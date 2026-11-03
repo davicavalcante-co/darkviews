@@ -27,6 +27,18 @@ export async function extractFrames(video: string, durationS: number, dir: strin
   return (await readdir(dir)).filter((f) => f.endsWith('.jpg')).sort()
 }
 
+// Folha de contato: vários quadros numa imagem só, da esquerda para a direita, linha a linha; devolve o tempo de cada um.
+// O Claude abre UM arquivo em vez de dezenas — cada abertura extra reenviava todo o contexto e multiplicava os tokens.
+export async function contactSheet(video: string, durationS: number, dir: string, count = 24, cols = 6) {
+  const step = durationS / count
+  const out = join(dir, 'folha-de-quadros.jpg')
+  const rows = Math.ceil(count / cols)
+  await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-ss', (step / 2).toFixed(2), '-i', video, '-vf',
+    `fps=1/${step.toFixed(3)},scale=320:-2,tile=${cols}x${rows}`,
+    '-frames:v', '1', '-q:v', '4', out])
+  return { file: out, cols, times: Array.from({ length: count }, (_, i) => +(step * (i + 0.5)).toFixed(1)) }
+}
+
 // whisper.cpp local; sem modelo configurado, segue sem transcrição.
 export async function transcribe(video: string, dir: string): Promise<string | null> {
   const model = process.env.WHISPER_MODEL
@@ -37,4 +49,13 @@ export async function transcribe(video: string, dir: string): Promise<string | n
     await run('whisper-cli', ['-m', model, '-f', wav, '-l', 'auto', '-otxt', '-of', join(dir, 'transcricao')], BIG)
     return (await readFile(join(dir, 'transcricao.txt'), 'utf8')).trim()
   } finally { await rm(wav, { force: true }) }
+}
+
+// Várias imagens numa folha só (grade, da esquerda para a direita), para o Claude ver todas com uma leitura.
+export async function imageSheet(paths: string[], out: string, cols = 6) {
+  const n = paths.length, rows = Math.ceil(n / cols)
+  const scaled = paths.map((_, i) => `[${i}:v]scale=480:270:force_original_aspect_ratio=decrease,pad=480:270:(ow-iw)/2:(oh-ih)/2,setsar=1[v${i}]`).join(';')
+  const concat = `${paths.map((_, i) => `[v${i}]`).join('')}concat=n=${n}:v=1:a=0,tile=${cols}x${rows}:padding=4`
+  await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...paths.flatMap((p) => ['-i', p]), '-filter_complex', `${scaled};${concat}`, '-frames:v', '1', '-q:v', '4', out])
+  return out
 }

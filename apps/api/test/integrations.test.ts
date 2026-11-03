@@ -99,7 +99,8 @@ describe('integrações do usuário', () => {
 
   it('vozes e banco gratuitos já vêm conectados, sem chave', async () => {
     const voices = (await activeProviders('voz', null)).map((a) => a.provider)
-    expect(voices[0]).toBe('piper') // voz neural antes da voz do macOS
+    expect(voices[0]).toBe('kokoro') // voz neural com boa pronúncia vem primeiro
+    expect(voices.indexOf('piper')).toBeLessThan(voices.indexOf('macos_say'))
     expect(voices).toContain('macos_say')
     expect((await activeProviders('banco_de_imagens', null)).map((a) => a.provider)).toContain('openverse')
   })

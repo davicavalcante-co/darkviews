@@ -52,6 +52,9 @@ export const VIDEO_MAX_BYTES = 2 * 1024 * 1024 * 1024
 export const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 export const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
 
+// Posição da legenda: vertical-horizontal ("bottom-center"); "bottom" e "middle" sozinhos valem centralizado.
+export const CAPTION_POSITION = /^(top|middle|bottom)(-(left|center|right))?$/
+
 export const NewProjectInput = z.object({
   name: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(5000),
@@ -61,6 +64,10 @@ export const NewProjectInput = z.object({
   fontFamily: z.string().trim().min(1).max(60), // conferida contra as fontes liberadas no servidor
   highlightMode: HighlightMode,
   voiceBrief: z.string().trim().max(200).optional().transform((v) => v || undefined), // ex.: "mulher jovem, animada"
+  voicePreset: z.string().trim().max(60).optional().transform((v) => v || undefined), // voz escolhida entre as opções do fornecedor em uso
+  voiceTone: z.enum(['calma', 'natural', 'animada']).optional().or(z.literal('').transform(() => undefined)),
+  highlightColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().or(z.literal('').transform(() => undefined)),
+  captionPosition: z.string().regex(CAPTION_POSITION).optional().or(z.literal('').transform(() => undefined)),
   captions: z.string().default('[]').transform((s, ctx) => {
     try { return z.array(z.string().max(200)).parse(JSON.parse(s)) } catch {
       ctx.addIssue({ code: 'custom', message: 'Legendas inválidas' }); return z.NEVER
@@ -68,7 +75,8 @@ export const NewProjectInput = z.object({
   }),
 })
 
-export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'media', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'talking_head', 'media', 'image_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ReviewInput = z.object({ rejected: z.array(z.number().int().min(0)).max(2000) })
 export type ProjectStatus = z.infer<typeof ProjectStatus>
 
 export type ProgressEvent = {
@@ -90,9 +98,13 @@ type CatalogItem = {
 }
 // Fornecedores com adaptador pronto. builtIn = ligado por padrão (não precisa de chave).
 export const PROVIDERS: CatalogItem[] = [
+  { provider: 'kokoro', label: 'Kokoro · voz neural', category: 'voz', tier: 'gratis', secrets: [], builtIn: true, priority: 20,
+    config: { voice: 'pf_dora', speed: '1.0' }, choices: { voice: ['pf_dora', 'pm_alex', 'pm_santa'] },
+    help: 'Voz neural em português do Brasil, com boa pronúncia (lh, nh, rr). Já vem pronta e pode ser usada em vídeos de clientes.',
+    tutorial: ['Já vem pronta, sem cadastro.', 'Escolha a voz: Dora (feminina), Alex (masculina) ou Santa (masculina grave).', 'Clique em Testar e depois em Salvar.'] },
   { provider: 'piper', label: 'Piper · voz neural', category: 'voz', tier: 'gratis', secrets: [], builtIn: true, priority: 30,
     config: { voice: 'faber', speed: '1.08' }, choices: { voice: ['faber', 'cadu'] },
-    help: 'Voz neural em português do Brasil, natural e local. Já vem conectada.',
+    help: 'Reserva: voz local mais simples (pode errar sons como lh e tr).',
     tutorial: ['Já vem pronta, sem cadastro.', 'Escolha a voz (Faber ou Cadu) e a velocidade da fala.', 'Clique em Testar e depois em Salvar.'] },
   { provider: 'omnivoice', label: 'OmniVoice · via Claude Code', category: 'voz', tier: 'gratis', secrets: [], priority: 15,
     config: { steps: '16', speed: '1.0' }, choices: { steps: ['8', '16', '32'] },
@@ -164,8 +176,24 @@ export const CaptionTrackInput = z.object({
   color: hex,
   highlightColor: hex,
   highlightMode: HighlightMode,
-  position: z.enum(['bottom', 'middle']),
+  position: z.string().regex(CAPTION_POSITION),
   segments: z.array(CaptionSegmentInput).max(2000),
 })
 export * from './cuts'
 export * from './claude-usage'
+
+// ---------- Voz desejada: opções prontas por fornecedor de voz ----------
+export const VOICE_TONES = [
+  { id: 'calma', label: 'Calma', speed: 0.92 },
+  { id: 'natural', label: 'Natural', speed: 1.0 },
+  { id: 'animada', label: 'Animada', speed: 1.1 },
+] as const
+export const VOICE_PRESETS: Record<string, { id: string; label: string }[]> = {
+  kokoro: [{ id: 'pf_dora', label: 'Dora - Mulher' }, { id: 'pm_alex', label: 'Alex - Homem' }, { id: 'pm_santa', label: 'Santa - Homem, voz grave' }],
+  piper: [{ id: 'faber', label: 'Faber - Homem' }, { id: 'cadu', label: 'Cadu - Homem jovem' }],
+  openai_tts: [{ id: 'coral', label: 'Coral - Mulher, calorosa' }, { id: 'nova', label: 'Nova - Mulher jovem' }, { id: 'shimmer', label: 'Shimmer - Mulher, suave' }, { id: 'onyx', label: 'Onyx - Homem, voz grave' }, { id: 'echo', label: 'Echo - Homem' }, { id: 'ash', label: 'Ash - Homem jovem' }],
+  google_tts: [{ id: 'pt-BR-Neural2-A', label: 'Neural2-A - Mulher' }, { id: 'pt-BR-Neural2-C', label: 'Neural2-C - Mulher' }, { id: 'pt-BR-Neural2-B', label: 'Neural2-B - Homem' }],
+  elevenlabs: [{ id: '', label: 'Voz configurada na sua conta' }],
+  macos_say: [{ id: 'Luciana', label: 'Luciana - Mulher' }],
+  omnivoice: [{ id: 'mulher jovem, animada', label: 'Mulher jovem, animada' }, { id: 'homem maduro, calmo, voz grave', label: 'Homem maduro, calmo' }, { id: 'narradora de documentário, tom sério', label: 'Narradora de documentário' }],
+}

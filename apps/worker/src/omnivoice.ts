@@ -15,16 +15,24 @@ const API = process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
 
 const healthy = () => fetch(`${API}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false)
 
+// O modelo padrão do OmniVoice só gera voz com a licença (não comercial) aceita; sem ela o /generate responde 403 na hora.
+// Checa antes de chamar o Claude, para não gastar tokens à toa.
+export async function omniVoiceLicensed() {
+  const form = new FormData(); form.append('text', '.'); form.append('num_step', '1')
+  const r = await fetch(`${API}/generate`, { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) }).catch(() => null)
+  return !!r && r.status !== 403
+}
+
 // O OmniVoice precisa do servidor local ligado. Se estiver instalado e desligado, liga com o script da própria skill.
 export async function ensureOmniVoice() {
-  if (await healthy()) return true
+  if (await healthy()) return omniVoiceLicensed()
   if (!existsSync(OMNIVOICE_HOME)) return false
   try {
     await run(join(SKILL_DIR, 'scripts/start-backend.sh'), [], { env: { ...process.env, OMNIVOICE_HOME }, timeout: 120_000 })
   } catch (e) {
     logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: não foi possível ligar o servidor local', details: { stderr: String((e as { stderr?: string }).stderr ?? '').slice(-1500) } })
   }
-  return healthy()
+  return (await healthy()) && omniVoiceLicensed()
 }
 
 const Result = z.object({

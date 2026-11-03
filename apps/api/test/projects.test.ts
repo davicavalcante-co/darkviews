@@ -78,6 +78,20 @@ describe('novo vídeo', () => {
   })
 })
 
+describe('tokens por vídeo', () => {
+  it('soma os tokens do projeto e estima pela média dos prontos', async () => {
+    const id = (await create(ana)).json().id
+    await prisma.project.update({ where: { id }, data: { status: 'editing', targetDurationS: 60 } })
+    const job = await prisma.job.findFirstOrThrow({ where: { projectId: id } })
+    await prisma.claudeUsageEvent.create({ data: { jobId: job.id, model: 'm', inputTokens: 1000, outputTokens: 500, cacheReadTokens: 400, cacheWriteTokens: 100 } })
+    const row = (await app.inject({ url: '/api/projects', headers: ana.headers })).json().find((r: { id: string }) => r.id === id)
+    expect(row.tokens).toBe(2000)
+    const est = (await app.inject({ url: '/api/projects/estimate?seconds=120', headers: ana.headers })).json()
+    expect(est.basedOn).toBeGreaterThan(0)
+    expect(est.tokens).toBeGreaterThan(0)
+  })
+})
+
 describe('acesso a projetos', () => {
   it('outro usuário recebe 404; admin vê', async () => {
     const id = (await create(ana)).json().id
@@ -153,5 +167,83 @@ describe('enviar fonte', () => {
   })
   it('recusa arquivo que não é fonte, mesmo com extensão .ttf', async () => {
     expect((await send(Buffer.from('isto não é uma fonte'), 'falsa.ttf')).statusCode).toBe(400)
+  })
+})
+
+describe('aprovação das imagens', () => {
+  async function setup() {
+    const id = (await create(ana)).json().id
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    const script = await prisma.script.create({ data: { projectId: id, version: 1, body: 'b', scenePlan: '[]', createdBy: 'claude' } })
+    const mk = (i: number, sid: string) => prisma.asset.create({ data: { projectId: id, kind: 'stock_image', filePath: '/tmp/x.jpg', mime: 'image/jpeg', sourceProvider: 'pexels', sourceId: sid } })
+    const [a0, a1] = [await mk(0, 'p0'), await mk(1, 'p1')]
+    const q = JSON.stringify({ type: 'stock', kind: 'image', queries: ['coffee'], orientation: 'landscape' })
+    await prisma.scene.createMany({ data: [
+      { scriptId: script.id, index: 0, startS: 0, endS: 3, narration: 'cena 0', assetId: a0.id, searchQuery: q },
+      { scriptId: script.id, index: 1, startS: 3, endS: 6, narration: 'cena 1', assetId: a1.id, searchQuery: q },
+    ] })
+    await prisma.project.update({ where: { id }, data: { status: 'image_review' } })
+    return id
+  }
+
+  it('lista as imagens para aprovar sem expor caminho; outro usuário recebe 404', async () => {
+    const id = await setup()
+    const r = (await app.inject({ url: `/api/projects/${id}/review`, headers: ana.headers })).json()
+    expect(r.scenes.map((s: { index: number; bank: string }) => [s.index, s.bank])).toEqual([[0, 'Pexels'], [1, 'Pexels']])
+    expect(JSON.stringify(r)).not.toMatch(/filePath|\/tmp/)
+    expect((await app.inject({ url: `/api/projects/${id}/review`, headers: beto.headers })).statusCode).toBe(404)
+  })
+
+  it('aprovar tudo segue para a narração', async () => {
+    const id = await setup()
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/review`, headers: ana.headers, payload: { rejected: [] } })
+    expect(r.json()).toMatchObject({ next: 'narracao' })
+    expect(await prisma.job.count({ where: { projectId: id, type: 'voice', status: 'queued' } })).toBe(1)
+  })
+
+  it('recusar uma cena busca outra só para ela e lembra a recusada', async () => {
+    const id = await setup()
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/review`, headers: ana.headers, payload: { rejected: [1] } })
+    expect(r.json()).toMatchObject({ next: 'nova_busca', replaced: 1 })
+    const scenes = await prisma.scene.findMany({ where: { script: { projectId: id } }, orderBy: { index: 'asc' } })
+    expect(scenes[0].assetId).not.toBeNull() // aprovada fica
+    expect(scenes[1].assetId).toBeNull()
+    expect(JSON.parse(scenes[1].searchQuery!).rejected).toEqual(['pexels:p1'])
+    expect(await prisma.job.count({ where: { projectId: id, type: 'media', status: 'queued' } })).toBe(1)
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/review`, headers: ana.headers, payload: { rejected: [] } })).statusCode).toBe(409)
+  })
+})
+
+describe('pessoa falando na referência', () => {
+  it('só aceita a escolha quando o vídeo está esperando, e segue para o roteiro', async () => {
+    const id = (await create(ana)).json().id
+    const post = () => app.inject({ method: 'POST', url: `/api/projects/${id}/talking-head`, headers: ana.headers, payload: { choice: 'stock' } })
+    expect((await post()).statusCode).toBe(409)
+    await prisma.project.update({ where: { id }, data: { status: 'talking_head' } })
+    expect((await post()).statusCode).toBe(202)
+    const p = await prisma.project.findUniqueOrThrow({ where: { id }, include: { jobs: { where: { type: 'script' } } } })
+    expect(p.status).toBe('scripting')
+    expect(JSON.parse(p.options).talkingHead).toBe('stock')
+    expect(p.jobs).toHaveLength(1)
+  })
+})
+
+describe('voz e thumbnail', () => {
+  it('lista todas as vozes prontas com a origem, e a principal vem marcada', async () => {
+    const v = (await app.inject({ url: '/api/voices', headers: ana.headers })).json()
+    expect(v.current).toBe('kokoro:pf_dora')
+    expect(v.voices).toContainEqual(expect.objectContaining({ id: 'kokoro:pf_dora', label: 'Dora - Mulher (Kokoro)' }))
+    expect(v.voices.some((x: { provider: string }) => x.provider === 'piper')).toBe(true)
+    expect(v.tones.map((t: { id: string }) => t.id)).toEqual(['calma', 'natural', 'animada'])
+  })
+  it('salva e lista thumbnails do projeto', async () => {
+    const id = (await create(ana)).json().id
+    const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64)])
+    const form = new FormData(); form.append('images', new Blob([new Uint8Array(jpg)]), 'thumbnail.jpg')
+    const req = new Request('http://x', { method: 'POST', body: form })
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/thumbnails`, headers: { ...ana.headers, 'content-type': req.headers.get('content-type')! }, payload: Buffer.from(await req.arrayBuffer()) })
+    expect(r.statusCode).toBe(201)
+    expect((await app.inject({ url: `/api/projects/${id}/thumbnails`, headers: ana.headers })).json()).toHaveLength(1)
+    expect((await app.inject({ url: `/api/projects/${id}/thumbnails`, headers: beto.headers })).statusCode).toBe(404)
   })
 })

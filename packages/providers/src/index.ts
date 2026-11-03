@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { promisify } from 'node:util'
@@ -133,13 +134,59 @@ async function piperSpeak(text: string, model: string, speed: number, out: strin
   })
 }
 
+const KOKORO_PY = process.env.KOKORO_PYTHON ?? resolve(import.meta.dirname, '../../../.venv-kokoro/bin/python')
+const KOKORO_SCRIPT = resolve(import.meta.dirname, '../kokoro_tts.py')
+
+// Kokoro: um processo para várias falas (o modelo carrega uma vez só).
+async function kokoroSpeak(items: { text: string; out: string; voice: string; speed: number }[]) {
+  await new Promise<void>((ok, fail) => {
+    const p = execFile(KOKORO_PY, [KOKORO_SCRIPT], { timeout: 30 * 60_000, maxBuffer: 16 * 1024 * 1024 }, (e) => (e ? fail(e) : ok()))
+    p.stdin?.end(JSON.stringify(items))
+  })
+}
+
+// Várias falas de uma vez (um vídeo inteiro). Com Kokoro como voz principal, gera todas num processo só;
+// com as outras vozes, uma a uma. Fala que falhar fica de fora (o chamador decide o que fazer).
+export type VoiceChoice = { provider?: string; voice?: string; speed?: number }
+// A voz escolhida na criação passa para o topo da lista; as outras seguem como reserva.
+export const preferProvider = <T extends { provider: string }>(list: T[], provider?: string) =>
+  provider ? [...list.filter((a) => a.provider === provider), ...list.filter((a) => a.provider !== provider)] : list
+export async function synthesizeMany(items: { key: number; text: string; outBase: string }[], ffmpeg: string, userId?: string | null, choice: VoiceChoice = {}) {
+  const result = new Map<number, { path: string; provider: string }>()
+  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider)
+  if (first?.provider === 'kokoro') {
+    try {
+      const voice = choice.voice || first.config.voice || 'pf_dora', speed = choice.speed ?? (Number(first.config.speed) || 1)
+      await kokoroSpeak(items.map((i) => ({ text: i.text, out: i.outBase + '.kokoro.wav', voice, speed })))
+      for (const i of items) {
+        await run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', i.outBase + '.kokoro.wav', '-ar', '48000', '-ac', '2', i.outBase + '.wav'])
+        result.set(i.key, { path: i.outBase + '.wav', provider: 'kokoro' })
+      }
+      return result
+    } catch (e) {
+      warn('kokoro', `voz falhou, usando a próxima: ${(e as Error).message}`, userId)
+    }
+  }
+  for (const i of items) {
+    const v = await synthesize(i.text, i.outBase, ffmpeg, userId, first?.provider === 'kokoro' ? ['kokoro'] : [], choice)
+    if (v) result.set(i.key, v)
+  }
+  return result
+}
+
 // Gera a fala em `outBase`.wav (48 kHz estéreo) e devolve o caminho. null = nenhuma voz disponível.
-export async function synthesize(text: string, outBase: string, ffmpeg: string, userId?: string | null): Promise<{ path: string; provider: string } | null> {
+export async function synthesize(text: string, outBase: string, ffmpeg: string, userId?: string | null, skip: string[] = [], choice: VoiceChoice = {}): Promise<{ path: string; provider: string } | null> {
   const wav = outBase + '.wav'
   const toWav = (input: string) => run(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-ar', '48000', '-ac', '2', wav])
-  for (const a of await activeProviders('voz', userId)) {
+  const providers = preferProvider(await activeProviders('voz', userId), choice.provider)
+  for (const [n, a0] of providers.entries()) {
+    if (skip.includes(a0.provider)) continue
+    const a = n === 0 && (choice.voice || choice.speed) ? { ...a0, config: { ...a0.config, ...(choice.voice && { voice: choice.voice }), ...(choice.speed && { speed: String(choice.speed) }) } } : a0
     try {
-      if (a.provider === 'piper') {
+      if (a.provider === 'kokoro') {
+        await kokoroSpeak([{ text, out: outBase + '.kokoro.wav', voice: a.config.voice || 'pf_dora', speed: Number(a.config.speed) || 1 }])
+        await toWav(outBase + '.kokoro.wav')
+      } else if (a.provider === 'piper') {
         const raw = outBase + '.piper.wav'
         await piperSpeak(text, await piperModel(a.config.voice || 'faber'), Number(a.config.speed) || 1.08, raw)
         await toWav(raw)
@@ -201,7 +248,13 @@ export async function testIntegration(provider: string, secrets: Record<string, 
     else if (provider === 'elevenlabs') await getJson('https://api.elevenlabs.io/v1/user', { 'xi-api-key': secrets.api_key })
     else if (provider === 'openai_tts') await getJson('https://api.openai.com/v1/models/gpt-4o-mini-tts', { authorization: `Bearer ${secrets.api_key}` })
     else if (provider === 'google_tts') await getJson(`https://texttospeech.googleapis.com/v1/voices?languageCode=pt-BR&key=${encodeURIComponent(secrets.api_key)}`)
-    else if (provider === 'omnivoice') { if (!(await fetch(`${process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'}/health`, { signal: AbortSignal.timeout(3000) })).ok) return false }
+    else if (provider === 'omnivoice') {
+      const api = process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
+      if (!(await fetch(`${api}/health`, { signal: AbortSignal.timeout(3000) })).ok) return false
+      const form = new FormData(); form.append('text', '.'); form.append('num_step', '1')
+      if ((await fetch(`${api}/generate`, { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) })).status === 403) return false // licença não aceita
+    }
+    else if (provider === 'kokoro') { await kokoroSpeak([{ text: 'Olá.', out: join(tmpdir(), `kokoro-teste-${process.pid}.wav`), voice: config.voice || 'pf_dora', speed: 1 }]) }
     else if (provider === 'piper') { await piperModel(config.voice || 'faber'); await run(PIPER_BIN, ['--help']) }
     else if (provider === 'macos_say') await run('say', ['-v', config.voice || 'Luciana', '-o', '/dev/null', 'ok'])
     else if (provider === 'local_music') await readdir(join(STORAGE_DIR, 'music'))

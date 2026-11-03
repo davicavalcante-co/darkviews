@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
+
+type Voices = { voices: { id: string; label: string; provider: string; freeText: boolean }[]; current: string | null; tones: readonly { id: string; label: string }[] }
 import { api, uploadFont, useFonts } from './api'
+import { CaptionPosition, FontSelect } from './ui'
+import { compact } from './dashboard'
 
 // "Novo vídeo" em formato de estúdio: configuração numa coluna à esquerda e as criações ao lado.
 type Creation = {
-  id: string; name: string; prompt: string; status: ProjectStatus; targetDurationS: number; aspect: string; createdAt: string; images: number
+  id: string; name: string; prompt: string; status: ProjectStatus; targetDurationS: number; aspect: string; createdAt: string; images: number; tokens: number
   video: { version: number; durationS: number } | null
   job: { stage: string | null; progress: number; status: string; etaS: number | null } | null
 }
 type Img = { file: File; caption: string; url: string }
 
 const STATUS: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', media: 'Buscando mídia', rendering: 'Criando vídeo',
+  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', rendering: 'Criando vídeo',
   editing: 'Pronto · em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 const PLATFORM_LABEL = { youtube: 'YouTube', instagram: 'Instagram', kwai: 'Kwai', tiktok: 'TikTok' }
@@ -44,7 +48,11 @@ function Composer() {
   const [video, setVideo] = useState<File | null>(null)
   const [images, setImages] = useState<Img[]>([])
   const [minutes, setMinutes] = useState(3)
+  const [voicePreset, setVoicePreset] = useState('')
+  const [voiceTone, setVoiceTone] = useState('natural')
   const [font, setFont] = useState('')
+  const [highlightColor, setHighlightColor] = useState('#FFD43B')
+  const [captionPosition, setCaptionPosition] = useState('bottom-center')
   const [fontBusy, setFontBusy] = useState(false)
   useEffect(() => { if (!font && fonts.length) setFont(fonts[0]) }, [fonts])
   const [error, setError] = useState('')
@@ -85,7 +93,13 @@ function Composer() {
     if (link && video) return setError('Use link ou vídeo de referência, não os dois')
 
     const body = new FormData()
-    for (const k of ['name', 'prompt', 'fontFamily', 'highlightMode', 'voiceBrief']) body.append(k, String(form.get(k) ?? ''))
+    for (const k of ['name', 'prompt']) body.append(k, String(form.get(k) ?? ''))
+    body.append('fontFamily', font)
+    body.append('highlightColor', highlightColor)
+    body.append('captionPosition', captionPosition)
+    body.append('highlightMode', 'palavra-chave')
+    body.append('voicePreset', voicePreset)
+    body.append('voiceTone', voiceTone)
     body.append('targetDurationS', String(seconds))
     if (link) body.append('link', link)
     body.append('captions', JSON.stringify(images.map((i) => i.caption)))
@@ -116,7 +130,7 @@ function Composer() {
           {link && <small className={platform ? 'ok' : 'error'}>{platform ? `Plataforma: ${PLATFORM_LABEL[platform]}` : 'Plataforma não suportada'}</small>}
           <label className={`drop${link ? ' disabled' : ''}`}>
             <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={!!link} onChange={(e) => pickVideo(e.target.files?.[0])} />
-            <span aria-hidden="true">▶</span>{video ? video.name : 'ou envie um vídeo (MP4, MOV, WebM)'}
+            <span aria-hidden="true">▶</span><span className="ellipsis">{video ? video.name : 'Enviar vídeo de referência'}</span>
           </label>
         </div>
 
@@ -144,10 +158,7 @@ function Composer() {
           <small className="muted">Selecione várias de uma vez (ou arraste para cá). Uma legenda curta ("fachada da loja") ajuda o Claude a pôr cada foto na cena certa.</small>
         </div>
 
-        <label className="field-label">Voz desejada <span className="muted">opcional</span>
-          <input name="voiceBrief" maxLength={200} placeholder="Ex.: mulher jovem, animada, ritmo rápido" />
-          <small className="muted">Com o OmniVoice ligado, o Claude Code cria essa voz para o vídeo.</small>
-        </label>
+        <VoicePicker preset={voicePreset} setPreset={setVoicePreset} tone={voiceTone} setTone={setVoiceTone} />
 
         <label className="field-label">Prompt
           <textarea name="prompt" required maxLength={5000} rows={7} placeholder="Sobre o que é o vídeo, público, tom, chamada para ação…" />
@@ -155,33 +166,71 @@ function Composer() {
       </div>
 
       <div className="composer-foot">
-        <div className="chips">
-          <div className="stepper" role="group" aria-label="Duração em minutos">
-            <button type="button" aria-label="Menos" onClick={() => step(-0.5)}>−</button>
-            <span>{fmt(minutes * 60)}</span>
-            <button type="button" aria-label="Mais" onClick={() => step(0.5)}>+</button>
+        <div className="controls">
+          <div className="control">
+            <span className="control-label">Duração</span>
+            <div className="stepper" role="group" aria-label="Duração em minutos">
+              <button type="button" aria-label="Menos" onClick={() => step(-0.5)}>−</button>
+              <span>{fmt(minutes * 60)}</span>
+              <button type="button" aria-label="Mais" onClick={() => step(0.5)}>+</button>
+            </div>
           </div>
-          <span className="chip" title="Formato do vídeo principal">16:9</span>
-          <select name="fontFamily" className="chip" aria-label="Fonte das legendas" value={font} onChange={(e) => setFont(e.target.value)}>
-            {[...new Set([font, ...fonts])].filter(Boolean).map((f) => <option key={f}>{f}</option>)}
-          </select>
-          <label className="chip upload-chip" title="Enviar uma fonte .ttf ou .otf">
-            {fontBusy ? 'Enviando…' : '+ fonte'}
-            <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={fontBusy} onChange={async (e) => {
-              const f = e.target.files?.[0]; e.target.value = ''
-              if (!f) return
-              setFontBusy(true); setError('')
-              try { setFont(await uploadFont(f)) } catch (err) { setError((err as Error).message) } finally { setFontBusy(false) }
-            }} />
-          </label>
-          <select name="highlightMode" className="chip" aria-label="Destaque da legenda">
-            <option value="palavra-chave">Palavras-chave</option><option value="karaokê">Karaokê</option><option value="manual">Manual</option>
-          </select>
+          <div className="control">
+            <span className="control-label">Formato</span>
+            <span className="chip" title="Formato do vídeo principal (os cortes verticais saem na aprovação)">16:9</span>
+          </div>
+          <div className="control grow">
+            <span className="control-label">Fonte da legenda</span>
+            <div className="font-row">
+              <FontSelect value={font} fonts={fonts} onChange={setFont} />
+              <label className="chip upload-chip" title="Enviar uma fonte .ttf ou .otf">
+                {fontBusy ? '…' : '+'}
+                <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={fontBusy} onChange={async (e) => {
+                  const f = e.target.files?.[0]; e.target.value = ''
+                  if (!f) return
+                  setFontBusy(true); setError('')
+                  try { setFont(await uploadFont(f)) } catch (err) { setError((err as Error).message) } finally { setFontBusy(false) }
+                }} />
+              </label>
+            </div>
+          </div>
+          <div className="control">
+            <span className="control-label">Cor do destaque</span>
+            <input type="color" className="color-input" value={highlightColor} onChange={(e) => setHighlightColor(e.target.value.toUpperCase())} aria-label="Cor das palavras em destaque" />
+          </div>
+          <div className="control">
+            <span className="control-label">Posição da legenda</span>
+            <CaptionPosition value={captionPosition} onChange={setCaptionPosition} />
+          </div>
         </div>
         {error && <p className="error" role="alert">{error}</p>}
+        <TokenEstimate seconds={Math.round(minutes * 60)} />
         <button className="cta" disabled={busy}>{busy ? 'Enviando…' : 'Criar vídeo'} <span aria-hidden="true">→</span></button>
       </div>
     </form>
+  )
+}
+
+// Voz desejada: opções da voz que vai narrar (mudam conforme o fornecedor em uso) e o tom da fala.
+function VoicePicker({ preset, setPreset, tone, setTone }: { preset: string; setPreset: (v: string) => void; tone: string; setTone: (v: string) => void }) {
+  const [v, setV] = useState<Voices | null>(null)
+  useEffect(() => { api<Voices>('/voices').then((r) => { setV(r); if (!preset && r.current) setPreset(r.current) }).catch(() => {}) }, [])
+  if (!v?.voices.length) return null
+  const chosen = v.voices.find((x) => x.id === preset)
+  return (
+    <div className="field">
+      <label className="field-label" htmlFor="voz">Voz</label>
+      <select id="voz" value={chosen ? preset : ''} onChange={(e) => setPreset(e.target.value)}>
+        {!chosen && <option value="">{preset ? `Personalizada: ${preset.split(':').slice(1).join(':')}` : 'Escolha uma voz'}</option>}
+        {v.voices.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
+      </select>
+      {(chosen?.freeText || (!chosen && preset.startsWith('omnivoice:'))) && (
+        <input value={preset.slice('omnivoice:'.length)} maxLength={50} onChange={(e) => setPreset('omnivoice:' + e.target.value)} placeholder="Ou descreva: mulher jovem, animada…" aria-label="Descrição da voz" />
+      )}
+      <div className="choice-row" role="radiogroup" aria-label="Tom">
+        {v.tones.map((t) => <button key={t.id} type="button" role="radio" aria-checked={tone === t.id} className="choice small-choice" onClick={() => setTone(t.id)}>{t.label}</button>)}
+      </div>
+    </div>
   )
 }
 
@@ -232,6 +281,7 @@ function CreationRow({ r }: { r: Creation }) {
         <div className="chips">
           <span className="chip">{r.aspect}</span>
           <span className="chip">{fmt(r.video?.durationS ?? r.targetDurationS)}</span>
+          {r.tokens > 0 && <span className="chip" title="Tokens do Claude gastos neste vídeo">{compact(r.tokens)} tokens</span>}
           {r.images > 0 && <span className="chip">{r.images} {r.images === 1 ? 'imagem' : 'imagens'}</span>}
           <span className={`chip status ${r.status}`}>{STATUS[r.status]}</span>
           <span className="muted when">{ago(r.createdAt)}</span>
@@ -258,4 +308,12 @@ function CreationRow({ r }: { r: Creation }) {
       </footer>
     </article>
   )
+}
+
+// Perto do botão "Criar vídeo": quantos tokens do Claude o vídeo deve gastar, pela média dos vídeos já feitos.
+function TokenEstimate({ seconds }: { seconds: number }) {
+  const [est, setEst] = useState<{ tokens: number; basedOn: number } | null>(null)
+  useEffect(() => { api<{ tokens: number; basedOn: number }>(`/projects/estimate?seconds=${seconds}`).then(setEst).catch(() => {}) }, [seconds])
+  if (!est) return null
+  return <p className="muted token-est" title={est.basedOn ? `Média dos últimos ${est.basedOn} vídeos prontos` : 'Estimativa inicial; fica mais precisa depois do primeiro vídeo'}>≈ {compact(est.tokens)} tokens do Claude</p>
 }

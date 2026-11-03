@@ -8,3 +8,4 @@ dist
 .DS_Store
 .venv-tts
 packages/db/prisma/test-mcp.db*
+.venv-kokoro
