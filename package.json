@@ -1,0 +1,16 @@
+{
+  "name": "corte-final",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter \"./apps/**\" run dev",
+    "test": "pnpm -r run test",
+    "db:push": "cd packages/db && node --env-file=../../.env node_modules/prisma/build/index.js db push --skip-generate",
+    "db:seed": "pnpm --filter @corte/api seed",
+    "db:demo": "pnpm --filter @corte/api seed:demo",
+    "db:setup": "pnpm db:push && pnpm db:seed"
+  },
+  "devDependencies": {
+    "typescript": "^5.6"
+  }
+}

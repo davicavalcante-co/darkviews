@@ -1,0 +1,362 @@
+// Enums e JSON ficam como String para funcionar igual em SQLite e PostgreSQL.
+// Os valores permitidos são validados com Zod em packages/shared.
+// Para PostgreSQL: troque o provider e a DATABASE_URL.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String?   // null até o primeiro acesso do admin do seed
+  role         String    @default("user") // admin | user
+  status       String    @default("active") // active | disabled
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  projects     Project[]
+  auditLogs    AuditLog[]
+  changeRequests ChangeRequest[]
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  ip        String
+  userAgent String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("sessions")
+}
+
+model Project {
+  id              String    @id @default(uuid())
+  ownerId         String
+  owner           User      @relation(fields: [ownerId], references: [id])
+  name            String
+  prompt          String
+  status          String    @default("queued") // queued|analyzing|scripting|media|rendering|editing|in_approval|approved|failed
+  targetDurationS Int
+  aspect          String    @default("16:9")
+  options         String    @default("{}") // JSON: fonte, estilo de destaque
+  approvedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  reference       Reference?
+  assets          Asset[]
+  scripts         Script[]
+  videoVersions   VideoVersion[]
+  captionTracks   CaptionTrack[]
+  metadataFields  MetadataField[]
+  changeRequests  ChangeRequest[]
+  cuts            Cut[]
+  jobs            Job[]
+  @@index([ownerId])
+  @@map("projects")
+}
+
+model Reference {
+  id           String   @id @default(uuid())
+  projectId    String   @unique
+  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sourceType   String   // link | upload
+  platform     String?  // youtube | instagram | kwai | tiktok
+  url          String?
+  filePath     String?
+  durationS    Float?
+  styleProfile String?  // JSON
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("references")
+}
+
+model Asset {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind           String   // user_image|stock_image|stock_video|ai_image|ai_video|voice|music
+  filePath       String
+  mime           String
+  width          Int?
+  height         Int?
+  durationS      Float?
+  sourceProvider String?
+  sourceId       String?
+  license        String?
+  attribution    String?
+  sortOrder      Int      @default(0)
+  userCaption    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  scenes         Scene[]
+  @@index([projectId])
+  @@map("assets")
+}
+
+model Script {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version   Int
+  body      String
+  scenePlan String   // JSON validado
+  createdBy String   // "claude" ou user_id
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  scenes    Scene[]
+  @@unique([projectId, version])
+  @@map("scripts")
+}
+
+model Scene {
+  id           String   @id @default(uuid())
+  scriptId     String
+  script       Script   @relation(fields: [scriptId], references: [id], onDelete: Cascade)
+  index        Int
+  startS       Float
+  endS         Float
+  narration    String?
+  onScreenText String?
+  assetId      String?
+  asset        Asset?   @relation(fields: [assetId], references: [id])
+  searchQuery  String?
+  transition   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  @@map("scenes")
+}
+
+model VideoVersion {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version        Int
+  filePath       String
+  durationS      Float
+  renderSettings String   // JSON
+  isCurrent      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@unique([projectId, version])
+  @@map("video_versions")
+}
+
+model CaptionTrack {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version        Int
+  fontFamily     String
+  fontWeight     Int      @default(700)
+  size           Int
+  color          String
+  highlightColor String
+  highlightMode  String   // palavra-chave | manual | karaokê
+  position       String
+  isCurrent      Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  segments       CaptionSegment[]
+  @@unique([projectId, version])
+  @@map("caption_tracks")
+}
+
+model CaptionSegment {
+  id         String       @id @default(uuid())
+  trackId    String
+  track      CaptionTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  startS     Float
+  endS       Float
+  text       String
+  highlights String       // JSON
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+  @@map("caption_segments")
+}
+
+model MetadataField {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  field     String   // title | description | keywords
+  version   Int
+  value     String
+  isCurrent Boolean  @default(true)
+  createdBy String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([projectId, field, version])
+  @@map("metadata_fields")
+}
+
+model ChangeRequest {
+  id               String   @id @default(uuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  part             String   // video|caption|title|description|keywords
+  frameTimeS       Float?
+  type             String
+  text             String
+  status           String   @default("open") // open | applied
+  authorId         String
+  author           User     @relation(fields: [authorId], references: [id])
+  appliedInVersion Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@map("change_requests")
+}
+
+model Cut {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  platform  String   // shorts | reels | tiktok | stories
+  partIndex Int      @default(0)
+  startS    Float
+  endS      Float
+  cropX     Float    @default(50) // 0–100
+  filePath  String?
+  status    String   @default("queued")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("cuts")
+}
+
+model Job {
+  id         String    @id @default(uuid())
+  projectId  String
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type       String    // ingest|analyze|script|media|render|cuts|regen_part
+  status     String    @default("queued") // queued|running|paused|done|failed
+  stage      String?
+  progress   Int       @default(0)
+  etaS       Int?
+  startedAt  DateTime?
+  finishedAt DateTime?
+  error      String?
+  lockedBy   String?
+  attempts   Int       @default(0)
+  resumeAt   DateTime? // job pausado volta para a fila nesse horário (limite do Claude)
+  payload    String?   // JSON com parâmetros do job (ex.: parte a regerar)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  usageEvents ClaudeUsageEvent[]
+  @@index([status, createdAt])
+  @@map("jobs")
+}
+
+model JobMetric {
+  id             String   @id @default(uuid())
+  jobType        String
+  inputDurationS Float
+  elapsedS       Float
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@index([jobType])
+  @@map("job_metrics")
+}
+
+model Integration {
+  id           String    @id @default(uuid())
+  provider     String
+  category     String    // roteiro|voz|música|imagem|vídeo|banco_de_imagens|transcrição
+  enabled      Boolean   @default(false)
+  priority     Int       @default(0)
+  config       String    @default("{}") // JSON sem segredos
+  lastTestAt   DateTime?
+  lastTestOk   Boolean?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  secrets      IntegrationSecret[]
+  @@map("integrations")
+}
+
+model IntegrationSecret {
+  id            String      @id @default(uuid())
+  integrationId String
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+  name          String
+  ciphertext    String
+  iv            String
+  authTag       String
+  last4         String
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  @@unique([integrationId, name])
+  @@map("integration_secrets")
+}
+
+model Font {
+  id             String   @id @default(uuid())
+  family         String   @unique
+  weights        String   // JSON: [400,700]
+  enabled        Boolean  @default(false)
+  cachedFilePath String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  @@map("fonts")
+}
+
+model ClaudeUsageEvent {
+  id               String   @id @default(uuid())
+  jobId            String?
+  job              Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  model            String
+  inputTokens      Int
+  outputTokens     Int
+  cacheReadTokens  Int      @default(0)
+  cacheWriteTokens Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  @@index([createdAt])
+  @@map("claude_usage_events")
+}
+
+model ClaudeStatus {
+  id              String    @id @default(uuid())
+  checkedAt       DateTime  @default(now())
+  available       Boolean
+  reason          String?
+  sessionUsedPct  Float?    // null = "sem dados ainda"
+  sessionResetsAt DateTime?
+  weekUsedPct     Float?
+  weekResetsAt    DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  @@map("claude_status")
+}
+
+model Setting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@map("settings")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actor      User?    @relation(fields: [actorId], references: [id])
+  action     String
+  targetType String
+  targetId   String?
+  details    String   @default("{}") // JSON sem segredos
+  ip         String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@index([createdAt])
+  @@map("audit_logs")
+}

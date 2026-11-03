@@ -1,0 +1,27 @@
+{
+  "name": "@corte/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/index.ts",
+    "seed": "tsx --env-file=../../.env src/seed.ts",
+    "seed:demo": "tsx --env-file=../../.env src/seed-demo.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@corte/db": "workspace:*",
+    "@corte/shared": "workspace:*",
+    "@fastify/cookie": "^11",
+    "@fastify/multipart": "^9.4.0",
+    "@fastify/rate-limit": "^10",
+    "@node-rs/argon2": "^2",
+    "fastify": "^5",
+    "zod": "^3.23",
+    "@corte/providers": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "vitest": "^3"
+  }
+}

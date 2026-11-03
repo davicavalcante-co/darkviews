@@ -1,0 +1,9 @@
+{
+  "name": "@corte/providers",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": { "test": "vitest run --passWithNoTests" },
+  "dependencies": { "@corte/db": "workspace:*", "@corte/shared": "workspace:*" },
+  "devDependencies": { "@types/node": "^22", "vitest": "^3" }
+}

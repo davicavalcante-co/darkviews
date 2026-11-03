@@ -1,0 +1,70 @@
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { prisma, STORAGE_DIR, type Job } from '@corte/db'
+import { toAss, type CaptionStyle, type Segment, type TimedScene } from './captions.js'
+import { assertLibass, FFMPEG, run } from './ffmpeg.js'
+import { ensureFont, FONTS_DIR } from './fonts.js'
+import { timedScenes, trackStyle } from './render.js'
+
+// Janela 9:16 sobre o 1920x1080: 608 px de largura, posição horizontal pelo crop_x (0 = esquerda, 100 = direita).
+export const cropXpx = (cropX: number) => Math.round(((1920 - 608) * cropX) / 100)
+
+// Recorta um trecho [start, end] e queima a legenda montada para a tela vertical.
+export async function renderCut(o: { clean: string; startS: number; endS: number; cropX: number; ass: string; fontsDir: string; out: string }) {
+  const work = await mkdtemp(join(tmpdir(), 'corte-vertical-'))
+  try {
+    await writeFile(join(work, 'legendas.ass'), o.ass)
+    await symlink(o.fontsDir, join(work, 'fonts'))
+    await mkdir(join(o.out, '..'), { recursive: true })
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', o.startS.toFixed(3), '-i', o.clean, '-t', (o.endS - o.startS).toFixed(3),
+      '-vf', `crop=608:1080:${cropXpx(o.cropX)}:0,scale=1080:1920:flags=lanczos,setsar=1,subtitles=legendas.ass:fontsdir=fonts`,
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-pix_fmt', 'yuv420p', '-r', '30', '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', o.out],
+    { cwd: work, maxBuffer: 16 * 1024 * 1024 })
+  } finally { await rm(work, { recursive: true, force: true }) }
+}
+
+// Legendas e textos de tela que caem no trecho, com o tempo deslocado para começar em 0.
+export function shiftToWindow(segments: Segment[], scenes: TimedScene[], startS: number, endS: number) {
+  const inside = <T extends { startS: number; endS: number }>(x: T) => x.endS > startS && x.startS < endS
+  const shift = <T extends { startS: number; endS: number }>(x: T): T => ({ ...x, startS: Math.max(0, x.startS - startS), endS: Math.min(endS, x.endS) - startS })
+  return { segments: segments.filter(inside).map(shift), scenes: scenes.filter(inside).map(shift) }
+}
+
+export async function cuts(job: Job) {
+  await assertLibass()
+  const project = await prisma.project.findUniqueOrThrow({
+    where: { id: job.projectId },
+    include: {
+      videoVersions: { where: { isCurrent: true } },
+      captionTracks: { where: { isCurrent: true }, include: { segments: { orderBy: { startS: 'asc' } } } },
+      scripts: { orderBy: { version: 'desc' }, take: 1, include: { scenes: { orderBy: { index: 'asc' }, include: { asset: true } } } },
+      assets: { where: { kind: 'voice' } },
+      cuts: { where: { status: 'queued' }, orderBy: [{ platform: 'asc' }, { partIndex: 'asc' }] },
+    },
+  })
+  const clean = JSON.parse(project.videoVersions[0]?.renderSettings ?? '{}').clean as string | undefined
+  if (!clean) throw new Error('Renderize o vídeo de novo antes de gerar os cortes')
+  const track = project.captionTracks[0]
+  const style: CaptionStyle | null = track ? trackStyle(track) : null
+  if (track) await ensureFont(track.fontFamily, track.fontWeight)
+  const segments: Segment[] = (track?.segments ?? []).map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) }))
+  const scenes = timedScenes(project.scripts[0]?.scenes ?? [], new Map(project.assets.map((a) => [a.sortOrder, a])))
+
+  for (const [i, cut] of project.cuts.entries()) {
+    await prisma.job.update({ where: { id: job.id }, data: { stage: `Cortando ${cut.platform}${cut.platform === 'stories' ? ` parte ${cut.partIndex + 1}` : ''}`, progress: Math.round((i / project.cuts.length) * 100) } })
+    await prisma.cut.update({ where: { id: cut.id }, data: { status: 'running' } })
+    try {
+      const w = shiftToWindow(segments, scenes, cut.startS, cut.endS)
+      const out = join(STORAGE_DIR, 'cuts', project.id, `${cut.platform}-${cut.partIndex + 1}-${cut.id.slice(0, 8)}.mp4`)
+      await renderCut({
+        clean, startS: cut.startS, endS: cut.endS, cropX: cut.cropX, fontsDir: FONTS_DIR, out,
+        ass: style ? toAss(w.segments, w.scenes, style, { w: 1080, h: 1920 }) : toAss([], w.scenes, { fontFamily: 'Inter', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', highlightMode: 'manual', position: 'bottom' }, { w: 1080, h: 1920 }),
+      })
+      await prisma.cut.update({ where: { id: cut.id }, data: { status: 'done', filePath: out } })
+    } catch (e) {
+      await prisma.cut.update({ where: { id: cut.id }, data: { status: 'failed' } })
+      throw e
+    }
+  }
+}
