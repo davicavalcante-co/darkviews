@@ -11,6 +11,17 @@ export const StyleProfile = z.object({
   structure: z.array(z.string()).describe('Partes do roteiro na ordem: gancho, problema, ...'),
   tone: z.string().describe('Tom da narração'),
   notes: z.string().describe('Outras observações úteis para recriar o estilo'),
+  transitions: z.array(z.string()).describe('Transições usadas (corte seco, fade, zoom, slide, whip...), quando e com que frequência'),
+  composition: z.string().describe('Composição dos quadros: regra dos terços, centralização, espaço para texto, profundidade, ângulo da câmera'),
+  setting: z.string().describe('Cenários e ambientes que aparecem (estúdio, rua, natureza, tela de computador...)'),
+  imagery: z.string().describe('Tipo de imagem: fotos ou vídeos, de banco ou próprias, ilustração, gráficos, B-roll; como se movem'),
+  textOnScreen: z.string().describe('Textos na tela além da legenda: títulos, números, setas, destaques; fonte, cor e posição'),
+  audio: z.string().describe('Música, efeitos sonoros e pausas da narração'),
+  recommendations: z.array(z.string()).describe('Recomendações práticas e específicas para o novo vídeo imitar este estilo'),
+  talkingHead: z.object({
+    present: z.boolean().describe('Há trechos com uma pessoa falando para a câmera (o mesmo enquadramento de rosto se repetindo)?'),
+    segments: z.array(z.object({ startS: z.number(), endS: z.number(), description: z.string() })).describe('Trechos aproximados com a pessoa falando'),
+  }),
 })
 export type StyleProfile = z.infer<typeof StyleProfile>
 
@@ -22,6 +33,7 @@ const Media = z.discriminatedUnion('type', [
     queries: z.array(z.string()).min(1).max(3).describe('2 a 3 termos de busca em inglês'),
     orientation: z.enum(['landscape', 'portrait', 'square']),
   }),
+  z.object({ type: z.literal('user_video'), note: z.string().describe('O que o vídeo do cliente mostra neste trecho') }),
   z.object({ type: z.literal('text_card'), text: z.string().describe('Quadro de texto 2D quando nenhuma imagem serve') }),
 ])
 

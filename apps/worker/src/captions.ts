@@ -1,5 +1,5 @@
 export type Segment = { startS: number; endS: number; text: string; highlights: number[] }
-export type CaptionStyle = { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: 'bottom' | 'middle' }
+export type CaptionStyle = { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string }
 export type TimedScene = { startS: number; endS: number; speechS: number; narration: string; onScreenText: string | null; isCard: boolean }
 
 const WORDS_PER_LINE = 6
@@ -51,7 +51,9 @@ export function toAss(segments: Segment[], scenes: TimedScene[], st: CaptionStyl
   const vertical = canvas.h > canvas.w
   const side = vertical ? 70 : 120
   const bold = st.fontWeight >= 600 ? -1 : 0
-  const align = st.position === 'middle' ? 5 : 2
+  // Alinhamento do ASS no teclado numérico: embaixo 1-3, meio 4-6, em cima 7-9; esquerda, centro, direita.
+  const [v, h = 'center'] = st.position.split('-')
+  const align = ({ bottom: 1, middle: 4, top: 7 }[v] ?? 1) + ({ left: 0, center: 1, right: 2 }[h] ?? 1)
   const lines = [
     '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${canvas.w}`, `PlayResY: ${canvas.h}`, 'WrapStyle: 0', 'ScaledBorderAndShadow: yes', '',
     '[V4+ Styles]',

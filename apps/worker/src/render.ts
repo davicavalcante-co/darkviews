@@ -14,9 +14,14 @@ export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card';
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
 export type RenderInput = { scenes: RenderScene[]; music: string | null; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
 
-function clipArgs(s: RenderScene, i: number, out: string): string[] {
-  const frames = Math.round(s.durationS * FPS)
-  const fade = `,fade=t=in:st=0:d=${s.transition === 'fade' ? 0.45 : 0.18}`
+// Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
+const TRANSITIONS: Record<string, [string, number]> = { fade: ['fade', 0.45], slide: ['slideleft', 0.45], zoom: ['zoomin', 0.45], cut: ['fade', 0.12] }
+
+// extraS: o clipe dura um pouco mais que a cena para sobrepor com a próxima na transição (o total não muda).
+function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] {
+  const len = s.durationS + extraS
+  const frames = Math.round(len * FPS)
+  const fade = ''
   if (s.kind === 'image') {
     // Movimento contínuo e variado, cena a cena: aproxima, afasta, desliza para a direita e para a esquerda.
     // A intensidade acompanha a duração (on = quadro atual, d = total), então cenas curtas também se mexem.
@@ -32,10 +37,10 @@ function clipArgs(s: RenderScene, i: number, out: string): string[] {
       '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   if (s.kind === 'video') {
-    return ['-stream_loop', '-1', '-i', s.path!, '-t', s.durationS.toFixed(3), '-an', '-vf',
+    return ['-stream_loop', '-1', '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
       `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS}${fade}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
-  return ['-f', 'lavfi', '-i', `color=c=0x111418:s=1920x1080:r=${FPS}:d=${s.durationS.toFixed(3)}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
+  return ['-f', 'lavfi', '-i', `color=c=0x111418:s=1920x1080:r=${FPS}:d=${len.toFixed(3)}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
 }
 
 // Monta o vídeo final 1920x1080 30 fps: clipes por cena, locução casada com as cenas, trilha baixa e legenda ASS queimada.
@@ -47,9 +52,10 @@ export async function renderVideo(input: RenderInput) {
   const ff = (args: string[]) => run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { cwd: work, maxBuffer: 16 * 1024 * 1024 })
   try {
     const clips: string[] = [], audios: string[] = []
+    const into = input.scenes.map((s, i) => (i === 0 ? null : TRANSITIONS[s.transition] ?? TRANSITIONS.fade))
     for (const [i, s] of input.scenes.entries()) {
       const clip = `clip-${String(i).padStart(4, '0')}.mp4`
-      await ff(clipArgs(s, i, clip))
+      await ff(clipArgs(s, i, clip, into[i + 1]?.[1] ?? 0))
       // Áudio da cena com a duração exata dela: fala + silêncio até o fim.
       const wav = `audio-${String(i).padStart(4, '0')}.wav`
       await ff(s.voice
@@ -58,19 +64,34 @@ export async function renderVideo(input: RenderInput) {
       clips.push(clip); audios.push(wav)
       await input.onProgress?.(Math.round(((i + 1) / input.scenes.length) * 75))
     }
-    await writeFile(join(work, 'clips.txt'), clips.map((c) => `file '${c}'`).join('\n'))
     await writeFile(join(work, 'audios.txt'), audios.map((c) => `file '${c}'`).join('\n'))
-    await ff(['-f', 'concat', '-safe', '0', '-i', 'clips.txt', '-c', 'copy', 'video.mp4'])
+    if (clips.length === 1) {
+      await ff(['-i', clips[0], '-c', 'copy', 'video.mp4'])
+    } else {
+      // Dissolvências entre as cenas: a transição k começa onde a cena k-1 terminaria, então a voz continua sincronizada.
+      let graph = clips.map((_, k) => `[${k}:v]settb=AVTB,setpts=PTS-STARTPTS[c${k}]`).join(';')
+      let prev = 'c0', offset = 0
+      for (let k = 1; k < clips.length; k++) {
+        offset += input.scenes[k - 1].durationS
+        const [type, d] = into[k]!
+        graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${offset.toFixed(3)}[x${k}]`
+        prev = `x${k}`
+      }
+      await ff([...clips.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', 'video.mp4'])
+    }
     await ff(['-f', 'concat', '-safe', '0', '-i', 'audios.txt', '-c', 'copy', 'narracao.wav'])
     await writeFile(join(work, 'legendas.ass'), input.ass)
     await symlink(input.fontsDir, join(work, 'fonts'))
     await input.onProgress?.(80)
 
     const args = ['-i', 'video.mp4', '-i', 'narracao.wav']
-    let audio = '[1:a]anull[a]'
+    // Narração: corta o grave que embola, compressão leve (voz presente e constante) e volume no padrão do YouTube (-16 LUFS).
+    const voiceChain = 'highpass=f=70,acompressor=threshold=-20dB:ratio=3:attack=8:release=180:makeup=2,loudnorm=I=-16:TP=-1.5:LRA=9'
+    let audio = `[1:a]${voiceChain}[a]`
     if (input.music) {
       args.push('-stream_loop', '-1', '-i', input.music)
-      audio = '[2:a]volume=0.12[m];[1:a][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]'
+      // Música abaixa sozinha enquanto há fala e volta nas pausas (ducking).
+      audio = `[1:a]${voiceChain},asplit=2[v][key];[2:a]volume=0.35[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];[v][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`
     }
     await mkdir(join(input.out, '..'), { recursive: true })
     await ff([...args, '-filter_complex', `[0:v]subtitles=legendas.ass:fontsdir=fonts[v];${audio}`, '-map', '[v]', '-map', '[a]',
@@ -97,10 +118,10 @@ export function timedScenes(scenes: SceneRow[], voices: Map<number, { durationS:
 }
 
 export function trackStyle(t: { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string }): CaptionStyle {
-  return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position as CaptionStyle['position'] }
+  return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position }
 }
 
-const DEFAULT_STYLE = { size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom' as const }
+const DEFAULT_STYLE = { size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom-center' }
 
 export async function render(job: Job) {
   const project = await prisma.project.update({
@@ -114,7 +135,7 @@ export async function render(job: Job) {
   })
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
-  const opts = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string }
+  const opts = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; highlightColor?: string; captionPosition?: string }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   const music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
@@ -128,7 +149,7 @@ export async function render(job: Job) {
     const segs = buildSegments(timed, opts.highlightMode ?? 'palavra-chave', keywords)
     track = await prisma.captionTrack.create({
       data: {
-        projectId: project.id, version: 1, fontFamily, fontWeight: 700, ...DEFAULT_STYLE, highlightMode: opts.highlightMode ?? 'palavra-chave',
+        projectId: project.id, version: 1, fontFamily, fontWeight: 700, ...DEFAULT_STYLE, ...(opts.highlightColor && { highlightColor: opts.highlightColor }), ...(opts.captionPosition && { position: opts.captionPosition }), highlightMode: opts.highlightMode ?? 'palavra-chave',
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },

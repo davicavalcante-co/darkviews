@@ -77,9 +77,11 @@ describe('fontes', () => {
     expect((await app.inject({ method: 'PUT', url: '/api/admin/fonts/Inter', headers: admin, payload: { enabled: false } })).statusCode).toBe(200)
     expect((await app.inject({ url: '/api/fonts', headers: user })).json()).not.toContain('Inter')
     expect((await create(user)).statusCode).toBe(400)
-    for (const f of ['Bebas Neue', 'Montserrat', 'Poppins']) await app.inject({ method: 'PUT', url: `/api/admin/fonts/${encodeURIComponent(f)}`, headers: admin, payload: { enabled: false } })
-    expect((await app.inject({ method: 'PUT', url: '/api/admin/fonts/Roboto', headers: admin, payload: { enabled: false } })).statusCode).toBe(409)
-    await app.inject({ method: 'PUT', url: '/api/admin/fonts/Inter', headers: admin, payload: { enabled: true } })
+    // Bloqueia todas as liberadas menos uma (outros testes podem ter enviado fontes ao mesmo banco).
+    const on = ((await app.inject({ url: '/api/fonts', headers: admin })).json() as string[])
+    for (const f of on.slice(0, -1)) await app.inject({ method: 'PUT', url: `/api/admin/fonts/${encodeURIComponent(f)}`, headers: admin, payload: { enabled: false } })
+    expect((await app.inject({ method: 'PUT', url: `/api/admin/fonts/${encodeURIComponent(on.at(-1)!)}`, headers: admin, payload: { enabled: false } })).statusCode).toBe(409)
+    for (const f of [...on, 'Inter']) await app.inject({ method: 'PUT', url: `/api/admin/fonts/${encodeURIComponent(f)}`, headers: admin, payload: { enabled: true } })
   })
 })
 
@@ -95,14 +97,14 @@ describe('painel', () => {
     const all = (await app.inject({ url: '/api/dashboard', headers: admin })).json()
     expect(mine.production.editing).toBe(1)
     expect(all.production.editing).toBeGreaterThan(mine.production.editing)
-    expect(mine.claude.tokens).toBeUndefined()
+    expect(mine.claude.tokens).toBeDefined() // consumo visível para todos os usuários
     expect(mine.claude.warnings).toEqual([]) // falta de login: aviso só para o admin
     expect(all.claude.warnings[0].text).toMatch(/login/)
     expect(all.claude.tokens.today).toBeGreaterThanOrEqual(150)
     expect(all.claude.byModel).toContainEqual({ model: 'claude-opus-5-5', tokens: 150 }) // gráfico de pizza por modelo
-    expect(mine.claude.byModel).toBeUndefined()
     const pill = (await app.inject({ url: '/api/claude/usage', headers: user })).json()
-    expect(pill.tokens).toBeUndefined() // a barra do topo mostra só o status para o usuário comum
+    expect(pill.tokens).toBeDefined()
+    expect(pill.account).toBeUndefined() // o e-mail da conta do Claude fica só para o admin
     expect(all.claude.sessionLeftPct).toBeNull() // sem dados ainda, não zero
     expect(all.claude.plan.name).toBe('Max')
     expect(typeof mine.claude.connected).toBe('boolean')

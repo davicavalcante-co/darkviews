@@ -3,7 +3,7 @@ import { prisma, claimNextJob, estimateSeconds, logEvent, type Job } from '@cort
 import { ingest } from './ingest.js'
 import { analyze } from './analyze.js'
 import { script } from './script.js'
-import { media } from './media-job.js'
+import { media, voice } from './media-job.js'
 import { render } from './render.js'
 import { regenPart } from './regen-part.js'
 import { cuts } from './cuts.js'
@@ -11,7 +11,7 @@ import { ClaudeUnavailable, recordStatus } from './claude.js'
 import { checkClaude, holdLongVideo } from './claude-check.js'
 
 const WORKER_ID = `${hostname()}:${process.pid}`
-const HANDLERS: Record<string, (job: Job) => Promise<void>> = { ingest, analyze, script, media, render, regen_part: regenPart, cuts }
+const HANDLERS: Record<string, (job: Job) => Promise<void>> = { ingest, analyze, script, media, voice, render, regen_part: regenPart, cuts }
 
 // shortcut: jobs "running" de um worker que caiu ficam presos; ao iniciar, devolvemos os nossos para a fila.
 await prisma.job.updateMany({ where: { status: 'running', lockedBy: { startsWith: hostname() + ':' } }, data: { status: 'queued', lockedBy: null } })

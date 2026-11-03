@@ -15,6 +15,11 @@ describe('legendas', () => {
     const segs = buildSegments([scene], 'palavra-chave', ['Cafe'])
     expect(segs[0].highlights).toEqual([1])
   })
+  it('posição vira o alinhamento do ASS (vertical + horizontal)', () => {
+    const alignOf = (position: string) => toAss([], [], { ...style, position }).split('\n').find((l) => l.startsWith('Style: Default'))!.split(',')[18]
+    expect([alignOf('bottom'), alignOf('bottom-left'), alignOf('middle'), alignOf('top-right')]).toEqual(['2', '1', '5', '9'])
+  })
+
   it('gera ASS com cor no formato BGR e tempos corretos', () => {
     const ass = toAss(buildSegments([scene], 'palavra-chave', ['café']), [{ ...scene, onScreenText: 'Título', isCard: true }], style)
     expect(ass).toContain('{\\1c&H003BD4FF&}café{\\1c&H00FFFFFF&}')

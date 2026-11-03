@@ -20,8 +20,8 @@ export async function claudeBlock(isAdmin: boolean) {
     checkedAt: status?.checkedAt ?? null,
     warnings: claudeWarnings(status, isAdmin),
   }
-  // Usuário comum vê só status e avisos; números e histórico ficam para o admin.
-  if (isAdmin) {
+  // Consumo visível para todos os usuários; só o e-mail da conta do Claude fica para o admin.
+  {
     const now = Date.now()
     const today = new Date(new Date().setHours(0, 0, 0, 0))
     const month = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
@@ -48,7 +48,7 @@ export async function claudeBlock(isAdmin: boolean) {
       sessionResetsAt: status?.sessionResetsAt ?? null,
       weekLeftPct: status?.weekUsedPct == null ? null : Math.max(0, 100 - status.weekUsedPct),
       weekResetsAt: status?.weekResetsAt ?? null,
-      account: { email: account.email, organization: account.organization },
+      account: isAdmin ? { email: account.email, organization: account.organization } : undefined,
       subscription: status?.subscriptionType ?? account.subscription ?? null,
       plan: { name: settings.plan_name || null, renewsAt: settings.plan_renews_at || null, daysLeft: renews ? Math.ceil((renews.getTime() - now) / DAY) : null },
       byModel,
@@ -86,6 +86,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
       production: {
         analyzing: count('queued', 'analyzing'),
         creating: count('scripting', 'media', 'rendering'),
+        imageReview: count('image_review'),
         editing: count('editing'),
         inApproval: count('in_approval'),
         approved: count('approved'),

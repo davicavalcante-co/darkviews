@@ -6,17 +6,24 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { activeProviders, pickMusic, searchStock, synthesize, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S } from '@corte/shared'
-import { askClaude, ClaudeUnavailable } from './claude.js'
+import { activeProviders, pickMusic, preferProvider, searchStock, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
+import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 
+// Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
+const UA = 'CorteFinal/1.0 (gerador de vídeos local; https://github.com/davicavalcante-co/corte-final)'
 async function download(url: string, dir: string) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(5 * 60_000) })
-  if (!res.ok || !res.body) throw new Error(`download HTTP ${res.status}`)
+  let res: Response | null = null
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(5 * 60_000) })
+    if (res.status !== 429 && res.status < 500) break
+    await new Promise((r) => setTimeout(r, (Number(res!.headers.get('retry-after')) || 2 ** attempt * 2) * 1000))
+  }
+  if (!res?.ok || !res.body) throw new Error(`download HTTP ${res?.status}`)
   if (Number(res.headers.get('content-length') ?? 0) > MAX_DOWNLOAD) throw new Error('arquivo grande demais')
   const tmp = join(dir, randomUUID())
   await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(tmp))
@@ -24,6 +31,8 @@ async function download(url: string, dir: string) {
   if (!type) { await rm(tmp, { force: true }); throw new Error('download não é imagem nem vídeo válido') }
   return { path: tmp, ...type }
 }
+
+const BANK_NAMES: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse' }
 
 const Choices = z.object({ choices: z.array(z.object({ scene: z.number().int(), candidate: z.number().int().min(0) })) })
 
@@ -43,8 +52,9 @@ export async function media(job: Job) {
   const wanted = script.scenes.filter((s) => !s.assetId && s.searchQuery && JSON.parse(s.searchQuery).type === 'stock')
   const found = new Map<number, StockCandidate[]>()
   for (const [i, s] of wanted.entries()) {
-    const q = JSON.parse(s.searchQuery!)
-    found.set(s.index, await searchStock(q.queries, q.kind, q.orientation, project.ownerId))
+    const q = JSON.parse(s.searchQuery!) as { queries: string[]; kind: 'image' | 'video'; orientation: string; rejected?: string[] }
+    const rejected = new Set(q.rejected ?? [])
+    found.set(s.index, (await searchStock(q.queries, q.kind, q.orientation, project.ownerId)).filter((c) => !rejected.has(`${c.provider}:${c.sourceId}`)))
     await step('Buscando imagens', 5 + Math.round((i / Math.max(wanted.length, 1)) * 25))
   }
 
@@ -55,7 +65,7 @@ export async function media(job: Job) {
     await step('Claude escolhendo as imagens', 32)
     const style = project.reference?.styleProfile ? JSON.parse(project.reference.styleProfile) : null
     const out = await askClaude({
-      jobId: job.id, cwd: dir, effort: 'low', schema: Choices,
+      jobId: job.id, cwd: dir, effort: 'low', schema: Choices, model: LIGHT_MODEL, maxTurns: 3,
       prompt: [
         'Escolha a melhor opção de banco de imagens para cada cena de um vídeo. Considere o texto da cena, a descrição de cada opção e as cores.',
         style ? `Paleta e estilo desejados: ${JSON.stringify({ palette: style.palette, tone: style.tone })}` : '',
@@ -81,13 +91,13 @@ export async function media(job: Job) {
           data: {
             projectId: project.id, kind: file.kind === 'video' ? 'stock_video' : 'stock_image', filePath: file.path, mime: file.mime,
             sourceProvider: c.provider, sourceId: c.sourceId, license: c.license,
-            attribution: `${c.kind === 'video' ? 'Vídeo' : 'Foto'}: ${c.author} (${c.provider === 'pexels' ? 'Pexels' : 'Pixabay'}) ${c.pageUrl}`,
+            attribution: `${c.kind === 'video' ? 'Vídeo' : 'Foto'}: ${c.author} (${BANK_NAMES[c.provider] ?? c.provider}, ${c.license}) ${c.pageUrl}`,
             durationS: file.kind === 'video' ? await durationOf(file.path) : null, sortOrder: idx,
           },
         })
         assetId = asset.id
         break
-      } catch (e) { console.warn(`[media] cena ${idx}: ${(e as Error).message}`) }
+      } catch (e) { logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `imagem da cena ${idx} (${c.provider}): ${(e as Error).message}`, details: { jobId: job.id, projectId: project.id } }) }
     }
     await prisma.scene.update({
       where: { id: scene.id },
@@ -96,19 +106,42 @@ export async function media(job: Job) {
     await step('Baixando imagens', 35 + Math.round((i / Math.max(found.size, 1)) * 20))
   }
 
+  // Para aqui e espera o usuário aprovar as imagens do banco (tela de Andamento). Sem imagens de banco, segue direto.
+  const stock = await prisma.scene.count({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } } })
+  if (stock) {
+    await prisma.project.update({ where: { id: project.id }, data: { status: 'image_review' } })
+  } else {
+    await prisma.job.create({ data: { projectId: project.id, type: 'voice', stage: 'Na fila' } })
+  }
+}
+
+// Depois das imagens aprovadas: locução, tempo das cenas, trilha e render.
+export async function voice(job: Job) {
+  const project = await prisma.project.update({
+    where: { id: job.projectId }, data: { status: 'media' },
+    include: { scripts: { orderBy: { version: 'desc' }, take: 1 } },
+  })
+  const script = project.scripts[0]
+  if (!script) throw new Error('Projeto sem roteiro')
+  const dir = join(STORAGE_DIR, 'media', project.id)
+  await mkdir(dir, { recursive: true })
+  const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
+
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
   await prisma.asset.deleteMany({ where: { projectId: project.id, kind: { in: ['voice', 'music'] } } })
   // Se a voz escolhida for o OmniVoice, a narração inteira passa pelo Claude Code (skill omnivoice + MCP).
   // Cena que ele não entregar cai para a próxima voz da lista (Piper, depois macOS).
-  const voices = await activeProviders('voz', project.ownerId)
+  // voicePreset vem como "fornecedor:voz" (ex.: "piper:faber"); o fornecedor escolhido vai para o topo.
+  const opts = JSON.parse(project.options) as { voiceBrief?: string; voicePreset?: string; voiceTone?: string }
+  const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
+  const voices = preferProvider(await activeProviders('voz', project.ownerId), chosenProvider)
   let directed = new Map<number, string>()
   if (voices[0]?.provider === 'omnivoice') {
     await step('Claude Code criando a voz (OmniVoice)', 55)
     if (await ensureOmniVoice()) {
-      const opts = JSON.parse(project.options) as { voiceBrief?: string }
       directed = await narrateWithClaude({
-        jobId: job.id, projectId: project.id, dir, brief: opts.voiceBrief ?? null, steps: voices[0].config.steps || '16', speed: voices[0].config.speed || '1.0',
+        jobId: job.id, projectId: project.id, dir, brief: opts.voiceBrief ?? chosenVoice ?? null, steps: voices[0].config.steps || '16', speed: voices[0].config.speed || '1.0',
         scenes: scenes.filter((s) => s.narration?.trim()).map((s) => ({ index: s.index, text: s.narration! })),
       }).catch((e) => {
         if (e instanceof ClaudeUnavailable) throw e
@@ -116,27 +149,38 @@ export async function media(job: Job) {
         return new Map<number, string>()
       })
     } else {
-      logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: servidor local indisponível, usando a próxima voz', details: { jobId: job.id } })
+      logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: desligado ou com a licença do modelo não aceita; usando a próxima voz', details: { jobId: job.id } })
     }
   }
 
+  // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que o Claude/OmniVoice já narrou é reaproveitado.
+  await step('Gerando áudio da locução', 60)
+  const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
+  const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
+  const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
+  const made = await synthesizeMany(todo.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
+    { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'omnivoice' })
+
+  // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
+  // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
+  const isNewContext = (s: (typeof scenes)[number]) => !!s.onScreenText || (s.searchQuery ? JSON.parse(s.searchQuery).type === 'text_card' : false)
   let t = 0
   for (const [i, s] of scenes.entries()) {
-    await step('Gerando áudio da locução', 55 + Math.round((i / scenes.length) * 40))
-    let speechS = 0
-    if (s.narration?.trim()) {
-      const base = join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)
-      const fromClaude = directed.get(s.index)
-      const voice = fromClaude
-        ? await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', fromClaude, '-ar', '48000', '-ac', '2', base + '.wav']).then(() => ({ path: base + '.wav', provider: 'omnivoice' }))
-        : await synthesize(s.narration, base, FFMPEG, project.ownerId)
-      if (voice) {
-        speechS = await durationOf(voice.path)
-        await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: voice.path, mime: 'audio/wav', durationS: speechS, sourceProvider: voice.provider, sortOrder: s.index } })
-      }
+    await step('Gerando áudio da locução', 60 + Math.round((i / scenes.length) * 35))
+    const next = scenes[i + 1]
+    const lead = i > 0 && isNewContext(s) ? 0.6 : 0.15
+    const tail = next && isNewContext(next) ? 0.9 : 0.45
+    let dur = s.endS - s.startS
+    const v = made.get(s.index)
+    if (v) {
+      // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
+      const out = bases.get(s.index)! + '.final.wav'
+      await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
+        `afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+      dur = await durationOf(out)
+      await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
     }
-    // A cena acompanha a fala (mais um respiro curto). Esperar o tempo planejado deixava silêncios entre as frases.
-    const dur = speechS > 0 ? speechS + 0.25 : s.endS - s.startS
     await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
     t += dur
   }

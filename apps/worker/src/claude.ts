@@ -5,6 +5,7 @@ import { logEvent, prisma } from '@corte/db'
 import type { ClaudeReason } from '@corte/shared'
 
 const MODEL = process.env.CLAUDE_MODEL ?? 'claude-opus-5-5'
+export const LIGHT_MODEL = process.env.CLAUDE_LIGHT_MODEL ?? 'claude-haiku-5-5'
 
 // Claude fora do ar ou no limite: o worker pausa o job e o retoma em `resumeAt`.
 export class ClaudeUnavailable extends Error {
@@ -39,16 +40,17 @@ type Ask<T> = {
   jobId: string; prompt: string; schema: ZodType<T>; cwd: string; canReadFiles?: boolean; effort?: 'low' | 'medium' | 'high'
   // Skills do projeto (.claude/skills) + servidores MCP: o Claude Code usa só as ferramentas listadas em `allow`.
   skills?: { projectDir: string; names: string[] }; mcpServers?: Record<string, McpServerConfig>; allow?: string[]; maxTurns?: number
+  model?: string // tarefas simples (escolher entre opções) usam um modelo menor e mais barato
 }
 
 // Uma chamada ao Claude local (login do Claude Code da máquina) com saída JSON validada.
-export async function askClaude<T>({ jobId, prompt, schema, cwd, canReadFiles, effort = 'high', skills, mcpServers, allow = [], maxTurns = 30 }: Ask<T>): Promise<T> {
+export async function askClaude<T>({ jobId, prompt, schema, cwd, canReadFiles, effort = 'high', skills, mcpServers, allow = [], maxTurns = 30, model = MODEL }: Ask<T>): Promise<T> {
   const builtIn = [...(canReadFiles ? ['Read'] : []), ...(skills ? ['Skill'] : [])]
   let limit: SDKRateLimitInfo | null = null
   const run = query({
     prompt,
     options: {
-      model: MODEL,
+      model,
       cwd: skills?.projectDir ?? cwd,
       effort,
       tools: builtIn,

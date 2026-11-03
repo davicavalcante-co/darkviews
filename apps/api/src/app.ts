@@ -68,7 +68,8 @@ export async function buildApp() {
     }
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return
     // CSRF: toda mutação precisa vir do frontend e, se logado, trazer o token da sessão.
-    if (req.headers.origin !== webOrigin) return reply.code(403).send({ error: 'Origem não permitida' })
+    // O Vite troca de porta quando a 5173 está ocupada (5174, 5175…): aceita qualquer porta do localhost; o token da sessão continua obrigatório.
+    if (req.headers.origin !== webOrigin && !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(req.headers.origin ?? '')) return reply.code(403).send({ error: 'Origem não permitida' })
     if (PUBLIC_MUTATIONS.has(req.routeOptions.url ?? '')) return
     if (req.sessionToken && req.headers['x-csrf-token'] !== csrfFor(req.sessionToken)) {
       return reply.code(403).send({ error: 'Token CSRF inválido' })

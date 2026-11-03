@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Part } from '@corte/shared'
 import { api, useFonts } from './api'
-import { PageHead } from './ui'
+import { CaptionPosition, FontSelect, Modal, PageHead } from './ui'
+import { ThumbnailTab } from './thumbnail'
 
 type Segment = { startS: number; endS: number; text: string; highlights: number[] }
 type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; segments: Segment[] }
@@ -18,7 +19,8 @@ type EditData = {
   changeRequests: ChangeReq[]
 }
 
-const TABS: [Part, string][] = [['video', 'Vídeo'], ['caption', 'Legenda'], ['title', 'Título'], ['description', 'Descrição'], ['keywords', 'Palavras-chave']]
+type Tab = Part | 'thumbnail'
+const TABS: [Tab, string][] = [['video', 'Vídeo'], ['caption', 'Legenda'], ['title', 'Título'], ['description', 'Descrição'], ['keywords', 'Palavras-chave'], ['thumbnail', 'Thumbnail']]
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const when = (d: string) => new Date(d).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 const by = (c: string) => (c === 'claude' ? 'Claude' : c === 'system' ? 'sistema' : 'você')
@@ -29,7 +31,7 @@ async function act(fn: () => Promise<unknown>, reload: () => void) {
 
 export function EditPage({ id }: { id: string }) {
   const [data, setData] = useState<EditData | null>(null)
-  const [tab, setTab] = useState<Part>('video')
+  const [tab, setTab] = useState<Tab>('video')
   const [missing, setMissing] = useState(false)
   const load = () => api<EditData>(`/projects/${id}/edit`).then(setData, () => setMissing(true))
   useEffect(() => { load() }, [id])
@@ -57,6 +59,8 @@ export function EditPage({ id }: { id: string }) {
         {tab === 'video' && <VideoTab {...props} />}
         {tab === 'caption' && <CaptionTab {...props} />}
         {(tab === 'title' || tab === 'description' || tab === 'keywords') && <MetaTab key={tab} field={tab} {...props} />}
+        {tab === 'thumbnail' && <ThumbnailTab id={id} video={data.videos.find((v) => v.isCurrent) ?? null}
+          title={data.metadata.find((m) => m.field === 'title' && m.isCurrent)?.value ?? ''} />}
       </div>
     </div>
   )
@@ -161,66 +165,97 @@ function useGoogleFont(family: string, weight: number) {
 function CaptionTab(props: TabProps) {
   const allowed = useFonts()
   const { id, data, reload, busy } = props
+  const ref = useRef<HTMLVideoElement>(null)
   const [track, setTrack] = useState<Track | null>(data.caption)
+  const [time, setTime] = useState(0)
+  const [styleOpen, setStyleOpen] = useState(false)
+  const [saved, setSaved] = useState('')
   useEffect(() => setTrack(data.caption), [data.caption?.version])
   useGoogleFont(track?.fontFamily ?? 'Inter', track?.fontWeight ?? 700)
-  if (!track) return <p className="muted">A legenda é criada junto com o vídeo.</p>
+  const video = data.videos.find((v) => v.isCurrent)
+  if (!track || !video) return <p className="muted">A legenda aparece aqui quando o vídeo terminar de ser criado.</p>
 
-  const set = (patch: Partial<Track>) => setTrack({ ...track, ...patch })
-  const setSeg = (i: number, patch: Partial<Segment>) => set({ segments: track.segments.map((s, j) => (j === i ? { ...s, ...patch } : s)) })
+  const set = (patch: Partial<Track>) => { setTrack({ ...track, ...patch }); setSaved('') }
+  const segs = track.segments
+  const setSeg = (i: number, patch: Partial<Segment>) => set({ segments: segs.map((s, j) => (j === i ? { ...s, ...patch } : s)) })
   const toggle = (i: number, w: number) => {
-    const h = track.segments[i].highlights
+    const h = segs[i].highlights
     setSeg(i, { highlights: h.includes(w) ? h.filter((x) => x !== w) : [...h, w] })
   }
+  const seek = (t: number) => { if (ref.current) { ref.current.currentTime = t; setTime(t) } }
+  const active = segs.findIndex((s) => time >= s.startS && time < s.endS)
+  // Sem legenda neste instante: a mais próxima depois (para os botões de anterior/próxima).
+  const nextIdx = segs.findIndex((s) => s.startS > time)
+  const cur = active >= 0 ? segs[active] : null
   const { version: _v, ...body } = track
   const save = () => api(`/projects/${id}/captions`, { method: 'PUT', body })
+  const nudge = (i: number, key: 'startS' | 'endS', d: number) => setSeg(i, { [key]: Math.max(0, Math.round((segs[i][key] + d) * 10) / 10) })
+  const color = (w: number, s: Segment) => (s.highlights.includes(w) || track.highlightMode === 'karaokê' ? track.highlightColor : track.color)
 
   return (
     <div className="cards">
-      <div className="panel narrow">
-      <span className="panel-title">Estilo</span>
-      <div className="grid">
-        <label>Fonte<select value={track.fontFamily} onChange={(e) => set({ fontFamily: e.target.value })}>{[...new Set([track.fontFamily, ...allowed])].map((f) => <option key={f}>{f}</option>)}</select></label>
-        <label>Peso<select value={track.fontWeight} onChange={(e) => set({ fontWeight: Number(e.target.value) })}><option value={400}>Normal</option><option value={700}>Negrito</option><option value={900}>Extra</option></select></label>
-        <label>Tamanho<input type="number" min={24} max={140} value={track.size} onChange={(e) => set({ size: Number(e.target.value) })} /></label>
-        <label>Posição<select value={track.position} onChange={(e) => set({ position: e.target.value })}><option value="bottom">Embaixo</option><option value="middle">Centro</option></select></label>
-        <label>Cor<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
-        <label>Cor do destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
-        <label>Destaque<select value={track.highlightMode} onChange={(e) => set({ highlightMode: e.target.value })}>
-          <option value="palavra-chave">Palavras-chave</option><option value="karaokê">Karaokê</option><option value="manual">Manual</option>
-        </select></label>
-      </div>
-      </div>
       <div className="panel wide">
-      <div className="row"><span className="panel-title">Linhas · {track.segments.length}</span><span className="muted">Clique numa palavra para ligar ou desligar o destaque.</span></div>
-      <div className="segments">
-        {track.segments.map((s, i) => (
-          <div className="segment" key={i}>
-            <input type="number" step={0.1} min={0} value={s.startS} aria-label="Início (s)" onChange={(e) => setSeg(i, { startS: Number(e.target.value) })} />
-            <input type="number" step={0.1} min={0} value={s.endS} aria-label="Fim (s)" onChange={(e) => setSeg(i, { endS: Number(e.target.value) })} />
-            <div>
-              <input value={s.text} maxLength={200} aria-label="Texto" onChange={(e) => setSeg(i, { text: e.target.value, highlights: s.highlights.filter((h) => h < e.target.value.split(/\s+/).length) })} />
-              <div className="words" style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight }}>
-                {s.text.split(/\s+/).filter(Boolean).map((w, j) => (
-                  <button type="button" key={j} onClick={() => toggle(i, j)} style={{ color: s.highlights.includes(j) || track.highlightMode === 'karaokê' ? track.highlightColor : track.color }}>{w}</button>
-                ))}
-              </div>
+        <div className="caption-stage">
+          <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}`}
+            onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
+          {/* Prévia: a legenda deste instante com a fonte e as cores escolhidas. */}
+          {cur && (
+            <div className={`caption-preview ${track.position.replace('-', ' ')}`} style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight, fontSize: `clamp(14px, ${track.size / 24}vw, ${track.size / 2.2}px)` }}>
+              {cur.text.split(/\s+/).filter(Boolean).map((w, j) => <span key={j} style={{ color: color(j, cur) }}>{w} </span>)}
             </div>
-            <button type="button" className="link" aria-label="Remover linha" onClick={() => set({ segments: track.segments.filter((_, j) => j !== i) })}>✕</button>
-          </div>
-        ))}
+          )}
+        </div>
+        <div className="seg-track" aria-label="Legendas ao longo do vídeo">
+          {segs.map((s, i) => (
+            <button key={i} type="button" className={`seg-block${i === active ? ' on' : ''}`} title={s.text}
+              style={{ left: `${(s.startS / video.durationS) * 100}%`, width: `${Math.max(0.4, ((s.endS - s.startS) / video.durationS) * 100)}%` }}
+              onClick={() => { seek(s.startS + 0.01); ref.current?.pause() }} aria-label={`Legenda em ${fmt(s.startS)}: ${s.text}`} />
+          ))}
+          <span className="cursor" style={{ left: `${(time / video.durationS) * 100}%` }} />
+        </div>
+        <p className="muted small">Clique num bloco para ir até aquela legenda. Cada bloco é uma linha.</p>
       </div>
-      <div className="row">
-        <button type="button" className="link" onClick={() => {
-          const last = track.segments.at(-1)
-          set({ segments: [...track.segments, { startS: last?.endS ?? 0, endS: (last?.endS ?? 0) + 2, text: 'Nova legenda', highlights: [] }] })
-        }}>+ Linha</button>
-        <span>
-          <button type="button" className="link" onClick={() => act(save, reload)}>Salvar versão</button>{' '}
+
+      <div className="panel">
+        <div className="row"><h3 className="panel-title">Legenda neste momento</h3><span className="muted">{fmt(time)}</span></div>
+        {cur ? (
+          <>
+            <input value={cur.text} maxLength={200} aria-label="Texto da legenda" onChange={(e) => setSeg(active, { text: e.target.value, highlights: cur.highlights.filter((h) => h < e.target.value.split(/\s+/).length) })} />
+            <div className="words" style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight }}>
+              {cur.text.split(/\s+/).filter(Boolean).map((w, j) => (
+                <button type="button" key={j} onClick={() => toggle(active, j)} style={{ color: color(j, cur) }} aria-pressed={cur.highlights.includes(j)}>{w}</button>
+              ))}
+            </div>
+            <p className="muted small">Clique numa palavra para destacar.</p>
+            <div className="nudge">
+              <span>Começa {fmt(cur.startS)}<button type="button" className="icon-btn" onClick={() => nudge(active, 'startS', -0.1)} aria-label="Começar 0,1 s antes">−</button><button type="button" className="icon-btn" onClick={() => nudge(active, 'startS', 0.1)} aria-label="Começar 0,1 s depois">+</button></span>
+              <span>Termina {fmt(cur.endS)}<button type="button" className="icon-btn" onClick={() => nudge(active, 'endS', -0.1)} aria-label="Terminar 0,1 s antes">−</button><button type="button" className="icon-btn" onClick={() => nudge(active, 'endS', 0.1)} aria-label="Terminar 0,1 s depois">+</button></span>
+            </div>
+            <button type="button" className="link" onClick={() => set({ segments: segs.filter((_, j) => j !== active) })}>Apagar esta legenda</button>
+          </>
+        ) : (
+          <>
+            <p className="muted">Nenhuma legenda neste instante.</p>
+            <button type="button" className="ghost-btn" onClick={() => {
+              const t = Math.round(time * 10) / 10
+              const end = Math.min(nextIdx >= 0 ? segs[nextIdx].startS : video.durationS, t + 2)
+              set({ segments: [...segs, { startS: t, endS: Math.max(t + 0.5, end), text: 'Nova legenda', highlights: [] }].sort((a, b) => a.startS - b.startS) })
+            }}>Adicionar legenda aqui</button>
+          </>
+        )}
+        <div className="row">
+          <button type="button" className="link" disabled={active <= 0 && nextIdx <= 0} onClick={() => { const i = active > 0 ? active - 1 : Math.max(0, nextIdx - 1); seek(segs[i].startS + 0.01) }}>← Anterior</button>
+          <button type="button" className="link" disabled={(active >= 0 ? active + 1 : nextIdx) >= segs.length || nextIdx === -1 && active === -1} onClick={() => { const i = active >= 0 ? active + 1 : nextIdx; if (segs[i]) seek(segs[i].startS + 0.01) }}>Próxima →</button>
+        </div>
+        <footer className="modal-actions">
+          <button type="button" className="link" onClick={() => setStyleOpen(true)}>Estilo da legenda</button>
+          <span className="spacer" />
+          {saved && <span className="ok">{saved}</span>}
+          <button type="button" className="ghost-btn" onClick={() => act(async () => { await save(); setSaved('Salvo') }, reload)}>Salvar</button>
           <button type="button" disabled={busy} onClick={() => act(async () => { await save(); await api(`/projects/${id}/render`, { method: 'POST' }) }, reload)}>Salvar e renderizar</button>
-        </span>
+        </footer>
       </div>
-      </div>
+
       <div className="panel">
         <span className="panel-title">Regerar com o Claude</span>
         <Requests {...props} part="caption" />
@@ -228,6 +263,21 @@ function CaptionTab(props: TabProps) {
       </div>
       <History items={data.captionVersions.map((v) => ({ version: v.version, isCurrent: v.isCurrent, label: `${v.fontFamily} · ${v.segments} linhas · ${when(v.createdAt)}` }))}
         onRestore={(version) => act(() => api(`/projects/${id}/captions/restore`, { method: 'POST', body: { version } }), reload)} />
+
+      <Modal open={styleOpen} onClose={() => setStyleOpen(false)} kicker="Legenda" title="Estilo da legenda">
+        <div className="grid">
+          <div className="field"><span className="field-label">Fonte</span><FontSelect value={track.fontFamily} fonts={allowed} onChange={(f) => set({ fontFamily: f })} /></div>
+          <label>Peso<select value={track.fontWeight} onChange={(e) => set({ fontWeight: Number(e.target.value) })}><option value={400}>Normal</option><option value={700}>Negrito</option><option value={900}>Extra</option></select></label>
+          <label>Tamanho<input type="number" min={24} max={140} value={track.size} onChange={(e) => set({ size: Number(e.target.value) })} /></label>
+          <div className="field"><span className="field-label">Posição</span><CaptionPosition value={track.position} onChange={(position) => set({ position })} /></div>
+          <label>Cor<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
+          <label>Cor do destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
+          <label>Destaque<select value={track.highlightMode} onChange={(e) => set({ highlightMode: e.target.value })}>
+            <option value="palavra-chave">Palavras-chave</option><option value="karaokê">Karaokê</option><option value="manual">Manual</option>
+          </select></label>
+        </div>
+        <footer className="modal-actions"><span className="spacer" /><button type="button" onClick={() => setStyleOpen(false)}>Pronto</button></footer>
+      </Modal>
     </div>
   )
 }

@@ -18,7 +18,7 @@ export type ClaudeBlock = {
   history?: { day: string; tokens: number }[]
 }
 type Dash = {
-  production: { analyzing: number; creating: number; editing: number; inApproval: number; approved: number; failed: number; cuts: number; weeks: { start: string; count: number }[] }
+  production: { analyzing: number; creating: number; imageReview?: number; editing: number; inApproval: number; approved: number; failed: number; cuts: number; weeks: { start: string; count: number }[] }
   claude: ClaudeBlock
 }
 
@@ -118,7 +118,7 @@ export function Dashboard({ isAdmin }: { isAdmin: boolean }) {
       <Section idx={1} title="Produção" aside={isAdmin ? 'todos os projetos' : 'seus projetos'}>
         <div className="tiles">
           <Tile label="Em análise" value={p.analyzing} />
-          <Tile label="Criando" value={p.creating} />
+          <Tile label="Criando" value={p.creating} hint={p.imageReview ? `${p.imageReview} esperando você aprovar imagens` : null} />
           <Tile label="Em edição" value={p.editing} />
           <Tile label="Aguardando aprovação" value={p.inApproval} />
           <Tile label="Aprovados" value={p.approved} hint={p.failed ? `${p.failed} com falha` : null} />
@@ -139,7 +139,7 @@ export function Dashboard({ isAdmin }: { isAdmin: boolean }) {
           </div>
         </div>
         {/* Segunda linha da grade: consumo do Claude (só admin), mesmo par linha + pizza */}
-        {isAdmin && <div className="cards">
+        <div className="cards">
           {c.history && (
             <div className="panel wide">
               <div className="row"><h3 className="panel-title">Tokens do Claude Code por dia</h3><span className="muted">últimos 14 dias</span></div>
@@ -154,7 +154,7 @@ export function Dashboard({ isAdmin }: { isAdmin: boolean }) {
                 slices={c.byModel.map((m) => ({ key: m.model, label: MODEL_NAMES[m.model] ?? m.model, value: m.tokens }))} />
             </div>
           )}
-        </div>}
+        </div>
       </Section>
     </div>
   )

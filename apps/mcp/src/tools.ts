@@ -18,7 +18,7 @@ async function project(u: User, id: string) {
   return p
 }
 const STATUS: Record<string, string> = {
-  queued: 'na fila', analyzing: 'analisando a referência', scripting: 'escrevendo o roteiro', media: 'buscando mídia e gravando a voz',
+  queued: 'na fila', analyzing: 'analisando a referência', scripting: 'escrevendo o roteiro', media: 'buscando mídia e gravando a voz', image_review: 'aguardando a aprovação das imagens (no site)',
   rendering: 'criando o vídeo', editing: 'pronto, em edição', in_approval: 'aguardando aprovação', approved: 'aprovado', failed: 'falhou',
 }
 const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5173'
@@ -44,7 +44,7 @@ export async function createVideo(u: User, a: { nome: string; prompt: string; du
   const p = await prisma.project.create({
     data: {
       ownerId: u.id, name: input.name, prompt: input.prompt, targetDurationS: input.targetDurationS,
-      options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief }),
+      options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone }),
       reference: input.link ? { create: { sourceType: 'link', url: input.link } } : undefined,
       jobs: { create: { type: 'ingest', stage: 'Na fila' } },
     },

@@ -6,7 +6,8 @@ import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
 import { prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
-import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, VIDEO_MAX_BYTES, type ProgressEvent } from '@corte/shared'
+import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
+import { activeProviders } from '@corte/providers'
 import { requireAuth } from './auth.js'
 import { enabledFonts, getSettings } from './settings.js'
 
@@ -86,7 +87,7 @@ export async function projectRoutes(app: FastifyInstance) {
           name: input.name,
           prompt: input.prompt,
           targetDurationS: input.targetDurationS,
-          options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief }),
+          options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone, highlightColor: input.highlightColor, captionPosition: input.captionPosition }),
           reference: input.link
             ? { create: { sourceType: 'link', url: input.link, platform: detectPlatform(input.link) } }
             : video[0] ? { create: { sourceType: 'upload', filePath: video[0].path } } : undefined,
@@ -116,10 +117,22 @@ export async function projectRoutes(app: FastifyInstance) {
         _count: { select: { assets: { where: { kind: 'user_image' } } } },
       },
     })
-    // Formato da lista e do feed "Criações": prompt resumido, vídeo atual e tarefa em andamento.
+    const tokens = await tokensByProject(rows.map((r) => r.id))
+    // Formato da lista e do feed "Criações": prompt resumido, vídeo atual, tarefa em andamento e tokens gastos.
     return rows.map(({ videoVersions, jobs, _count, prompt, ...p }) => ({
-      ...p, prompt: prompt.slice(0, 220), video: videoVersions[0] ?? null, job: jobs[0] ?? null, images: _count.assets,
+      ...p, prompt: prompt.slice(0, 220), video: videoVersions[0] ?? null, job: jobs[0] ?? null, images: _count.assets, tokens: tokens.get(p.id) ?? 0,
     }))
+  })
+
+  // Estimativa antes de criar: média de tokens por segundo dos vídeos já prontos (de todos), vezes a duração pedida.
+  app.get<{ Querystring: { seconds?: string } }>('/api/projects/estimate', { preHandler: requireAuth }, async (req) => {
+    const seconds = Math.min(Math.max(Number(req.query.seconds) || 60, 10), 3600)
+    const done = await prisma.project.findMany({ where: { status: { in: ['editing', 'in_approval', 'approved'] } }, orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, targetDurationS: true } })
+    const tokens = await tokensByProject(done.map((d) => d.id))
+    const used = done.filter((d) => tokens.get(d.id))
+    // shortcut: sem histórico usa ~4 mil tokens por segundo de vídeo; a média real assume assim que houver um vídeo pronto.
+    const perS = used.length ? used.reduce((n, d) => n + tokens.get(d.id)!, 0) / used.reduce((n, d) => n + d.targetDurationS, 0) : 4000
+    return { tokens: Math.round(perS * seconds), basedOn: used.length }
   })
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
@@ -179,8 +192,102 @@ export async function projectRoutes(app: FastifyInstance) {
     return reply.send(createReadStream(v.filePath, { start, end }))
   })
 
+  // Voz que vai narrar os vídeos deste usuário (a primeira pronta) e as opções prontas para escolher em Novo vídeo.
+  // Todas as vozes prontas para este usuário, com a origem: "Faber - Masculina (Piper)". O id é "fornecedor:voz".
+  app.get('/api/voices', { preHandler: requireAuth }, async (req) => {
+    const active = await activeProviders('voz', req.user!.id)
+    const voices = active.flatMap((a) => {
+      const label = (PROVIDERS.find((x) => x.provider === a.provider)?.label ?? a.provider).split(' · ')[0].split(' (')[0]
+      return (VOICE_PRESETS[a.provider] ?? []).map((v) => ({ id: `${a.provider}:${v.id}`, label: `${v.label} (${label})`, provider: a.provider, freeText: a.provider === 'omnivoice' }))
+    })
+    const first = active[0]
+    const current = first && `${first.provider}:${first.config.voice ?? ''}`
+    return { voices, current: voices.some((v) => v.id === current) ? current : voices[0]?.id ?? null, tones: VOICE_TONES }
+  })
+
+
+  // ---------- Aprovação das imagens (antes da narração) ----------
+  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse' }
+  // A referência tem uma pessoa falando: o cliente escolhe vídeo de banco (JSON {choice:'stock'}) ou envia o vídeo dele (multipart, campo "video").
+  app.post<{ Params: { id: string } }>('/api/projects/:id/talking-head', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'talking_head') return reply.code(409).send({ error: 'Este vídeo não está esperando essa escolha' })
+    let choice: 'stock' | 'upload' = 'stock'
+    if (req.isMultipart()) {
+      const part = await req.file()
+      if (!part || part.fieldname !== 'video') return reply.code(400).send({ error: 'Envie o vídeo da pessoa falando' })
+      const saved = await saveUpload(part)
+      await prisma.asset.create({ data: { projectId: p.id, kind: 'user_video', filePath: saved.path, mime: saved.mime, sortOrder: 0 } })
+      choice = 'upload'
+    } else if ((req.body as { choice?: string } | null)?.choice !== 'stock') return reply.code(400).send({ error: 'Escolha inválida' })
+    await prisma.$transaction([
+      prisma.project.update({ where: { id: p.id }, data: { status: 'scripting', options: JSON.stringify({ ...JSON.parse(p.options), talkingHead: choice }) } }),
+      prisma.job.create({ data: { projectId: p.id, type: 'script', stage: 'Na fila' } }),
+    ])
+    return reply.code(202).send({ choice })
+  })
+
+  app.get<{ Params: { id: string } }>('/api/projects/:id/review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const scenes = await prisma.scene.findMany({
+      where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, orderBy: { index: 'asc' },
+      select: { index: true, narration: true, asset: { select: { id: true, kind: true, sourceProvider: true, attribution: true } } },
+    })
+    return {
+      status: p.status,
+      scenes: scenes.map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution })),
+    }
+  })
+
+  // Arquivo de uma imagem ou vídeo do projeto (para a aprovação). Só o dono ou o admin; o caminho nunca sai do servidor.
+  app.get<{ Params: { id: string; assetId: string } }>('/api/projects/:id/assets/:assetId', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true } })
+    const a = p && await prisma.asset.findFirst({ where: { id: req.params.assetId, projectId: p.id } })
+    if (!a) return reply.code(404).send({ error: 'Arquivo não encontrado' })
+    reply.header('content-type', a.mime).header('cache-control', 'private, max-age=3600')
+    return reply.send(createReadStream(a.filePath))
+  })
+
+  // Aprova o conjunto: sem recusas, segue para a narração; com recusas, só essas cenas ganham uma nova busca (sem repetir a recusada).
+  app.post<{ Params: { id: string } }>('/api/projects/:id/review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'image_review') return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
+    const { rejected } = ReviewInput.parse(req.body)
+    const scenes = await prisma.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', index: { in: rejected } }, include: { asset: true } })
+    await prisma.$transaction([
+      ...scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
+        const q = JSON.parse(s.searchQuery!)
+        return prisma.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
+      }),
+      prisma.project.update({ where: { id: p.id }, data: { status: 'media' } }),
+      prisma.job.create({ data: { projectId: p.id, type: scenes.length ? 'media' : 'voice', stage: 'Na fila' } }),
+    ])
+    return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
+  })
+
+  // ---------- Thumbnails (miniaturas do YouTube) ----------
+  app.get<{ Params: { id: string } }>('/api/projects/:id/thumbnails', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    return prisma.asset.findMany({ where: { projectId: p.id, kind: 'thumbnail' }, orderBy: { createdAt: 'desc' }, select: { id: true, createdAt: true } })
+  })
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/thumbnails', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const part = await req.file()
+    if (!part || part.fieldname !== 'images') return reply.code(400).send({ error: 'Envie a imagem da thumbnail' })
+    const saved = await saveUpload(part) // mesma checagem de tipo real e tamanho das imagens enviadas
+    if (saved.size > 2 * 1024 * 1024) { await rm(saved.path, { force: true }); return reply.code(413).send({ error: 'O YouTube aceita thumbnails de até 2 MB' }) }
+    const a = await prisma.asset.create({ data: { projectId: p.id, kind: 'thumbnail', filePath: saved.path, mime: saved.mime, width: 1280, height: 720 } })
+    return reply.code(201).send({ id: a.id })
+  })
+
   // Vídeo que falhou: repete só a etapa que deu erro (o que já ficou pronto é aproveitado).
-  const RETRY_STATUS: Record<string, string> = { ingest: 'queued', analyze: 'analyzing', script: 'scripting', media: 'media', render: 'rendering', regen_part: 'editing' }
+  const RETRY_STATUS: Record<string, string> = { ingest: 'queued', analyze: 'analyzing', script: 'scripting', media: 'media', voice: 'media', render: 'rendering', regen_part: 'editing' }
   app.post<{ Params: { id: string } }>('/api/projects/:id/retry', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
@@ -202,8 +309,24 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     if (req.user!.role !== 'admin' && p.status === 'approved') return reply.code(403).send({ error: 'Projeto aprovado não pode ser excluído' })
     await prisma.project.delete({ where: { id: p.id } })
+    // Apaga tudo o que o vídeo usou: envios, referência, imagens, narração, renders, cortes e miniaturas.
     const paths = [p.reference?.filePath, ...p.assets.map((a) => a.filePath)].filter((x): x is string => !!x)
-    await Promise.all(paths.map((f) => rm(f, { force: true })))
+    const dirs = ['media', 'renders', 'cuts', 'thumbs'].map((d) => join(STORAGE_DIR, d, p.id))
+    await Promise.all([...paths, ...dirs].map((f) => rm(f, { force: true, recursive: true })))
     return { ok: true }
   })
+}
+
+// Soma os tokens do Claude de cada projeto (os eventos de uso ficam ligados às tarefas do projeto).
+async function tokensByProject(ids: string[]) {
+  const events = await prisma.claudeUsageEvent.findMany({
+    where: { job: { projectId: { in: ids } } },
+    select: { inputTokens: true, outputTokens: true, cacheReadTokens: true, cacheWriteTokens: true, job: { select: { projectId: true } } },
+  })
+  const out = new Map<string, number>()
+  for (const e of events) {
+    const id = e.job!.projectId
+    out.set(id, (out.get(id) ?? 0) + e.inputTokens + e.outputTokens + e.cacheReadTokens + e.cacheWriteTokens)
+  }
+  return out
 }

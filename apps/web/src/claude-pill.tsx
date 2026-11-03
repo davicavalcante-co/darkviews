@@ -38,20 +38,21 @@ export function ClaudePill({ isAdmin }: { isAdmin: boolean }) {
   const state = !c.connected ? 'off' : c.available === false ? 'off' : c.available ? 'on' : ''
   const status = !c.connected ? 'Não conectado' : c.available === false ? 'Indisponível' : 'Claude'
   const sessionLeft = left(c.sessionResetsAt, now)
-  const session = sessionLeft && c.sessionLeftPct != null ? Math.round(c.sessionLeftPct) : null
+  const session = sessionLeft && c.sessionLeftPct != null ? Math.round(100 - c.sessionLeftPct) : null
   const weekOk = c.weekResetsAt && new Date(c.weekResetsAt).getTime() > now
-  const week = weekOk && c.weekLeftPct != null ? Math.round(c.weekLeftPct) : null
+  const week = weekOk && c.weekLeftPct != null ? Math.round(100 - c.weekLeftPct) : null
   const plan = c.subscription ? PLAN_NAMES[c.subscription] ?? c.subscription : c.plan?.name
-  const meter = (pct: number | null) => <span className="meter" aria-hidden="true"><span style={{ width: `${pct ?? 0}%` }} className={pct != null && pct <= 20 ? 'low' : ''} /></span>
+  // Barra de uso: enche conforme gasta; cheia = limite da sessão/semana atingido.
+  const meter = (pct: number | null) => <span className="meter" aria-hidden="true"><span style={{ width: `${pct ?? 0}%` }} className={pct != null && pct >= 80 ? 'low' : ''} /></span>
 
   return (
     <div className="pill-dock" ref={ref}>
       <button type="button" className="usage-pill" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)}
-        aria-label={`Uso do Claude: ${status}${session != null ? `, sessão ${session}% restante` : ''}${week != null ? `, semana ${week}% restante` : ''}`}>
+        aria-label={`Uso do Claude: ${status}${session != null ? `, sessão ${session}% usada` : ''}${week != null ? `, semana ${week}% usada` : ''}`}>
         <span className={`dot ${state}`} />
         <strong>{status}</strong>
         {plan && <span className="pill-plan">{plan}</span>}
-        {isAdmin && c.connected && <>
+        {c.connected && <>
           <span className="sep" />
           <span className="pill-metric" title="Limite do plano, janela de 5 h (o chat do Claude usa a mesma cota)">Sessão {meter(session)} <b>{session != null ? `${session}%` : '—'}</b></span>
           {sessionLeft && <span className="pill-muted">↻ {sessionLeft}</span>}
@@ -66,13 +67,13 @@ export function ClaudePill({ isAdmin }: { isAdmin: boolean }) {
         <div className="pill-pop" role="dialog" aria-label="Uso do Claude">
           {c.warnings.map((w) => <p key={w.text} className={w.level === 'red' ? 'alert' : 'warn'}>{w.text}</p>)}
           {!c.connected && <p className="muted">{isAdmin ? 'Conecte o Claude no Painel para criar vídeos.' : 'Peça ao administrador para conectar o Claude.'}</p>}
-          {isAdmin && c.connected ? (
+          {c.connected ? (
             <dl className="pop-grid">
               {c.account?.email && <><dt>Conta</dt><dd>{c.account.email}</dd></>}
               <dt>Plano</dt><dd>{plan ?? '—'}{c.plan?.daysLeft != null ? ` · renova em ${c.plan.daysLeft} dias` : ''}</dd>
               <dt className="pop-sec">Limite do plano</dt><dd className="pop-sec muted">compartilhado com o chat</dd>
-              <dt>Sessão (5 h)</dt><dd>{session != null ? `${session}% restante · reinicia em ${sessionLeft}` : 'sem dados ainda'}</dd>
-              <dt>Semana</dt><dd>{week != null ? `${week}% restante · reinicia em ${new Date(c.weekResetsAt!).toLocaleDateString('pt-BR')}` : 'sem dados ainda'}</dd>
+              <dt>Sessão (5 h)</dt><dd>{session != null ? `${session}% usado · reinicia em ${sessionLeft}` : 'sem dados ainda'}</dd>
+              <dt>Semana</dt><dd>{week != null ? `${week}% usado · reinicia em ${new Date(c.weekResetsAt!).toLocaleDateString('pt-BR')}` : 'sem dados ainda'}</dd>
               <dt className="pop-sec">Claude Code</dt><dd className="pop-sec muted">tokens desta máquina</dd>
               <dt>Hoje</dt><dd>{num(c.tokens?.today ?? 0)}</dd>
               <dt>Na sessão atual</dt><dd>{num(c.tokens?.session ?? 0)}</dd>
