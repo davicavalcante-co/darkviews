@@ -28,8 +28,17 @@ const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s 
 
 type ProjectRow = { id: string; name: string; status: ProjectStatus; targetDurationS: number; createdAt: string; owner: { name: string } }
 
-export function ProjectList({ isAdmin }: { isAdmin: boolean }) {
-  const [rows, setRows] = useState<ProjectRow[] | null>(null)
+type ListProps = {
+  isAdmin: boolean
+  title?: string
+  statuses?: ProjectStatus[] // só os projetos nestes status (abas Edição e Aprovação)
+  href?: (id: string) => string
+  empty?: string
+}
+
+export function ProjectList({ isAdmin, title = 'Projetos', statuses, href = (id) => `#/projeto/${id}`, empty = 'Nenhum projeto ainda.' }: ListProps) {
+  const [all, setRows] = useState<ProjectRow[] | null>(null)
+  const rows = all && (statuses ? all.filter((p) => statuses.includes(p.status)) : all)
   const load = () => api<ProjectRow[]>('/projects').then(setRows)
   useEffect(() => { load() }, [])
 
@@ -41,13 +50,13 @@ export function ProjectList({ isAdmin }: { isAdmin: boolean }) {
   if (!rows) return null
   return (
     <section>
-      <div className="row"><h2>Projetos</h2><a className="btn" href="#/novo">Novo vídeo</a></div>
-      {rows.length === 0 ? <p className="muted">Nenhum projeto ainda.</p> : (
+      <div className="row"><h2>{title}</h2><a className="btn" href="#/novo">Novo vídeo</a></div>
+      {rows.length === 0 ? <p className="muted">{empty}</p> : (
         <table>
           <thead><tr><th>Nome</th>{isAdmin && <th>Dono</th>}<th>Duração</th><th>Status</th><th /></tr></thead>
           <tbody>{rows.map((p) => (
             <tr key={p.id}>
-              <td><a href={`#/projeto/${p.id}`}>{p.name}</a></td>
+              <td><a href={href(p.id)}>{p.name}</a></td>
               {isAdmin && <td>{p.owner.name}</td>}
               <td>{fmtDuration(p.targetDurationS)}</td>
               <td>{STATUS_LABEL[p.status]}</td>

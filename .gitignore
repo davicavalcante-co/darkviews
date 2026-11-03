@@ -5,3 +5,4 @@ packages/db/prisma/*.db*
 storage/*
 !storage/.gitkeep
 dist
+.DS_Store

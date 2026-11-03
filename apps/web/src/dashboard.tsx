@@ -23,7 +23,9 @@ function countdown(to: string | null | undefined, now: number) {
 }
 
 function Tile({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
-  return <div className="tile"><span className="muted">{label}</span><strong>{value}</strong>{hint && <small className="muted">{hint}</small>}</div>
+  // Texto ("sem dados ainda") fica menor que número, para não quebrar em várias linhas.
+  const isText = typeof value === 'string' && /[a-z]/i.test(value)
+  return <div className="tile"><span className="muted">{label}</span><strong className={isText ? 'text' : undefined}>{value}</strong>{hint && <small className="muted">{hint}</small>}</div>
 }
 
 function Bars({ data, label }: { data: { key: string; value: number; title: string }[]; label: string }) {

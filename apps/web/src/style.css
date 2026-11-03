@@ -13,16 +13,15 @@ label { display: block; margin-bottom: 1rem; color: var(--muted); font-size: .9r
 .tabs button { flex: 1; background: transparent; color: var(--muted); border: 1px solid var(--border); }
 .tabs button[aria-selected="true"] { color: var(--fg); border-color: var(--accent); }
 .error { color: #e03131; }
-.shell header { display: flex; gap: 1rem; align-items: center; padding: .75rem 16px; border-bottom: 1px solid var(--border); }
-.shell header span { margin-left: auto; color: var(--muted); }
-.shell main { padding: 16px; max-width: 960px; margin: 0 auto; overflow-x: auto; }
+.shell { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+.shell main { padding: 32px 40px; max-width: 1040px; width: 100%; min-width: 0; overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; } td, th { text-align: left; padding: .5rem; border-bottom: 1px solid var(--border); }
 .demo { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px dashed var(--border); display: grid; gap: .5rem; }
 .demo p { margin: 0; font-size: .8rem; color: var(--muted); }
 .demo button { background: transparent; color: var(--fg); border: 1px solid var(--border); }
 a { color: var(--accent); }
 textarea { font: inherit; width: 100%; padding: .55rem .7rem; margin-top: .25rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--fg); }
-.shell header nav { display: flex; gap: 1rem; } .shell header a { color: var(--fg); text-decoration: none; }
+
 .btn { display: inline-block; padding: .6rem 1rem; border-radius: 8px; background: var(--accent); color: #fff; text-decoration: none; }
 button.link { background: none; color: var(--accent); padding: .25rem .4rem; }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
@@ -38,7 +37,7 @@ legend { padding: 0 .4rem; color: var(--muted); }
 .stages li { color: var(--muted); } .stages li.done { color: var(--fg); } .stages li.done::before { content: '✓ '; color: #2f9e44; }
 .stages li.now { color: var(--accent); font-weight: 600; } .stages li.now::before { content: '● '; }
 progress { width: 100%; height: 10px; accent-color: var(--accent); }
-@media (max-width: 600px) { .shell header { flex-wrap: wrap; } .shell header span { margin-left: 0; } }
+
 .warn { background: #fff3bf; color: #5c3c00; padding: .6rem .8rem; border-radius: 8px; }
 details { margin: 1rem 0; } summary { cursor: pointer; font-weight: 600; }
 .profile div { display: grid; grid-template-columns: 10rem 1fr; gap: 1rem; padding: .3rem 0; border-bottom: 1px solid var(--border); }
@@ -79,3 +78,35 @@ input[type="color"] { height: 2.4rem; padding: .2rem; }
 .alert { background: #ffe3e3; color: #7a1010; padding: .6rem .8rem; border-radius: 8px; }
 .table-wrap { overflow-x: auto; } .details { font-family: ui-monospace, monospace; font-size: .8rem; max-width: 360px; word-break: break-word; }
 .tabs { flex-wrap: wrap; }
+
+/* ---------- Barra lateral: bloco de cima (logo + menu) e perfil embaixo ---------- */
+.sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; justify-content: space-between;
+  padding: 20px 14px; background: var(--card); border-right: 1px solid var(--border); }
+.sidebar-top { display: flex; flex-direction: column; gap: 28px; } /* espaço entre a logo e o menu, no mesmo bloco */
+.logo { display: flex; align-items: center; gap: .6rem; padding: 4px 10px; font-weight: 700; font-size: 1.05rem; color: var(--fg); text-decoration: none; }
+.logo-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent); color: #fff; font-size: .75rem; letter-spacing: .02em; }
+.sidebar nav { display: flex; flex-direction: column; gap: 2px; }
+.sidebar nav a { display: flex; align-items: center; gap: .7rem; padding: .55rem .75rem; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 500; }
+.sidebar nav a:hover { background: var(--bg); color: var(--fg); }
+.sidebar nav a.active { background: var(--bg); color: var(--accent); }
+.user-card { display: flex; align-items: center; gap: .6rem; padding: 12px 10px 4px; border-top: 1px solid var(--border); }
+.avatar { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); font-size: .75rem; font-weight: 700; }
+.who { display: grid; min-width: 0; line-height: 1.25; } .who strong { font-size: .9rem; }
+.who small { color: var(--muted); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logout { margin-left: auto; flex: none; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; background: none; color: var(--muted); border-radius: 8px; }
+.logout:hover { background: var(--bg); color: var(--fg); } .logout span { display: none; }
+
+/* No celular a barra vira um topo: logo e perfil numa linha, menu rolando na de baixo. */
+@media (max-width: 768px) {
+  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .shell main { padding: 16px; }
+  .sidebar { position: sticky; z-index: 10; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 10px 16px; gap: 8px; border-right: 0; border-bottom: 1px solid var(--border); }
+  .sidebar-top { display: contents; }
+  .logo { order: 1; padding: 0; }
+  .user-card { order: 2; margin-left: auto; border-top: 0; padding: 0; }
+  .who { display: none; }
+  .sidebar { min-width: 0; }
+  .sidebar nav { order: 3; flex-basis: 100%; min-width: 0; flex-direction: row; overflow-x: auto; gap: 4px; scrollbar-width: none; }
+  .sidebar nav a { flex: none; padding: .45rem .7rem; font-size: .9rem; }
+}
+.tile strong.text { font-size: 1rem; font-weight: 600; color: var(--muted); }
