@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest'
 import { hash } from '@node-rs/argon2'
 import { decryptSecret, encryptSecret, prisma } from '@corte/db'
+import { activeProviders } from '@corte/providers'
 import { buildApp } from '../src/app.js'
 
 const ORIGIN = 'http://localhost:5173'
@@ -68,5 +69,54 @@ describe('vídeo', () => {
     const owner = await prisma.user.findFirstOrThrow({ where: { email: 'adm@i.com' } })
     const p = await prisma.project.create({ data: { ownerId: owner.id, name: 'x', prompt: 'x', targetDurationS: 60 } })
     expect((await app.inject({ url: `/api/projects/${p.id}/video`, headers: user })).statusCode).toBe(404)
+  })
+})
+
+describe('integrações do usuário', () => {
+  it('usuário salva a própria chave sem mexer no padrão e nunca vê a chave do admin', async () => {
+    // O admin já cadastrou a do Pexels no teste anterior (padrão do sistema).
+    const before = (await app.inject({ url: '/api/integrations', headers: user })).json()
+    const pexels = before.find((i: { provider: string }) => i.provider === 'pexels')
+    expect(pexels).toMatchObject({ configured: false, systemDefault: { enabled: true } })
+    expect(pexels.secretsSet.api_key).toBeNull() // nem mascarada
+    expect(JSON.stringify(before)).not.toContain('1234')
+
+    const res = await app.inject({ method: 'PUT', url: '/api/integrations/pexels', headers: user, payload: { enabled: true, priority: 5, secrets: { api_key: 'chave-do-usuario-9999' } } })
+    expect(res.statusCode).toBe(200)
+    const owner = await prisma.user.findFirstOrThrow({ where: { email: 'usr@i.com' } })
+    // O worker usa a chave do dono do vídeo; os outros continuam com a do admin.
+    expect((await activeProviders('banco_de_imagens', owner.id))[0]).toMatchObject({ provider: 'pexels', secrets: { api_key: 'chave-do-usuario-9999' } })
+    expect((await activeProviders('banco_de_imagens', null)).find((a) => a.provider === 'pexels')!.secrets.api_key).toBe('chave-pexels-1234')
+
+    // A lista do admin continua mostrando só a chave do sistema.
+    const sys = (await app.inject({ url: '/api/admin/integrations', headers: admin })).json()
+    expect(sys.find((i: { provider: string }) => i.provider === 'pexels').secretsSet.api_key).toBe('••••1234')
+
+    // Voltar ao padrão apaga a preferência (e a chave) do usuário.
+    expect((await app.inject({ method: 'DELETE', url: '/api/integrations/pexels', headers: user })).statusCode).toBe(200)
+    expect((await activeProviders('banco_de_imagens', owner.id)).find((a) => a.provider === 'pexels')!.secrets.api_key).toBe('chave-pexels-1234')
+  })
+
+  it('vozes e banco gratuitos já vêm conectados, sem chave', async () => {
+    const voices = (await activeProviders('voz', null)).map((a) => a.provider)
+    expect(voices[0]).toBe('piper') // voz neural antes da voz do macOS
+    expect(voices).toContain('macos_say')
+    expect((await activeProviders('banco_de_imagens', null)).map((a) => a.provider)).toContain('openverse')
+  })
+
+  it('integração paga ligada sem chave não é usada', async () => {
+    await app.inject({ method: 'PUT', url: '/api/admin/integrations/openai_tts', headers: admin, payload: { enabled: true, priority: 1 } })
+    expect((await activeProviders('voz', null)).map((a) => a.provider)).not.toContain('openai_tts')
+  })
+})
+
+describe('logs', () => {
+  it('requisições viram log e só o admin lê', async () => {
+    await app.inject({ url: '/api/projects', headers: user })
+    await new Promise((r) => setTimeout(r, 50)) // a gravação do log não bloqueia a resposta
+    expect((await app.inject({ url: '/api/admin/logs', headers: user })).statusCode).toBe(403)
+    const logs = (await app.inject({ url: '/api/admin/logs?kind=request&q=/api/projects', headers: admin })).json()
+    expect(logs.rows[0]).toMatchObject({ source: 'api', kind: 'request', message: 'GET /api/projects → 200' })
+    expect(JSON.stringify(logs)).not.toMatch(/cookie|sid=|csrf/i)
   })
 })

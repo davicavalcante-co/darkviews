@@ -24,6 +24,7 @@ model User {
   projects     Project[]
   auditLogs    AuditLog[]
   changeRequests ChangeRequest[]
+  integrations   Integration[]
   @@map("users")
 }
 
@@ -269,6 +270,8 @@ model JobMetric {
 
 model Integration {
   id           String    @id @default(uuid())
+  ownerId      String?   // null = padrão do sistema (admin); preenchido = preferência do usuário
+  owner        User?     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   provider     String
   category     String    // roteiro|voz|música|imagem|vídeo|banco_de_imagens|transcrição
   enabled      Boolean   @default(false)
@@ -279,6 +282,7 @@ model Integration {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   secrets      IntegrationSecret[]
+  @@index([provider, ownerId])
   @@map("integrations")
 }
 
@@ -332,6 +336,7 @@ model ClaudeStatus {
   sessionResetsAt DateTime?
   weekUsedPct     Float?
   weekResetsAt    DateTime?
+  subscriptionType String?  // pro | max | team | enterprise (do /usage do Claude Code)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   @@map("claude_status")
@@ -359,4 +364,19 @@ model AuditLog {
   updatedAt  DateTime @updatedAt
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// Registro técnico para a aba Logs (só admin): requisições, jobs, integrações, Claude e erros. Nunca guarda chaves nem corpo de requisição.
+model SystemLog {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+  level     String   // info | warn | error
+  source    String   // api | worker
+  kind      String   // request | job | integration | claude | auth | error
+  message   String
+  details   String   @default("{}") // JSON sem segredos
+  userId    String?
+  @@index([createdAt])
+  @@index([level, createdAt])
+  @@map("system_logs")
 }

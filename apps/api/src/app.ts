@@ -3,7 +3,7 @@ import cookie from '@fastify/cookie'
 import rateLimit from '@fastify/rate-limit'
 import { hash, verify } from '@node-rs/argon2'
 import { ZodError } from 'zod'
-import { prisma, type User } from '@corte/db'
+import { logEvent, prisma, type User } from '@corte/db'
 import { CreateUserInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
 import { csrfFor, newToken, sha256 } from './security.js'
 import { requireAdmin, requireAuth } from './auth.js'
@@ -13,6 +13,9 @@ import { editRoutes } from './edit.js'
 import { cutRoutes } from './cuts.js'
 import { adminRoutes } from './admin.js'
 import { dashboardRoutes } from './dashboard.js'
+import { claudeAuthRoutes } from './claude-auth.js'
+import { logRoutes } from './logs.js'
+import { claudeMcpRoutes } from './claude-mcp.js'
 
 const SESSION_MS = 7 * 24 * 3600 * 1000
 const PUBLIC_MUTATIONS = new Set(['/api/auth/login', '/api/auth/setup'])
@@ -43,12 +46,14 @@ export async function buildApp() {
   app.decorateRequest('user', null)
   app.decorateRequest('sessionToken', null)
 
-  app.setErrorHandler((err, _req, reply) => {
+  app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) return reply.code(400).send({ error: 'Dados inválidos', issues: err.issues })
     const code = (err as { statusCode?: number }).statusCode
     if (code && code >= 400 && code < 500 && code !== 429) return reply.code(code).send({ error: (err as Error).message })
     if (code === 429) return reply.code(429).send({ error: 'Muitas tentativas. Aguarde um minuto.' })
     app.log.error(err)
+    logEvent({ level: 'error', source: 'api', kind: 'error', message: `${req.method} ${req.routeOptions.url ?? req.url}: ${(err as Error).message}`,
+      details: { stack: (err as Error).stack?.split('\n').slice(0, 10).join('\n') }, userId: req.user?.id })
     return reply.code(500).send({ error: 'Erro interno' })
   })
 
@@ -68,6 +73,18 @@ export async function buildApp() {
     if (req.sessionToken && req.headers['x-csrf-token'] !== csrfFor(req.sessionToken)) {
       return reply.code(403).send({ error: 'Token CSRF inválido' })
     }
+  })
+
+  // Toda requisição vira uma linha de log: método, rota, status, tempo e usuário. Sem corpo, cookies ou chaves.
+  // A própria tela de logs e os quadros da linha do tempo ficam de fora para não afogar o registro.
+  app.addHook('onResponse', async (req, reply) => {
+    const route = req.routeOptions.url ?? req.url.split('?')[0]
+    if (route === '/api/admin/logs' || route === '/api/projects/:id/frame' || route === '/api/health') return
+    const status = reply.statusCode
+    logEvent({
+      level: status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info', source: 'api', kind: route.startsWith('/api/auth') ? 'auth' : 'request',
+      message: `${req.method} ${route} → ${status}`, details: { ms: Math.round(reply.elapsedTime), ip: req.ip }, userId: req.user?.id,
+    })
   })
 
   async function startSession(req: FastifyRequest, reply: FastifyReply, user: User) {
@@ -160,5 +177,8 @@ export async function buildApp() {
   await app.register(cutRoutes)
   await app.register(adminRoutes)
   await app.register(dashboardRoutes)
+  await app.register(claudeAuthRoutes)
+  await app.register(logRoutes)
+  await app.register(claudeMcpRoutes)
   return app
 }

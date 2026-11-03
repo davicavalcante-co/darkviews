@@ -1,67 +1,83 @@
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { decryptSecret, encryptSecret, maskSecret, prisma } from '@corte/db'
 import { testIntegration } from '@corte/providers'
 import { IntegrationUpdate, PROVIDERS } from '@corte/shared'
-import { requireAdmin } from './auth.js'
+import { requireAdmin, requireAuth } from './auth.js'
 
 const find = (provider: string) => PROVIDERS.find((p) => p.provider === provider)
 
-export async function integrationRoutes(app: FastifyInstance) {
-  // Lista o catálogo com o estado salvo. Chaves aparecem só mascaradas (últimos 4 caracteres).
-  app.get('/api/admin/integrations', { preHandler: requireAdmin }, async () => {
-    const rows = await prisma.integration.findMany({ include: { secrets: true } })
+// Duas camadas: o padrão do sistema (admin, ownerId = null) e a preferência de cada usuário (ownerId = ele).
+// O usuário vê se o padrão do admin está ligado, mas nunca a chave do admin (nem mascarada).
+function routes(app: FastifyInstance, base: string, scope: 'system' | 'me') {
+  const guard = { preHandler: scope === 'system' ? requireAdmin : requireAuth }
+  const ownerOf = (req: FastifyRequest) => (scope === 'system' ? null : req.user!.id)
+  const findRow = (provider: string, ownerId: string | null) => prisma.integration.findFirst({ where: { provider, ownerId }, include: { secrets: true } })
+
+  app.get(base, guard, async (req) => {
+    const ownerId = ownerOf(req)
+    const rows = await prisma.integration.findMany({ where: { OR: [{ ownerId }, { ownerId: null }] }, include: { secrets: true } })
     return PROVIDERS.map((p) => {
-      const row = rows.find((r) => r.provider === p.provider)
+      const row = rows.find((r) => r.provider === p.provider && r.ownerId === ownerId)
+      const system = rows.find((r) => r.provider === p.provider && r.ownerId === null)
+      const systemOn = system ? system.enabled && p.secrets.every((n) => system.secrets.some((s) => s.name === n)) : !!p.builtIn
       return {
-        ...p,
-        enabled: row ? row.enabled : !!p.builtIn,
-        priority: row?.priority ?? 50,
-        config: { ...p.config, ...(row ? JSON.parse(row.config) : {}) },
+        provider: p.provider, label: p.label, category: p.category, tier: p.tier, help: p.help, signup: p.signup ?? null, tutorial: p.tutorial,
+        secrets: p.secrets, choices: p.choices ?? {}, builtIn: !!p.builtIn,
+        configured: !!row,
+        enabled: row ? row.enabled : scope === 'system' ? !!p.builtIn : systemOn,
+        priority: row?.priority ?? system?.priority ?? p.priority,
+        config: { ...p.config, ...(system ? JSON.parse(system.config) : {}), ...(row ? JSON.parse(row.config) : {}) },
         secretsSet: Object.fromEntries(p.secrets.map((name) => {
           const s = row?.secrets.find((x) => x.name === name)
           return [name, s ? maskSecret(s.last4) : null]
         })),
+        systemDefault: scope === 'me' ? { enabled: systemOn } : null,
         lastTestAt: row?.lastTestAt ?? null,
         lastTestOk: row?.lastTestOk ?? null,
       }
     })
   })
 
-  app.put<{ Params: { provider: string } }>('/api/admin/integrations/:provider', { preHandler: requireAdmin }, async (req, reply) => {
+  app.put<{ Params: { provider: string } }>(`${base}/:provider`, guard, async (req, reply) => {
     const p = find(req.params.provider)
     if (!p) return reply.code(404).send({ error: 'Integração desconhecida' })
     const input = IntegrationUpdate.parse(req.body)
-    const config = Object.fromEntries(Object.entries(input.config).filter(([k]) => k in p.config))
-    const row = await prisma.integration.upsert({
-      where: { id: (await prisma.integration.findFirst({ where: { provider: p.provider } }))?.id ?? '' },
-      update: { enabled: input.enabled, priority: input.priority, config: JSON.stringify(config) },
-      create: { provider: p.provider, category: p.category, enabled: input.enabled, priority: input.priority, config: JSON.stringify(config) },
-    })
+    const ownerId = ownerOf(req)
+    const config = Object.fromEntries(Object.entries(input.config).filter(([k, v]) => k in p.config && (!p.choices?.[k] || p.choices[k].includes(v))))
+    const existing = await findRow(p.provider, ownerId)
+    const row = existing
+      ? await prisma.integration.update({ where: { id: existing.id }, data: { enabled: input.enabled, priority: input.priority, config: JSON.stringify(config) } })
+      : await prisma.integration.create({ data: { ownerId, provider: p.provider, category: p.category, enabled: input.enabled, priority: input.priority, config: JSON.stringify(config) } })
     const changed: string[] = []
     for (const [name, value] of Object.entries(input.secrets)) {
       if (!p.secrets.includes(name)) continue
       changed.push(name)
       if (!value) { await prisma.integrationSecret.deleteMany({ where: { integrationId: row.id, name } }); continue }
       const enc = encryptSecret(value)
-      await prisma.integrationSecret.upsert({
-        where: { integrationId_name: { integrationId: row.id, name } },
-        update: enc, create: { integrationId: row.id, name, ...enc },
-      })
+      await prisma.integrationSecret.upsert({ where: { integrationId_name: { integrationId: row.id, name } }, update: enc, create: { integrationId: row.id, name, ...enc } })
     }
     // Audita o que mudou, nunca o valor da chave.
     await prisma.auditLog.create({
       data: {
-        actorId: req.user!.id, action: 'integration.update', targetType: 'integration', targetId: row.id, ip: req.ip,
+        actorId: req.user!.id, action: scope === 'system' ? 'integration.update' : 'integration.update_own', targetType: 'integration', targetId: row.id, ip: req.ip,
         details: JSON.stringify({ provider: p.provider, enabled: input.enabled, priority: input.priority, secretsChanged: changed }),
       },
     })
     return { ok: true }
   })
 
-  app.post<{ Params: { provider: string } }>('/api/admin/integrations/:provider/test', { preHandler: requireAdmin }, async (req, reply) => {
+  // Volta a usar o padrão do sistema (apaga a preferência do usuário, com as chaves dele).
+  if (scope === 'me') {
+    app.delete<{ Params: { provider: string } }>(`${base}/:provider`, guard, async (req, reply) => {
+      const { count } = await prisma.integration.deleteMany({ where: { provider: req.params.provider, ownerId: req.user!.id } })
+      return count ? { ok: true } : reply.code(404).send({ error: 'Você não tem preferência salva para esta integração' })
+    })
+  }
+
+  app.post<{ Params: { provider: string } }>(`${base}/:provider/test`, guard, async (req, reply: FastifyReply) => {
     const p = find(req.params.provider)
     if (!p) return reply.code(404).send({ error: 'Integração desconhecida' })
-    const row = await prisma.integration.findFirst({ where: { provider: p.provider }, include: { secrets: true } })
+    const row = await findRow(p.provider, ownerOf(req))
     if (p.secrets.some((n) => !row?.secrets.find((s) => s.name === n))) return reply.code(400).send({ error: 'Cadastre a chave antes de testar' })
     const ok = await testIntegration(
       p.provider,
@@ -71,4 +87,9 @@ export async function integrationRoutes(app: FastifyInstance) {
     if (row) await prisma.integration.update({ where: { id: row.id }, data: { lastTestAt: new Date(), lastTestOk: ok } })
     return { ok }
   })
+}
+
+export async function integrationRoutes(app: FastifyInstance) {
+  routes(app, '/api/admin/integrations', 'system')
+  routes(app, '/api/integrations', 'me')
 }

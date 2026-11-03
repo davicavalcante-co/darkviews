@@ -1,6 +1,6 @@
 import { prisma } from '@corte/db'
 import { SESSION_WARN_PCT } from '@corte/shared'
-import { recordStatus } from './claude.js'
+import { readPlanUsage, recordStatus } from './claude.js'
 import { run } from './ffmpeg.js'
 
 // Teste leve (sem gastar tokens): internet até a API e login do Claude Code. Roda a cada 2 minutos.
@@ -14,6 +14,15 @@ export async function checkClaude() {
     const { stdout } = await run('claude', ['auth', 'status'], { timeout: 20_000 })
     if (!JSON.parse(stdout).loggedIn && !process.env.CLAUDE_CODE_OAUTH_TOKEN) return recordStatus({ available: false, reason: 'no_login' })
   } catch { /* CLI fora do PATH: o Agent SDK usa o próprio executável; os erros reais dos jobs dizem o resto */ }
+  // Dados reais do plano; se a consulta falhar, mantém o último retrato e só confirma a disponibilidade.
+  const usage = await readPlanUsage().catch((e) => { console.warn('[worker] uso do Claude indisponível:', e.message); return null })
+  const full = usage?.sessionUsedPct != null && usage.sessionUsedPct >= 100
+  if (usage) {
+    return recordStatus({
+      available: !full, reason: full ? 'rate_limit' : null, subscriptionType: usage.subscriptionType,
+      sessionUsedPct: usage.sessionUsedPct, sessionResetsAt: usage.sessionResetsAt, weekUsedPct: usage.weekUsedPct, weekResetsAt: usage.weekResetsAt,
+    })
+  }
   const last = await prisma.claudeStatus.findFirst({ orderBy: { checkedAt: 'desc' } })
   // Limite atingido continua valendo até o horário de reinício.
   if (last?.reason === 'rate_limit' && last.sessionResetsAt && last.sessionResetsAt > new Date()) return

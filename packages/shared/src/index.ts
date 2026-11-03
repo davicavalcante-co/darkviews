@@ -60,6 +60,7 @@ export const NewProjectInput = z.object({
   targetDurationS: z.coerce.number().int().min(15).max(MAX_DURATION_S, 'Máximo de 18 minutos'),
   fontFamily: z.string().trim().min(1).max(60), // conferida contra as fontes liberadas no servidor
   highlightMode: HighlightMode,
+  voiceBrief: z.string().trim().max(200).optional().transform((v) => v || undefined), // ex.: "mulher jovem, animada"
   captions: z.string().default('[]').transform((s, ctx) => {
     try { return z.array(z.string().max(200)).parse(JSON.parse(s)) } catch {
       ctx.addIssue({ code: 'custom', message: 'Legendas inválidas' }); return z.NEVER
@@ -80,14 +81,50 @@ export * from './plan'
 export const IntegrationCategory = z.enum(['roteiro', 'voz', 'música', 'imagem', 'vídeo', 'banco_de_imagens', 'transcrição'])
 export type IntegrationCategory = z.infer<typeof IntegrationCategory>
 
-type CatalogItem = { provider: string; label: string; category: IntegrationCategory; secrets: string[]; config: Record<string, string>; builtIn?: boolean; help: string }
-// Fornecedores com adaptador pronto. builtIn = roda local, sem chave, ligado por padrão.
+// tier: gratis = funciona sem chave (já conectada) · gratis_chave = gratuita, mas pede conta/chave · pago = cobra por uso.
+export type Tier = 'gratis' | 'gratis_chave' | 'pago'
+type CatalogItem = {
+  provider: string; label: string; category: IntegrationCategory; tier: Tier; secrets: string[]
+  config: Record<string, string>; choices?: Record<string, string[]>; builtIn?: boolean; priority: number; help: string; signup?: string
+  tutorial: string[] // passo a passo do botão "Como conectar"
+}
+// Fornecedores com adaptador pronto. builtIn = ligado por padrão (não precisa de chave).
 export const PROVIDERS: CatalogItem[] = [
-  { provider: 'pexels', label: 'Pexels', category: 'banco_de_imagens', secrets: ['api_key'], config: {}, help: 'Fotos e vídeos gratuitos. Chave em pexels.com/api.' },
-  { provider: 'pixabay', label: 'Pixabay', category: 'banco_de_imagens', secrets: ['api_key'], config: {}, help: 'Fotos e vídeos gratuitos. Chave em pixabay.com/api/docs.' },
-  { provider: 'elevenlabs', label: 'ElevenLabs', category: 'voz', secrets: ['api_key'], config: { voice_id: '' }, help: 'Locução natural. Informe o voice_id da voz escolhida.' },
-  { provider: 'macos_say', label: 'Voz do macOS', category: 'voz', secrets: [], config: { voice: 'Luciana' }, builtIn: true, help: 'Gratuita e local, qualidade básica.' },
-  { provider: 'local_music', label: 'Músicas locais', category: 'música', secrets: [], config: {}, builtIn: true, help: 'Usa arquivos MP3/M4A da pasta storage/music (com licença de uso).' },
+  { provider: 'piper', label: 'Piper · voz neural', category: 'voz', tier: 'gratis', secrets: [], builtIn: true, priority: 30,
+    config: { voice: 'faber', speed: '1.08' }, choices: { voice: ['faber', 'cadu'] },
+    help: 'Voz neural em português do Brasil, natural e local. Já vem conectada.',
+    tutorial: ['Já vem pronta, sem cadastro.', 'Escolha a voz (Faber ou Cadu) e a velocidade da fala.', 'Clique em Testar e depois em Salvar.'] },
+  { provider: 'omnivoice', label: 'OmniVoice · via Claude Code', category: 'voz', tier: 'gratis', secrets: [], priority: 15,
+    config: { steps: '16', speed: '1.0' }, choices: { steps: ['8', '16', '32'] },
+    help: 'Voz neural local com design de voz, dirigida pelo Claude Code (skill omnivoice + MCP). Atenção: o modelo padrão é NÃO COMERCIAL (CC-BY-NC).',
+    signup: 'https://github.com/debpalash/OmniVoice-Studio',
+    tutorial: ['Uso só para testes pessoais: o modelo de voz padrão do OmniVoice não pode ser usado em vídeos de clientes pagantes (licença não comercial).', 'Precisa ser instalado pelo administrador no computador (uma vez).', 'Depois de instalado, ligue aqui e descreva a voz desejada em Novo vídeo.'] },
+  { provider: 'elevenlabs', label: 'ElevenLabs', category: 'voz', tier: 'pago', secrets: ['api_key'], priority: 10,
+    config: { voice_id: '' }, help: 'A voz mais humana do mercado. Plano grátis com cota pequena.', signup: 'https://elevenlabs.io/app/settings/api-keys',
+    tutorial: ['Crie uma conta em elevenlabs.io (o plano grátis dá alguns minutos por mês).', 'Abra Settings → API Keys e clique em "Create API Key". Copie a chave.', 'Em Voices → Voice Library, escolha uma voz em português e copie o Voice ID.', 'Cole a chave e o ID da voz aqui, ligue o card e clique em Testar.'] },
+  { provider: 'openai_tts', label: 'OpenAI Voz', category: 'voz', tier: 'pago', secrets: ['api_key'], priority: 10,
+    config: { voice: 'coral' }, choices: { voice: ['coral', 'alloy', 'ash', 'ballad', 'echo', 'nova', 'onyx', 'sage', 'shimmer', 'verse'] },
+    help: 'Voz expressiva que segue o tom do roteiro (gpt-4o-mini-tts).', signup: 'https://platform.openai.com/api-keys',
+    tutorial: ['Entre em platform.openai.com com sua conta (precisa de crédito na conta).', 'Abra API keys → "Create new secret key" e copie a chave.', 'Cole a chave aqui, escolha a voz e ligue o card.', 'Clique em Testar. A voz segue o tom do roteiro automaticamente.'] },
+  { provider: 'google_tts', label: 'Google Cloud Voz', category: 'voz', tier: 'gratis_chave', secrets: ['api_key'], priority: 20,
+    config: { voice: 'pt-BR-Neural2-B' }, choices: { voice: ['pt-BR-Neural2-B', 'pt-BR-Neural2-A', 'pt-BR-Neural2-C', 'pt-BR-Wavenet-B', 'pt-BR-Wavenet-A'] },
+    help: 'Vozes neurais do Google. Cota mensal gratuita, depois cobra.', signup: 'https://console.cloud.google.com/apis/credentials',
+    tutorial: ['Entre no console.cloud.google.com e crie (ou escolha) um projeto.', 'Em APIs e serviços → Biblioteca, ative "Cloud Text-to-Speech API".', 'Em APIs e serviços → Credenciais, clique em "Criar credenciais" → "Chave de API" e copie.', 'Recomendado: restrinja a chave só à Text-to-Speech API.', 'Cole a chave aqui, escolha a voz e clique em Testar.'] },
+  { provider: 'macos_say', label: 'Voz do macOS', category: 'voz', tier: 'gratis', secrets: [], builtIn: true, priority: 90,
+    config: { voice: 'Luciana' }, help: 'Reserva: só é usada se as outras vozes falharem.',
+    tutorial: ['Já vem pronta. É só reserva: entra se as outras vozes falharem.', 'Não precisa fazer nada.'] },
+  { provider: 'pexels', label: 'Pexels', category: 'banco_de_imagens', tier: 'gratis_chave', secrets: ['api_key'], priority: 10, config: {},
+    help: 'Fotos e vídeos reais, de graça. Crie a chave em 1 minuto.', signup: 'https://www.pexels.com/api/new/',
+    tutorial: ['Crie uma conta grátis em pexels.com.', 'Abra pexels.com/api/new, preencha o motivo de uso (ex.: "criação de vídeos") e envie.', 'Copie a chave que aparece na página.', 'Cole aqui, ligue o card e clique em Testar.'] },
+  { provider: 'pixabay', label: 'Pixabay', category: 'banco_de_imagens', tier: 'gratis_chave', secrets: ['api_key'], priority: 20, config: {},
+    help: 'Fotos e vídeos gratuitos.', signup: 'https://pixabay.com/api/docs/',
+    tutorial: ['Crie uma conta grátis em pixabay.com.', 'Abra pixabay.com/api/docs: com a conta logada, a sua chave aparece na seção "Parameters" (key).', 'Copie a chave, cole aqui, ligue o card e clique em Testar.'] },
+  { provider: 'openverse', label: 'Openverse', category: 'banco_de_imagens', tier: 'gratis', secrets: [], builtIn: true, priority: 60, config: {},
+    help: 'Fotos com licença Creative Commons para uso comercial. Já vem conectado.',
+    tutorial: ['Já vem pronto, sem cadastro.', 'Só usa fotos liberadas para uso comercial.', 'O crédito de cada foto entra sozinho na descrição do vídeo.'] },
+  { provider: 'local_music', label: 'Músicas locais', category: 'música', tier: 'gratis', secrets: [], builtIn: true, priority: 50, config: {},
+    help: 'Usa os arquivos MP3/M4A da pasta storage/music (com licença de uso).',
+    tutorial: ['Coloque arquivos MP3, M4A ou WAV na pasta storage/music do projeto.', 'Use só músicas com licença para uso comercial (bibliotecas pagas ou faixas livres de royalties).', 'Uma faixa é sorteada por vídeo e fica baixinha, por baixo da narração.'] },
 ]
 
 export const IntegrationUpdate = z.object({

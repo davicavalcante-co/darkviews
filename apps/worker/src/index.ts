@@ -1,5 +1,5 @@
 import { hostname } from 'node:os'
-import { prisma, claimNextJob, estimateSeconds, type Job } from '@corte/db'
+import { prisma, claimNextJob, estimateSeconds, logEvent, type Job } from '@corte/db'
 import { ingest } from './ingest.js'
 import { analyze } from './analyze.js'
 import { script } from './script.js'
@@ -31,23 +31,27 @@ async function runOne() {
   }
   const started = Date.now()
   console.log(`[worker] ${job.type} ${job.id}`)
+  logEvent({ source: 'worker', kind: 'job', message: `${job.type} iniciado`, details: { jobId: job.id, projectId: job.projectId } })
   try {
     const target = await inputDuration(job.projectId)
     await prisma.job.update({ where: { id: job.id }, data: { etaS: await estimateSeconds(job.type, target) } })
     await HANDLERS[job.type](job)
     await prisma.job.update({ where: { id: job.id }, data: { status: 'done', progress: 100, etaS: 0, finishedAt: new Date() } })
+    logEvent({ source: 'worker', kind: 'job', message: `${job.type} concluído em ${((Date.now() - started) / 1000).toFixed(1)} s`, details: { jobId: job.id, projectId: job.projectId } })
     await prisma.jobMetric.create({
       data: { jobType: job.type, inputDurationS: await inputDuration(job.projectId), elapsedS: (Date.now() - started) / 1000 },
     })
   } catch (e) {
     if (e instanceof ClaudeUnavailable) {
       console.warn(`[worker] pausado ${job.id}: ${e.message}`)
+      logEvent({ level: 'warn', source: 'worker', kind: 'claude', message: `${job.type} pausado: ${e.message}`, details: { jobId: job.id, reason: e.reason, resumeAt: e.resumeAt } })
       await recordStatus({ available: false, reason: e.reason, ...(e.reason === 'rate_limit' && { sessionResetsAt: e.resumeAt }) })
       await prisma.job.update({ where: { id: job.id }, data: { status: 'paused', stage: e.message, resumeAt: e.resumeAt, lockedBy: null } })
       return true
     }
     const message = e instanceof Error ? e.message : String(e)
     console.error(`[worker] falhou ${job.id}: ${message}`)
+    logEvent({ level: 'error', source: 'worker', kind: 'job', message: `${job.type} falhou: ${message}`, details: { jobId: job.id, projectId: job.projectId, stack: (e as Error).stack?.split('\n').slice(0, 8).join('\n'), stderr: String((e as { stderr?: string }).stderr ?? '').slice(-2000) } })
     await prisma.job.update({ where: { id: job.id }, data: { status: 'failed', error: message.slice(0, 500), finishedAt: new Date() } })
     // Corte com erro não desfaz a aprovação; o resto vira 'failed'.
     if (job.type !== 'cuts') await prisma.project.update({ where: { id: job.projectId }, data: { status: 'failed' } })

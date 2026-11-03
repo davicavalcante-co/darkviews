@@ -35,6 +35,9 @@ const ADMIN_ROUTES = [
   ['GET', '/api/admin/settings'], ['PUT', '/api/admin/settings'],
   ['GET', '/api/admin/fonts'], ['POST', '/api/admin/fonts'], ['PUT', '/api/admin/fonts/Inter'],
   ['GET', '/api/admin/audit'],
+  ['GET', '/api/admin/logs'],
+  ['GET', '/api/admin/claude/mcp'], ['POST', '/api/admin/claude/mcp/connect'], ['POST', '/api/admin/claude/mcp/disconnect'],
+  ['GET', '/api/admin/claude'], ['POST', '/api/admin/claude/connect'], ['POST', '/api/admin/claude/code'], ['POST', '/api/admin/claude/cancel'],
 ].map(([method, url]) => ({ method, url }))
 
 describe('todas as rotas de admin', () => {
@@ -59,6 +62,13 @@ describe('plano e limites', () => {
   })
   it('não aceita duração máxima acima de 18 minutos', async () => {
     expect((await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { max_duration_s: 1081, daily_video_limit: 0 } })).statusCode).toBe(400)
+  })
+})
+
+describe('conectar ao Claude', () => {
+  it('código precisa vir depois de iniciar o login e não aceita espaços', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/admin/claude/code', headers: admin, payload: { code: 'tem espaço no meio' } })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'POST', url: '/api/admin/claude/code', headers: admin, payload: { code: 'codigo-valido-123' } })).statusCode).toBe(409)
   })
 })
 
@@ -89,7 +99,13 @@ describe('painel', () => {
     expect(mine.claude.warnings).toEqual([]) // falta de login: aviso só para o admin
     expect(all.claude.warnings[0].text).toMatch(/login/)
     expect(all.claude.tokens.today).toBeGreaterThanOrEqual(150)
+    expect(all.claude.byModel).toContainEqual({ model: 'claude-opus-5-5', tokens: 150 }) // gráfico de pizza por modelo
+    expect(mine.claude.byModel).toBeUndefined()
+    const pill = (await app.inject({ url: '/api/claude/usage', headers: user })).json()
+    expect(pill.tokens).toBeUndefined() // a barra do topo mostra só o status para o usuário comum
     expect(all.claude.sessionLeftPct).toBeNull() // sem dados ainda, não zero
     expect(all.claude.plan.name).toBe('Max')
+    expect(typeof mine.claude.connected).toBe('boolean')
+    expect(mine.claude.account).toBeUndefined() // e-mail da conta do Claude só para o admin
   })
 })

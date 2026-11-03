@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "omnivoice": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "--directory",
+        "${HOME}/OmniVoice-Studio",
+        "run",
+        "python",
+        "-m",
+        "backend.mcp_server"
+      ],
+      "env": {
+        "OMNIVOICE_API_URL": "http://127.0.0.1:3900",
+        "OMNIVOICE_MCP_OUTPUT_MODE": "files",
+        "OMNIVOICE_MCP_BASE_PATH": "${HOME}/OmniVoice-Studio/saidas"
+      }
+    }
+  }
+}

@@ -6,3 +6,5 @@ storage/*
 !storage/.gitkeep
 dist
 .DS_Store
+.venv-tts
+packages/db/prisma/test-mcp.db*

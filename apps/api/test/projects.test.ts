@@ -87,6 +87,9 @@ describe('acesso a projetos', () => {
     expect((await app.inject({ url: `/api/projects/${id}`, headers: admin.headers })).statusCode).toBe(200)
     const list = (await app.inject({ url: '/api/projects', headers: beto.headers })).json()
     expect(list.find((p: { id: string }) => p.id === id)).toBeUndefined()
+    const mine = (await app.inject({ url: '/api/projects', headers: ana.headers })).json().find((p: { id: string }) => p.id === id)
+    expect(mine).toMatchObject({ video: null, images: 0, job: { status: 'queued' } })
+    expect(JSON.stringify(mine)).not.toMatch(/filePath|storage/)
   })
 
   it('a resposta nunca traz caminho de arquivo', async () => {
@@ -115,5 +118,40 @@ describe('fila de jobs', () => {
     const winners = [a, b].filter(Boolean)
     expect(winners).toHaveLength(1)
     expect(winners[0]!.projectId).toBe(id)
+  })
+})
+
+describe('tentar de novo', () => {
+  it('repete só a etapa que falhou, volta o status e não duplica', async () => {
+    const id = (await create(ana)).json().id
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    await prisma.job.create({ data: { projectId: id, type: 'render', status: 'failed', error: 'fonte', payload: null } })
+    await prisma.project.update({ where: { id }, data: { status: 'failed' } })
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/retry`, headers: beto.headers })).statusCode).toBe(404)
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/retry`, headers: ana.headers })
+    expect(r.json()).toEqual({ retried: 'render' })
+    expect((await prisma.project.findUniqueOrThrow({ where: { id } })).status).toBe('rendering')
+    expect(await prisma.job.count({ where: { projectId: id, type: 'render', status: 'queued' } })).toBe(1)
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/retry`, headers: ana.headers })).statusCode).toBe(409)
+  })
+})
+
+describe('enviar fonte', () => {
+  const send = async (buf: Buffer, name: string) => {
+    const form = new FormData(); form.append('font', new Blob([new Uint8Array(buf)]), name)
+    const req = new Request('http://x', { method: 'POST', body: form })
+    return app.inject({ method: 'POST', url: '/api/fonts/upload', headers: { ...ana.headers, 'content-type': req.headers.get('content-type')! }, payload: Buffer.from(await req.arrayBuffer()) })
+  }
+  it('aceita TTF de verdade, lê o nome de dentro e libera para todos', async () => {
+    const { readFileSync, existsSync } = await import('node:fs')
+    const sys = ['/System/Library/Fonts/Supplemental/Arial.ttf', '/Library/Fonts/Arial Unicode.ttf'].find((f) => existsSync(f))
+    if (!sys) return // sem fonte de sistema para testar nesta máquina
+    const r = await send(readFileSync(sys), 'minha-fonte.ttf')
+    expect(r.statusCode).toBe(201)
+    expect(r.json().family).toMatch(/Arial/)
+    expect((await app.inject({ url: '/api/fonts', headers: beto.headers })).json()).toContain(r.json().family)
+  })
+  it('recusa arquivo que não é fonte, mesmo com extensão .ttf', async () => {
+    expect((await send(Buffer.from('isto não é uma fonte'), 'falsa.ttf')).statusCode).toBe(400)
   })
 })

@@ -1,0 +1,8 @@
+{
+  "name": "@corte/mcp",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "tsx --env-file=../../.env src/index.ts", "test": "vitest run" },
+  "dependencies": { "@corte/db": "workspace:*", "@corte/shared": "workspace:*", "@modelcontextprotocol/sdk": "1.32.2", "zod": "^3.23" },
+  "devDependencies": { "@types/node": "^22", "tsx": "^4", "vitest": "^3" }
+}

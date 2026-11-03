@@ -47,9 +47,54 @@ Cada render guarda também uma cópia sem legenda (`vN-sem-legenda.mp4`), usada 
 
 Para outro caminho, defina `FFMPEG_PATH` no `.env`. Músicas de fundo: coloque arquivos MP3/M4A com licença de uso em `storage/music`.
 
+## Voz gratuita (Piper)
+
+A voz padrão é o **Piper**, uma voz neural em português do Brasil que roda no próprio computador, sem chave e sem custo. Instale uma vez:
+
+```bash
+pnpm run tts:setup
+```
+
+As vozes (Faber e Cadu, ~60 MB cada) são baixadas sozinhas na primeira fala, para `storage/voices`. Se o Piper não estiver instalado, o sistema usa a voz do macOS como reserva.
+
+## OmniVoice via Claude Code (skill + MCP)
+
+A skill [`omnivoice`](.claude/skills/omnivoice/ORIGEM.md) está em `.claude/skills/`. Quando a integração **OmniVoice** está ligada e em primeiro lugar na lista de vozes, a etapa "Gerando áudio" passa pelo Claude Code: ele carrega a skill, conecta no MCP do OmniVoice, cria a voz que o cliente descreveu em **Voz desejada** (Novo vídeo) e narra cada cena. Os áudios são gravados em arquivo, sem passar pelo contexto do Claude. Se o OmniVoice falhar, o vídeo usa a próxima voz (Piper).
+
+Instalar (uma vez; ~1,6 GB agora e ~2,4 GB do modelo na primeira narração):
+
+```bash
+pnpm run omnivoice:setup
+```
+
+Ligar e desligar o servidor local (porta 3900):
+
+```bash
+pnpm run omnivoice:start
+```
+```bash
+pnpm run omnivoice:stop
+```
+
+Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda separado. **Atenção: o modelo de voz padrão `k2-fsa/OmniVoice` é NÃO COMERCIAL (CC-BY-NC; Higgs Audio 2; Meta Llama 3)** e o OmniVoice só gera voz depois que alguém aceita essa licença no Model Catalogue do app. Não use esse modelo em vídeos de clientes pagantes.
+
+## Claude via MCP
+
+`apps/mcp` é um servidor MCP do Corte Final: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `CORTE_FINAL_EMAIL` (no `.env`), com as mesmas permissões do site.
+
+- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `corte-final` e `omnivoice`; aprove os dois na primeira vez.
+- **App Claude (Desktop):** Integrações → Claude · MCP → "Como conectar no app Claude" mostra o trecho de configuração.
+
 ## Integrações
 
-Em Admin → Integrações, cadastre as chaves (Pexels é gratuita e é a melhor para começar). Sem nenhum banco de imagens, as cenas sem foto sua viram quadros de texto. A voz do macOS funciona sem chave.
+Já vêm conectadas, sem chave: **Piper** (voz), **Openverse** (fotos Creative Commons) e **músicas locais**.
+
+- **Admin → Integrações (padrão):** o que vale para todos os usuários.
+- **Integrações** (menu lateral, para todos): cada usuário pode usar as próprias contas, grátis ou pagas (Pexels, Pixabay, ElevenLabs, OpenAI Voz, Google Cloud Voz). O que ele não configurar segue o padrão do admin. As chaves de um usuário só servem para os vídeos dele.
+
+## Logs
+
+Admin → Logs mostra tudo que entra, sai e falha: requisições da API (método, rota, status e tempo, sem corpo nem cookies), jobs do worker, chamadas ao Claude e falhas de integração, com a pilha de erro. Os registros com mais de 30 dias são apagados sozinhos.
 
 ## Claude
 

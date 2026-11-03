@@ -86,7 +86,7 @@ export async function projectRoutes(app: FastifyInstance) {
           name: input.name,
           prompt: input.prompt,
           targetDurationS: input.targetDurationS,
-          options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode }),
+          options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief }),
           reference: input.link
             ? { create: { sourceType: 'link', url: input.link, platform: detectPlatform(input.link) } }
             : video[0] ? { create: { sourceType: 'upload', filePath: video[0].path } } : undefined,
@@ -105,12 +105,22 @@ export async function projectRoutes(app: FastifyInstance) {
     }
   })
 
-  app.get('/api/projects', { preHandler: requireAuth }, async (req) =>
-    prisma.project.findMany({
+  app.get('/api/projects', { preHandler: requireAuth }, async (req) => {
+    const rows = await prisma.project.findMany({
       where: req.user!.role === 'admin' ? {} : { ownerId: req.user!.id },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, status: true, targetDurationS: true, createdAt: true, owner: { select: { name: true } } },
+      select: {
+        id: true, name: true, prompt: true, status: true, targetDurationS: true, aspect: true, createdAt: true, owner: { select: { name: true } },
+        videoVersions: { where: { isCurrent: true }, select: { version: true, durationS: true } },
+        jobs: { where: { status: { in: ['queued', 'running', 'paused'] } }, orderBy: { createdAt: 'desc' }, take: 1, select: { stage: true, progress: true, status: true, etaS: true } },
+        _count: { select: { assets: { where: { kind: 'user_image' } } } },
+      },
+    })
+    // Formato da lista e do feed "Criações": prompt resumido, vídeo atual e tarefa em andamento.
+    return rows.map(({ videoVersions, jobs, _count, prompt, ...p }) => ({
+      ...p, prompt: prompt.slice(0, 220), video: videoVersions[0] ?? null, job: jobs[0] ?? null, images: _count.assets,
     }))
+  })
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({
@@ -167,6 +177,21 @@ export async function projectRoutes(app: FastifyInstance) {
     if (m) reply.code(206).header('content-range', `bytes ${start}-${end}/${size}`)
     if ((req.query as { download?: string }).download) reply.header('content-disposition', `attachment; filename="video-v${v.version}.mp4"`)
     return reply.send(createReadStream(v.filePath, { start, end }))
+  })
+
+  // Vídeo que falhou: repete só a etapa que deu erro (o que já ficou pronto é aproveitado).
+  const RETRY_STATUS: Record<string, string> = { ingest: 'queued', analyze: 'analyzing', script: 'scripting', media: 'media', render: 'rendering', regen_part: 'editing' }
+  app.post<{ Params: { id: string } }>('/api/projects/:id/retry', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (await prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } } })) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
+    const failed = await prisma.job.findFirst({ where: { projectId: p.id, status: 'failed' }, orderBy: { createdAt: 'desc' } })
+    if (!failed || p.status !== 'failed') return reply.code(409).send({ error: 'Não há etapa com falha para repetir' })
+    await prisma.$transaction([
+      prisma.job.create({ data: { projectId: p.id, type: failed.type, payload: failed.payload, stage: 'Na fila' } }),
+      prisma.project.update({ where: { id: p.id }, data: { status: RETRY_STATUS[failed.type] ?? 'queued' } }),
+    ])
+    return reply.code(202).send({ retried: failed.type })
   })
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {

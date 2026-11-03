@@ -16,12 +16,19 @@ export type RenderInput = { scenes: RenderScene[]; music: string | null; ass: st
 
 function clipArgs(s: RenderScene, i: number, out: string): string[] {
   const frames = Math.round(s.durationS * FPS)
-  const fade = s.transition === 'fade' ? ',fade=t=in:st=0:d=0.4' : ''
+  const fade = `,fade=t=in:st=0:d=${s.transition === 'fade' ? 0.45 : 0.18}`
   if (s.kind === 'image') {
-    // Ken Burns: aproxima devagar a partir do centro (alterna para afastar nas cenas ímpares).
-    const z = i % 2 ? `if(eq(on,0),1.15,max(zoom-0.0006,1))` : `min(zoom+0.0006,1.15)`
+    // Movimento contínuo e variado, cena a cena: aproxima, afasta, desliza para a direita e para a esquerda.
+    // A intensidade acompanha a duração (on = quadro atual, d = total), então cenas curtas também se mexem.
+    const zIn = `1+0.22*on/${frames}`, zOut = `1.22-0.22*on/${frames}`
+    const motion = [
+      { z: zIn, x: 'iw/2-(iw/zoom/2)', y: 'ih/2-(ih/zoom/2)' },
+      { z: '1.18', x: `(iw-iw/zoom)*on/${frames}`, y: 'ih/2-(ih/zoom/2)' },
+      { z: zOut, x: 'iw/2-(iw/zoom/2)', y: 'ih/2-(ih/zoom/2)' },
+      { z: '1.18', x: `(iw-iw/zoom)*(1-on/${frames})`, y: 'ih/2-(ih/zoom/2)' },
+    ][i % 4]
     return ['-i', s.path!, '-vf',
-      `scale=2304:1296:force_original_aspect_ratio=increase,crop=2304:1296,zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=1920x1080:fps=${FPS}${fade}`,
+      `scale=2304:1296:force_original_aspect_ratio=increase,crop=2304:1296,zoompan=z='${motion.z}':x='${motion.x}':y='${motion.y}':d=${frames}:s=1920x1080:fps=${FPS}${fade}`,
       '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   if (s.kind === 'video') {

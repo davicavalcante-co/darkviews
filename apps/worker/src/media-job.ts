@@ -5,11 +5,12 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
-import { prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { pickMusic, searchStock, synthesize, type StockCandidate } from '@corte/providers'
+import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
+import { activeProviders, pickMusic, searchStock, synthesize, type StockCandidate } from '@corte/providers'
 import { MAX_DURATION_S } from '@corte/shared'
-import { askClaude } from './claude.js'
-import { durationOf, FFMPEG } from './ffmpeg.js'
+import { askClaude, ClaudeUnavailable } from './claude.js'
+import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
+import { durationOf, FFMPEG, run } from './ffmpeg.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 
@@ -43,7 +44,7 @@ export async function media(job: Job) {
   const found = new Map<number, StockCandidate[]>()
   for (const [i, s] of wanted.entries()) {
     const q = JSON.parse(s.searchQuery!)
-    found.set(s.index, await searchStock(q.queries, q.kind, q.orientation))
+    found.set(s.index, await searchStock(q.queries, q.kind, q.orientation, project.ownerId))
     await step('Buscando imagens', 5 + Math.round((i / Math.max(wanted.length, 1)) * 25))
   }
 
@@ -98,18 +99,44 @@ export async function media(job: Job) {
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
   await prisma.asset.deleteMany({ where: { projectId: project.id, kind: { in: ['voice', 'music'] } } })
+  // Se a voz escolhida for o OmniVoice, a narração inteira passa pelo Claude Code (skill omnivoice + MCP).
+  // Cena que ele não entregar cai para a próxima voz da lista (Piper, depois macOS).
+  const voices = await activeProviders('voz', project.ownerId)
+  let directed = new Map<number, string>()
+  if (voices[0]?.provider === 'omnivoice') {
+    await step('Claude Code criando a voz (OmniVoice)', 55)
+    if (await ensureOmniVoice()) {
+      const opts = JSON.parse(project.options) as { voiceBrief?: string }
+      directed = await narrateWithClaude({
+        jobId: job.id, projectId: project.id, dir, brief: opts.voiceBrief ?? null, steps: voices[0].config.steps || '16', speed: voices[0].config.speed || '1.0',
+        scenes: scenes.filter((s) => s.narration?.trim()).map((s) => ({ index: s.index, text: s.narration! })),
+      }).catch((e) => {
+        if (e instanceof ClaudeUnavailable) throw e
+        logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `omnivoice via Claude Code falhou: ${(e as Error).message}`, details: { jobId: job.id } })
+        return new Map<number, string>()
+      })
+    } else {
+      logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: servidor local indisponível, usando a próxima voz', details: { jobId: job.id } })
+    }
+  }
+
   let t = 0
   for (const [i, s] of scenes.entries()) {
     await step('Gerando áudio da locução', 55 + Math.round((i / scenes.length) * 40))
     let speechS = 0
     if (s.narration?.trim()) {
-      const voice = await synthesize(s.narration, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`), FFMPEG)
+      const base = join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)
+      const fromClaude = directed.get(s.index)
+      const voice = fromClaude
+        ? await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', fromClaude, '-ar', '48000', '-ac', '2', base + '.wav']).then(() => ({ path: base + '.wav', provider: 'omnivoice' }))
+        : await synthesize(s.narration, base, FFMPEG, project.ownerId)
       if (voice) {
         speechS = await durationOf(voice.path)
         await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: voice.path, mime: 'audio/wav', durationS: speechS, sourceProvider: voice.provider, sortOrder: s.index } })
       }
     }
-    const dur = Math.max(s.endS - s.startS, speechS + 0.3)
+    // A cena acompanha a fala (mais um respiro curto). Esperar o tempo planejado deixava silêncios entre as frases.
+    const dur = speechS > 0 ? speechS + 0.25 : s.endS - s.startS
     await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
     t += dur
   }
@@ -117,7 +144,7 @@ export async function media(job: Job) {
 
   // 5. Trilha de fundo (opcional).
   await step('Gerando áudio da trilha', 96)
-  const music = await pickMusic()
+  const music = await pickMusic(project.ownerId)
   if (music) await prisma.asset.create({ data: { projectId: project.id, kind: 'music', filePath: music, mime: 'audio/mpeg', sourceProvider: 'local_music', license: 'biblioteca local' } })
 
   await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering' } })

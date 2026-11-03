@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { type Part } from '@corte/shared'
 import { api, useFonts } from './api'
+import { PageHead } from './ui'
 
 type Segment = { startS: number; endS: number; text: string; highlights: number[] }
 type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; segments: Segment[] }
@@ -44,17 +45,20 @@ export function EditPage({ id }: { id: string }) {
   const busy = !!data.job
   const props = { id, data, reload: load, busy }
   return (
-    <section>
-      <p><a href={`#/projeto/${id}`}>← Andamento</a></p>
-      <div className="row"><h2>Edição</h2><a className="btn" href={`#/aprovar/${id}`}>{data.status === 'approved' ? 'Ver cortes' : 'Aprovar'}</a></div>
+    <div className="page">
+      <PageHead back={{ href: `#/projeto/${id}`, label: 'Andamento' }} kicker="Cada parte tem histórico e pode ser regerada sozinha" title="Edição">
+        <a className="btn" href={`#/aprovar/${id}`}>{data.status === 'approved' ? 'Ver cortes' : 'Aprovar'}</a>
+      </PageHead>
       {data.job && <p className="warn" role="status">{data.job.status === 'paused' ? 'Pausado' : 'Em andamento'}: {data.job.stage ?? data.job.type} · {data.job.progress}%</p>}
-      <div className="tabs" role="tablist">
-        {TABS.map(([p, label]) => <button key={p} type="button" role="tab" aria-selected={tab === p} onClick={() => setTab(p)}>{label}</button>)}
+      <div className="stack">
+        <div className="tabs" role="tablist">
+          {TABS.map(([p, label]) => <button key={p} type="button" role="tab" aria-selected={tab === p} onClick={() => setTab(p)}>{label}</button>)}
+        </div>
+        {tab === 'video' && <VideoTab {...props} />}
+        {tab === 'caption' && <CaptionTab {...props} />}
+        {(tab === 'title' || tab === 'description' || tab === 'keywords') && <MetaTab key={tab} field={tab} {...props} />}
       </div>
-      {tab === 'video' && <VideoTab {...props} />}
-      {tab === 'caption' && <CaptionTab {...props} />}
-      {(tab === 'title' || tab === 'description' || tab === 'keywords') && <MetaTab key={tab} field={tab} {...props} />}
-    </section>
+    </div>
   )
 }
 
@@ -103,7 +107,8 @@ function VideoTab(props: TabProps) {
   const scene = data.scenes.find((s) => time >= s.startS && time < s.endS)
 
   return (
-    <div className="stack">
+    <div className="cards">
+      <div className="panel wide">
       <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${current.version}`} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
       <div className="timeline" aria-label="Linha do tempo">
         {thumbs.map((t) => (
@@ -117,9 +122,10 @@ function VideoTab(props: TabProps) {
         ))}
       </div>
       <p className="muted">Quadro em {fmt(time)}{scene ? ` · cena ${scene.index + 1}: ${scene.narration ?? ''}` : ''}</p>
+      </div>
 
       <fieldset>
-        <legend>Pedir alteração neste quadro ({fmt(time)})</legend>
+        <legend>Pedir alteração no quadro {fmt(time)}</legend>
         <div className="regen">
           <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Tipo">
             <option value="trocar_imagem">Trocar imagem</option><option value="mudar_texto">Mudar fala/texto</option>
@@ -170,7 +176,9 @@ function CaptionTab(props: TabProps) {
   const save = () => api(`/projects/${id}/captions`, { method: 'PUT', body })
 
   return (
-    <div className="stack">
+    <div className="cards">
+      <div className="panel narrow">
+      <span className="panel-title">Estilo</span>
       <div className="grid">
         <label>Fonte<select value={track.fontFamily} onChange={(e) => set({ fontFamily: e.target.value })}>{[...new Set([track.fontFamily, ...allowed])].map((f) => <option key={f}>{f}</option>)}</select></label>
         <label>Peso<select value={track.fontWeight} onChange={(e) => set({ fontWeight: Number(e.target.value) })}><option value={400}>Normal</option><option value={700}>Negrito</option><option value={900}>Extra</option></select></label>
@@ -182,7 +190,9 @@ function CaptionTab(props: TabProps) {
           <option value="palavra-chave">Palavras-chave</option><option value="karaokê">Karaokê</option><option value="manual">Manual</option>
         </select></label>
       </div>
-      <p className="muted">Clique numa palavra para ligar ou desligar o destaque.</p>
+      </div>
+      <div className="panel wide">
+      <div className="row"><span className="panel-title">Linhas · {track.segments.length}</span><span className="muted">Clique numa palavra para ligar ou desligar o destaque.</span></div>
       <div className="segments">
         {track.segments.map((s, i) => (
           <div className="segment" key={i}>
@@ -210,8 +220,12 @@ function CaptionTab(props: TabProps) {
           <button type="button" disabled={busy} onClick={() => act(async () => { await save(); await api(`/projects/${id}/render`, { method: 'POST' }) }, reload)}>Salvar e renderizar</button>
         </span>
       </div>
-      <Requests {...props} part="caption" />
-      <Regen {...props} part="caption" label="Regerar legenda com Claude" />
+      </div>
+      <div className="panel">
+        <span className="panel-title">Regerar com o Claude</span>
+        <Requests {...props} part="caption" />
+        <Regen {...props} part="caption" label="Regerar legenda" />
+      </div>
       <History items={data.captionVersions.map((v) => ({ version: v.version, isCurrent: v.isCurrent, label: `${v.fontFamily} · ${v.segments} linhas · ${when(v.createdAt)}` }))}
         onRestore={(version) => act(() => api(`/projects/${id}/captions/restore`, { method: 'POST', body: { version } }), reload)} />
     </div>
@@ -226,7 +240,8 @@ function MetaTab(props: TabProps & { field: 'title' | 'description' | 'keywords'
   useEffect(() => setValue(current?.value ?? ''), [current?.version])
   const label = { title: 'Título', description: 'Descrição', keywords: 'Palavras-chave (separadas por vírgula)' }[field]
   return (
-    <div className="stack">
+    <div className="cards">
+      <div className="panel wide">
       <label>{label}
         {field === 'title'
           ? <input value={value} maxLength={100} onChange={(e) => setValue(e.target.value)} />
@@ -235,8 +250,12 @@ function MetaTab(props: TabProps & { field: 'title' | 'description' | 'keywords'
       </label>
       <div className="row"><span /><button type="button" disabled={value === current?.value}
         onClick={() => act(() => api(`/projects/${id}/metadata/${field}`, { method: 'PUT', body: { value } }), reload)}>Salvar versão</button></div>
-      <Requests {...props} part={field} />
-      <Regen {...props} part={field} label="Regerar com Claude" />
+      </div>
+      <div className="panel">
+        <span className="panel-title">Regerar com o Claude</span>
+        <Requests {...props} part={field} />
+        <Regen {...props} part={field} label="Regerar" />
+      </div>
       <History items={versions.map((v) => ({ version: v.version, isCurrent: v.isCurrent, label: `${by(v.createdBy)} · ${when(v.createdAt)}`, preview: v.value }))}
         onRestore={(version) => act(() => api(`/projects/${id}/metadata/${field}/restore`, { method: 'POST', body: { version } }), reload)} />
     </div>
@@ -246,14 +265,14 @@ function MetaTab(props: TabProps & { field: 'title' | 'description' | 'keywords'
 function History({ items, onRestore }: { items: { version: number; isCurrent: boolean; label: string; preview?: string }[]; onRestore: (v: number) => void }) {
   if (!items.length) return null
   return (
-    <details>
-      <summary>Histórico de versões ({items.length})</summary>
+    <div className="panel">
+      <span className="panel-title">Histórico de versões · {items.length}</span>
       <ul className="history">{items.map((v) => (
         <li key={v.version}>
-          <strong>v{v.version}</strong> {v.label} {v.isCurrent ? <em>· atual</em> : <button className="link" onClick={() => onRestore(v.version)}>voltar para esta</button>}
+          <strong>v{v.version}</strong> <span className="muted">{v.label}</span> {v.isCurrent ? <em className="ok">· atual</em> : <button className="link" onClick={() => onRestore(v.version)}>voltar para esta</button>}
           {v.preview && <p className="pre muted">{v.preview.slice(0, 300)}</p>}
         </li>))}
       </ul>
-    </details>
+    </div>
   )
 }

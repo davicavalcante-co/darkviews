@@ -19,6 +19,20 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 // Fontes liberadas pelo admin para as legendas.
 export function useFonts() {
   const [fonts, setFonts] = useState<string[]>([])
-  useEffect(() => { api<string[]>('/fonts').then(setFonts).catch(() => {}) }, [])
+  useEffect(() => {
+    const load = () => api<string[]>('/fonts').then(setFonts).catch(() => {})
+    load()
+    // Fonte enviada em qualquer tela atualiza todas as listas.
+    addEventListener('fonts-changed', load)
+    return () => removeEventListener('fonts-changed', load)
+  }, [])
   return fonts
+}
+
+// Envia um arquivo de fonte (.ttf/.otf); devolve o nome lido de dentro do arquivo.
+export async function uploadFont(file: File) {
+  const body = new FormData(); body.append('font', file)
+  const r = await api<{ family: string }>('/fonts/upload', { method: 'POST', body })
+  dispatchEvent(new Event('fonts-changed'))
+  return r.family
 }
