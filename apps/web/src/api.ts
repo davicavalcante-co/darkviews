@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 let csrfToken = ''
 export const setCsrf = (t: string) => { csrfToken = t }
+export const csrf = () => csrfToken
 
 export async function api<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
   const res = await fetch('/api' + path, {

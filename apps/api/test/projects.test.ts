@@ -19,13 +19,13 @@ async function login(email: string): Promise<Auth> {
 
 const base = { name: 'Café', prompt: 'Vídeo sobre café', targetDurationS: '120', fontFamily: 'Inter', highlightMode: 'karaokê' }
 
-async function create(auth: Auth, fields: Record<string, string> = {}, files: [string, Buffer, string][] = []) {
+async function create(auth: Auth, fields: Record<string, string> = {}, files: [string, Buffer, string][] = [], url = '/api/projects') {
   const form = new FormData()
   for (const [k, v] of Object.entries({ ...base, ...fields })) form.append(k, v)
   for (const [field, buf, name] of files) form.append(field, new Blob([new Uint8Array(buf)]), name)
   const req = new Request('http://x', { method: 'POST', body: form })
   return app.inject({
-    method: 'POST', url: '/api/projects',
+    method: 'POST', url,
     headers: { ...auth.headers, 'content-type': req.headers.get('content-type')! },
     payload: Buffer.from(await req.arrayBuffer()),
   })
@@ -211,6 +211,24 @@ describe('aprovação das imagens', () => {
     expect(JSON.parse(scenes[1].searchQuery!).rejected).toEqual(['pexels:p1'])
     expect(await prisma.job.count({ where: { projectId: id, type: 'media', status: 'queued' } })).toBe(1)
     expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/review`, headers: ana.headers, payload: { rejected: [] } })).statusCode).toBe(409)
+  })
+})
+
+describe('nova versão', () => {
+  it('mantém, remove e acrescenta imagens na ordem pedida e volta para o roteiro', async () => {
+    const id = (await create(ana, {}, [['images', PNG, 'a.png'], ['images', PNG, 'b.png']])).json().id
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    const [a] = await prisma.asset.findMany({ where: { projectId: id, kind: 'user_image' }, orderBy: { sortOrder: 'asc' } })
+    const order = JSON.stringify([{ new: true, caption: 'nova' }, { id: a.id, caption: 'mantida' }])
+    const res = await create(ana, { name: 'V2', order, captionSize: '80', captionOutline: '0', bgColor: '#FF0000', useStock: '0' }, [['images', PNG, 'c.png']], `/api/projects/${id}/regenerate`)
+    expect(res.statusCode).toBe(202)
+    const imgs = await prisma.asset.findMany({ where: { projectId: id, kind: 'user_image' }, orderBy: { sortOrder: 'asc' } })
+    expect(imgs.map((i) => i.userCaption)).toEqual(['nova', 'mantida'])
+    const p = await prisma.project.findUniqueOrThrow({ where: { id } })
+    expect(p.name).toBe('V2'); expect(p.status).toBe('scripting')
+    expect(JSON.parse(p.options)).toMatchObject({ captionSize: 80, captionOutline: false, bgColor: '#FF0000', useStock: false })
+    // Enquanto cria, não aceita outra versão.
+    expect((await create(ana, { order: '[]' }, [], `/api/projects/${id}/regenerate`)).statusCode).toBe(409)
   })
 })
 

@@ -13,8 +13,12 @@ import { checkClaude, holdLongVideo } from './claude-check.js'
 const WORKER_ID = `${hostname()}:${process.pid}`
 const HANDLERS: Record<string, (job: Job) => Promise<void>> = { ingest, analyze, script, media, voice, render, regen_part: regenPart, cuts }
 
-// shortcut: jobs "running" de um worker que caiu ficam presos; ao iniciar, devolvemos os nossos para a fila.
-await prisma.job.updateMany({ where: { status: 'running', lockedBy: { startsWith: hostname() + ':' } }, data: { status: 'queued', lockedBy: null } })
+// Jobs "running" de um worker que caiu ficam presos; ao iniciar, devolvemos para a fila só os de processos mortos
+// (outra cópia do sistema ligada ainda está trabalhando nos dela).
+const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' } }
+const stuck = await prisma.job.findMany({ where: { status: 'running', lockedBy: { startsWith: hostname() + ':' } }, select: { id: true, lockedBy: true } })
+const dead = stuck.filter((j) => !alive(Number(j.lockedBy!.split(':').pop()))).map((j) => j.id)
+if (dead.length) await prisma.job.updateMany({ where: { id: { in: dead }, status: 'running' }, data: { status: 'queued', lockedBy: null } })
 
 async function runOne() {
   // Jobs pausados pelo limite do Claude voltam sozinhos para a fila no horário de reinício.

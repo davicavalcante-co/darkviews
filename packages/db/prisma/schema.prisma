@@ -25,6 +25,7 @@ model User {
   auditLogs    AuditLog[]
   changeRequests ChangeRequest[]
   integrations   Integration[]
+  studioVoices   StudioVoice[]
   @@map("users")
 }
 
@@ -133,6 +134,8 @@ model Scene {
   asset        Asset?   @relation(fields: [assetId], references: [id])
   searchQuery  String?
   transition   String?
+  motion       String? // ken_burns | parallax | cutout | snap_zoom | static
+  easing       String? // ease_in_out | ease_in | ease_out | linear
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   @@map("scenes")
@@ -165,6 +168,7 @@ model CaptionTrack {
   highlightColor String
   highlightMode  String   // palavra-chave | manual | karaokê
   position       String
+  outline        Boolean  @default(true) // traçado (contorno) nas letras
   isCurrent      Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -379,4 +383,22 @@ model SystemLog {
   @@index([createdAt])
   @@index([level, createdAt])
   @@map("system_logs")
+}
+
+// Voz própria criada na aba Vozes (VoiceStudio). Rascunho até publicar; publicada aparece em Novo vídeo.
+model StudioVoice {
+  id         String   @id @default(uuid())
+  ownerId    String
+  owner      User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name       String
+  kind       String   // design (criada por atributos) | clone (gravação/envio da pessoa)
+  status     String   @default("draft") // draft | published
+  attrs      String   @default("{}") // atributos da voz criada (gênero, idade, tom…)
+  speed      Float    @default(1)
+  samplePath String   // amostra de referência que define a voz
+  profileId  String?  // id do perfil no VoiceStudio
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  @@index([ownerId])
+  @@map("studio_voices")
 }
