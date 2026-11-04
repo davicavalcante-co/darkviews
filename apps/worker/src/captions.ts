@@ -1,6 +1,9 @@
 export type Segment = { startS: number; endS: number; text: string; highlights: number[] }
-export type CaptionStyle = { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string }
+export type CaptionStyle = { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean }
 export type TimedScene = { startS: number; endS: number; speechS: number; narration: string; onScreenText: string | null; isCard: boolean }
+
+// Cor da faixa de destaque no formato do ASS (&HAABBGGRR, opaca).
+const hlBox = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}`
 
 const WORDS_PER_LINE = 6
 const norm = (w: string) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]/gu, '')
@@ -58,16 +61,23 @@ export function toAss(segments: Segment[], scenes: TimedScene[], st: CaptionStyl
     '[Script Info]', 'ScriptType: v4.00+', `PlayResX: ${canvas.w}`, `PlayResY: ${canvas.h}`, 'WrapStyle: 0', 'ScaledBorderAndShadow: yes', '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,${st.fontFamily},${st.size},${assColor(st.color)},${assColor(st.color)},&H00000000,&H80000000,${bold},0,0,0,100,100,0,0,1,4,2,${align},${side},${side},${vertical ? 380 : 90},1`,
-    `Style: Card,${st.fontFamily},${Math.round(st.size * 1.5)},${assColor(st.color)},${assColor(st.color)},&H00000000,&H00000000,${bold},0,0,0,100,100,0,0,1,3,0,5,${side + 40},${side + 40},0,1`,
-    `Style: Top,${st.fontFamily},${Math.round(st.size * 0.8)},${assColor(st.color)},${assColor(st.color)},&H00000000,&H80000000,${bold},0,0,0,100,100,0,0,1,3,1,8,${side},${side},${vertical ? 260 : 70},1`,
+    `Style: Default,${st.fontFamily},${st.size},${assColor(st.color)},${assColor(st.color)},&H00000000,&H80000000,${bold},0,0,0,100,100,0,0,1,${st.outline === false ? '0,1' : '4,2'},${align},${side},${side},${vertical ? 380 : 90},1`,
+    // Cartela de capítulo (estilo das referências de YouTube): título enorme, caixa alta, condensado, com sombra.
+    `Style: Card,${st.fontFamily},${Math.round(st.size * 2.4)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,96,100,1,0,1,0,6,5,${side + 60},${side + 60},0,1`,
+    // Texto de destaque sobre a imagem: faixa na cor de destaque (caixa opaca), texto escuro, no alto à esquerda.
+    `Style: Top,${st.fontFamily},${Math.round(st.size * 0.95)},&H00111111,&H00111111,${hlBox(st.highlightColor)},${hlBox(st.highlightColor)},-1,0,0,0,100,100,1,0,3,14,0,7,${side},${side},${vertical ? 260 : 80},1`,
     '', '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ]
   const hl = assColor(st.highlightColor), base = assColor(st.color)
   for (const s of scenes) {
     if (!s.onScreenText) continue
-    lines.push(`Dialogue: 1,${assTime(s.startS)},${assTime(s.endS)},${s.isCard ? 'Card' : 'Top'},,0,0,0,,${esc(s.onScreenText)}`)
+    const text = esc(s.onScreenText.toUpperCase())
+    if (s.isCard) lines.push(`Dialogue: 1,${assTime(s.startS)},${assTime(s.endS)},Card,,0,0,0,,{\\fad(250,200)}${text}`)
+    // Sobre a imagem, o destaque entra deslizando e fica só 2,8 s (não vira uma legenda parada a cena toda).
+    else lines.push(`Dialogue: 1,${assTime(s.startS + 0.15)},${assTime(Math.min(s.endS, s.startS + 2.95))},Top,,0,0,0,,{\\fad(180,220)\\move(${side - 60},${vertical ? 260 : 80},${side},${vertical ? 260 : 80},0,220)}${text}`)
   }
+  // Na cartela de capítulo não entra a legenda da fala: o título já ocupa a tela.
+  segments = segments.filter((g) => !scenes.some((s) => s.isCard && s.onScreenText && g.startS >= s.startS && g.endS <= s.endS + 0.05))
   for (const seg of segments) {
     const words = seg.text.split(' ')
     let text: string

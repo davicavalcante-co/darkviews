@@ -1,13 +1,13 @@
 import { createWriteStream } from 'node:fs'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { activeProviders, pickMusic, preferProvider, searchStock, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
+import { activeProviders, pickMusic, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { MAX_DURATION_S, MUSIC_STYLES, VOICE_TONES } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
@@ -15,7 +15,7 @@ import { durationOf, FFMPEG, run } from './ffmpeg.js'
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 
 // Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
-const UA = 'CorteFinal/1.0 (gerador de vídeos local; https://github.com/davicavalcante-co/corte-final)'
+const UA = 'CorteFinal/1.0 (local video tool; https://github.com/davicavalcante-co/corte-final)' // só ASCII: acento no User-Agent dá 403
 async function download(url: string, dir: string) {
   let res: Response | null = null
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -86,7 +86,7 @@ export async function media(job: Job) {
     for (const ci of order) {
       const c = cands[ci]
       try {
-        const file = await download(c.url, dir)
+        const file = await download(c.url, dir).catch((e) => (c.altUrl ? download(c.altUrl, dir) : Promise.reject(e)))
         const asset = await prisma.asset.create({
           data: {
             projectId: project.id, kind: file.kind === 'video' ? 'stock_video' : 'stock_image', filePath: file.path, mime: file.mime,
@@ -104,6 +104,14 @@ export async function media(job: Job) {
       data: assetId ? { assetId } : { searchQuery: JSON.stringify({ type: 'text_card', text: scene.onScreenText || '' }) },
     })
     await step('Baixando imagens', 35 + Math.round((i / Math.max(found.size, 1)) * 20))
+  }
+
+  // Cena sem imagem (download falhou ou quadro de texto vazio) nunca fica em branco: repete a imagem da cena mais próxima.
+  const all = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
+  const withAsset = all.filter((s) => s.assetId)
+  for (const s of all.filter((x) => !x.assetId && !(x.searchQuery && JSON.parse(x.searchQuery).type === 'text_card' && JSON.parse(x.searchQuery).text?.trim()))) {
+    const near = withAsset.reduce<typeof withAsset[number] | null>((b, x) => (!b || Math.abs(x.index - s.index) < Math.abs(b.index - s.index) ? x : b), null)
+    if (near) await prisma.scene.update({ where: { id: s.id }, data: { assetId: near.assetId } })
   }
 
   // Para aqui e espera o usuário aprovar as imagens do banco (tela de Andamento). Sem imagens de banco, segue direto.
@@ -137,7 +145,7 @@ export async function voice(job: Job) {
   const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
   const voices = preferProvider(await activeProviders('voz', project.ownerId), chosenProvider)
   let directed = new Map<number, string>()
-  if (voices[0]?.provider === 'omnivoice') {
+  if (voices[0]?.provider === 'omnivoice' && chosenProvider !== 'studio') {
     await step('Claude Code criando a voz (OmniVoice)', 55)
     if (await ensureOmniVoice()) {
       directed = await narrateWithClaude({
@@ -153,6 +161,23 @@ export async function voice(job: Job) {
     }
   }
 
+  // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
+  if (chosenProvider === 'studio') {
+    const own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
+    await step(`Narrando com a sua voz${own ? ` "${own.name}"` : ''}`, 55)
+    for (const s of own?.profileId ? scenes.filter((x) => x.narration?.trim()) : []) {
+      try {
+        const out = join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)
+        await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own!.profileId!, speed: own!.speed }))
+        await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
+        directed.set(s.index, out + '.wav')
+      } catch (e) {
+        logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index}: ${(e as Error).message}`, details: { jobId: job.id } })
+        if (e instanceof StudioError) break // VoiceStudio desligado ou sem licença: não adianta tentar as outras cenas
+      }
+    }
+  }
+
   // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que o Claude/OmniVoice já narrou é reaproveitado.
   await step('Gerando áudio da locução', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
@@ -160,7 +185,7 @@ export async function voice(job: Job) {
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   const made = await synthesizeMany(todo.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
     { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
-  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'omnivoice' })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: chosenProvider === 'studio' ? 'studio' : 'omnivoice' })
 
   // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
@@ -169,15 +194,18 @@ export async function voice(job: Job) {
   for (const [i, s] of scenes.entries()) {
     await step('Gerando áudio da locução', 60 + Math.round((i / scenes.length) * 35))
     const next = scenes[i + 1]
-    const lead = i > 0 && isNewContext(s) ? 0.6 : 0.15
-    const tail = next && isNewContext(next) ? 0.9 : 0.45
-    let dur = s.endS - s.startS
+    // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
+    const lead = i > 0 && isNewContext(s) ? 0.25 : 0.05
+    const tail = next && isNewContext(next) ? 0.4 : 0.18
+    // Cena sem fala (cartela) é só uma virada rápida, nunca um silêncio longo.
+    let dur = s.narration?.trim() ? s.endS - s.startS : Math.min(s.endS - s.startS, 1.6)
     const v = made.get(s.index)
     if (v) {
       // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
       const out = bases.get(s.index)! + '.final.wav'
       await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
-        `afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+        // Corta o silêncio que a voz sintética deixa no começo e no fim antes de pôr as pausas certas.
+        `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
       dur = await durationOf(out)
       await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
     }
@@ -187,9 +215,10 @@ export async function voice(job: Job) {
   if (t > MAX_DURATION_S) throw new Error(`Com a locução o vídeo ficou com ${Math.round(t)}s, acima de 18 minutos. Encurte o roteiro.`)
 
   // 5. Trilha de fundo (opcional).
-  await step('Gerando áudio da trilha', 96)
-  const music = await pickMusic(project.ownerId)
-  if (music) await prisma.asset.create({ data: { projectId: project.id, kind: 'music', filePath: music, mime: 'audio/mpeg', sourceProvider: 'local_music', license: 'biblioteca local' } })
+  await step('Buscando a trilha sonora', 96)
+  const style = MUSIC_STYLES.find((m) => m.id === (opts as { musicStyle?: string }).musicStyle) ?? MUSIC_STYLES[0]
+  const music = await pickMusic(project.ownerId, style.tags, t, join(dir, `trilha-${randomUUID().slice(0, 8)}`))
+  if (music) await prisma.asset.create({ data: { projectId: project.id, kind: 'music', filePath: music.path, mime: 'audio/mpeg', sourceProvider: music.provider, license: music.license, attribution: music.attribution || null } })
 
   await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering' } })
   await prisma.job.create({ data: { projectId: project.id, type: 'render', stage: 'Na fila' } })

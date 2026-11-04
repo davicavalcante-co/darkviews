@@ -13,6 +13,7 @@ const run = promisify(execFile)
 
 export type StockCandidate = {
   provider: string; sourceId: string; kind: 'image' | 'video'; url: string; pageUrl: string
+  altUrl?: string // versão menor, tentada se a principal falhar
   description: string; color: string | null; author: string; license: string; durationS?: number
 }
 type Active = { provider: string; config: Record<string, string>; secrets: Record<string, string> }
@@ -68,7 +69,7 @@ async function pixabay(a: Active, query: string, kind: 'image' | 'video', orient
   const q = `key=${encodeURIComponent(a.secrets.api_key)}&q=${encodeURIComponent(query)}&per_page=5&safesearch=true`
   if (kind === 'image') {
     const d = await getJson(`https://pixabay.com/api/?${q}&image_type=photo&orientation=${orientation === 'portrait' ? 'vertical' : 'horizontal'}`)
-    return d.hits.map((h: any) => ({ provider: 'pixabay', sourceId: String(h.id), kind, url: h.largeImageURL, pageUrl: h.pageURL, description: h.tags, color: null, author: h.user, license: 'Pixabay Content License' }))
+    return d.hits.map((h: any) => ({ provider: 'pixabay', sourceId: String(h.id), kind, url: h.largeImageURL, altUrl: h.webformatURL, pageUrl: h.pageURL, description: h.tags, color: null, author: h.user, license: 'Pixabay Content License' }))
   }
   const d = await getJson(`https://pixabay.com/api/videos/?${q}`)
   return d.hits.map((h: any) => ({ provider: 'pixabay', sourceId: String(h.id), kind, url: h.videos.large.url || h.videos.medium.url, pageUrl: h.pageURL, description: h.tags, color: null, author: h.user, license: 'Pixabay Content License', durationS: h.duration }))
@@ -90,20 +91,23 @@ async function openverse(_a: Active, query: string, kind: 'image' | 'video', ori
 const STOCK: Record<string, typeof pexels> = { pexels, pixabay, openverse }
 
 // Tenta cada banco por prioridade; se um falhar ou estourar a cota, vai para o próximo.
+// Até 5 opções do banco principal e 2 de reserva de cada um dos outros (se o download do principal falhar, a cena não fica vazia).
 export async function searchStock(queries: string[], kind: 'image' | 'video', orientation: string, userId?: string | null) {
+  const all: StockCandidate[] = []
   for (const a of await activeProviders('banco_de_imagens', userId)) {
+    const max = all.length ? 2 : 5
     try {
       const found: StockCandidate[] = []
       for (const q of queries) {
         for (const c of await STOCK[a.provider](a, q, kind, orientation)) if (!found.some((f) => f.sourceId === c.sourceId)) found.push(c)
-        if (found.length >= 5) break
+        if (found.length >= max) break
       }
-      if (found.length) return found.slice(0, 5)
+      all.push(...found.slice(0, max))
     } catch (e) {
       warn(a.provider, (e as Error).message, userId)
     }
   }
-  return []
+  return all
 }
 
 // ---------- voz ----------
@@ -149,11 +153,17 @@ async function kokoroSpeak(items: { text: string; out: string; voice: string; sp
 // com as outras vozes, uma a uma. Fala que falhar fica de fora (o chamador decide o que fazer).
 export type VoiceChoice = { provider?: string; voice?: string; speed?: number }
 // A voz escolhida na criação passa para o topo da lista; as outras seguem como reserva.
-export const preferProvider = <T extends { provider: string }>(list: T[], provider?: string) =>
-  provider ? [...list.filter((a) => a.provider === provider), ...list.filter((a) => a.provider !== provider)] : list
+// Depois dela, a reserva é a Kokoro (a que pronuncia melhor o português); Piper e macOS só no fim.
+const WEAK_VOICES = ['piper', 'macos_say']
+export const preferProvider = <T extends { provider: string }>(list: T[], provider?: string) => {
+  const rest = list.filter((a) => a.provider !== provider)
+  return [...list.filter((a) => a.provider === provider), ...rest.filter((a) => !WEAK_VOICES.includes(a.provider)), ...rest.filter((a) => WEAK_VOICES.includes(a.provider))]
+}
 export async function synthesizeMany(items: { key: number; text: string; outBase: string }[], ffmpeg: string, userId?: string | null, choice: VoiceChoice = {}) {
   const result = new Map<number, { path: string; provider: string }>()
-  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider)
+  // OmniVoice é narrado à parte (via Claude Code); aqui vale a primeira voz que este código sabe gerar.
+  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider).filter((a) => a.provider !== 'omnivoice')
+  if (first && first.provider !== choice.provider) choice = { speed: choice.speed } // a voz escolhida era de outro fornecedor
   if (first?.provider === 'kokoro') {
     try {
       const voice = choice.voice || first.config.voice || 'pf_dora', speed = choice.speed ?? (Number(first.config.speed) || 1)
@@ -231,11 +241,76 @@ export async function synthesize(text: string, outBase: string, ffmpeg: string, 
 }
 
 // ---------- música ----------
-export async function pickMusic(userId?: string | null): Promise<string | null> {
-  if (!(await activeProviders('música', userId)).some((a) => a.provider === 'local_music')) return null
-  const dir = join(STORAGE_DIR, 'music')
-  const files = (await readdir(dir).catch(() => [])).filter((f) => /\.(mp3|m4a|wav)$/i.test(f))
-  return files.length ? join(dir, files[Math.floor(Math.random() * files.length)]) : null
+// ---------- trilha sonora ----------
+export type MusicPick = { path: string; provider: string; license: string; attribution: string }
+// Só ASCII: com acento ("vídeos") os servidores recusam o pedido (403).
+const UA = { 'User-Agent': 'CorteFinal/1.0 (local video tool)' }
+async function save(url: string, out: string, init: RequestInit = {}) {
+  const res = await fetch(url, { ...init, headers: { ...UA, ...(init.headers as Record<string, string>) }, signal: AbortSignal.timeout(90_000) })
+  if (!res.ok || !res.body) throw new Error(`download HTTP ${res.status}`)
+  await pipeline(Readable.fromWeb(res.body as import('node:stream/web').ReadableStream), createWriteStream(out))
+  return out
+}
+// Entre as opções, a de duração mais próxima acima do vídeo (curta demais repete em loop).
+const byFit = <T>(list: T[], len: (x: T) => number, want: number) =>
+  [...list].sort((a, b) => (len(a) >= want ? len(a) - want : 1e6 + want - len(a)) - (len(b) >= want ? len(b) - want : 1e6 + want - len(b)))
+// Tenta as 3 que melhor encaixam: se um download falhar ou demorar, vai para a próxima.
+async function firstOk<T>(list: T[], fn: (x: T) => Promise<MusicPick>) {
+  let last: unknown
+  for (const x of list.slice(0, 3)) { try { return await fn(x) } catch (e) { last = e } }
+  if (last) throw last
+  return null
+}
+
+type MusicFn = (a: Active, tags: string, durationS: number, outBase: string) => Promise<MusicPick | null>
+const MUSIC: Record<string, MusicFn> = {
+  async elevenlabs_music(a, tags, durationS, outBase) {
+    const out = await save('https://api.elevenlabs.io/v1/music', outBase + '.mp3', {
+      method: 'POST', headers: { 'xi-api-key': a.secrets.api_key, 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: `${tags || 'calm'} instrumental background music for a YouTube video, no vocals`, music_length_ms: Math.round(Math.min(Math.max(durationS, 10), 300) * 1000) }),
+    })
+    return { path: out, provider: 'elevenlabs_music', license: 'ElevenLabs (uso comercial no plano pago)', attribution: 'Música: gerada com ElevenLabs' }
+  },
+  async jamendo(a, tags, durationS, outBase) {
+    const d = await getJson(`https://api.jamendo.com/v3.0/tracks/?client_id=${encodeURIComponent(a.secrets.api_key)}&format=json&limit=30&vocalinstrumental=instrumental&audiodownload_allowed=true&fuzzytags=${encodeURIComponent(tags.replace(/\s+/g, '+') || 'background')}`)
+    // Só licenças que permitem uso comercial e trilha em vídeo (sem NC e sem ND).
+    const ok = (d.results as any[]).filter((t) => t.audiodownload && !/-nc|-nd/.test(String(t.license_ccurl))) // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!ok.length) return null
+    return firstOk(byFit(ok, (x) => Number(x.duration), durationS), async (t) =>
+      ({ path: await save(t.audiodownload, outBase + '.mp3'), provider: 'jamendo', license: String(t.license_ccurl), attribution: `Música: "${t.name}" de ${t.artist_name} (Jamendo, ${t.license_ccurl}) ${t.shareurl}` }))
+  },
+  async openverse_audio(_a, tags, durationS, outBase) {
+    // Só Freesound: os arquivos do Jamendo listados no Openverse recusam download direto (403).
+    const d = await getJson(`https://api.openverse.org/v1/audio/?q=${encodeURIComponent(`${tags || 'background'} music`)}&source=freesound&license_type=commercial,modification&page_size=20`, UA) // sem conta, o máximo é 20 (acima disso dá 401)
+    const words = [...tags.split(/\s+/), 'music', 'loop', 'soundtrack', 'beat'].filter(Boolean)
+    const text = (r: any) => `${r.title} ${(r.tags ?? []).map((t: any) => t.name).join(' ')}`.toLowerCase() // eslint-disable-line @typescript-eslint/no-explicit-any
+    // Música de verdade (não efeito sonoro): entre 30 s e 15 min, com o estilo ou "music" no título/etiquetas.
+    const ok = (d.results as any[]).filter((r) => r.url && r.duration >= 30_000 && r.duration <= 420_000 && words.some((w) => text(r).includes(w))) // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!ok.length) return null
+    return firstOk(byFit(ok, (x) => Number(x.duration) / 1000, durationS), async (r) => {
+      const ext = String(r.url).match(/\.(mp3|ogg|wav|flac|m4a)(\?|$)/i)?.[1] ?? 'mp3'
+      const license = `CC ${String(r.license).toUpperCase()} ${r.license_version ?? ''}`.trim()
+      return { path: await save(r.url, `${outBase}.${ext}`), provider: 'openverse_audio', license, attribution: `Música: "${r.title}" de ${r.creator ?? 'autor desconhecido'} (${license}) ${r.foreign_landing_url ?? r.url}` }
+    })
+  },
+  async local_music() {
+    const dir = join(STORAGE_DIR, 'music')
+    const files = (await readdir(dir).catch(() => [])).filter((f) => /\.(mp3|m4a|wav)$/i.test(f))
+    if (!files.length) return null
+    return { path: join(dir, files[Math.floor(Math.random() * files.length)]), provider: 'local_music', license: 'biblioteca local', attribution: '' }
+  },
+}
+
+// Trilha no estilo pedido, tentando as fontes de música por prioridade. tags vazio = sem trilha.
+export async function pickMusic(userId: string | null | undefined, tags: string | null, durationS: number, outBase: string): Promise<MusicPick | null> {
+  if (tags === '') return null
+  for (const a of await activeProviders('música', userId)) {
+    try {
+      const m = await MUSIC[a.provider]?.(a, tags ?? 'background', durationS, outBase)
+      if (m) return m
+    } catch (e) { warn(a.provider, `trilha: ${(e as Error).message}`, userId) }
+  }
+  return null
 }
 
 // ---------- botão "Testar": chamada mínima, sem devolver a resposta bruta ----------
@@ -258,6 +333,67 @@ export async function testIntegration(provider: string, secrets: Record<string, 
     else if (provider === 'piper') { await piperModel(config.voice || 'faber'); await run(PIPER_BIN, ['--help']) }
     else if (provider === 'macos_say') await run('say', ['-v', config.voice || 'Luciana', '-o', '/dev/null', 'ok'])
     else if (provider === 'local_music') await readdir(join(STORAGE_DIR, 'music'))
+    else if (provider === 'openverse_audio') await getJson('https://api.openverse.org/v1/audio/?q=lofi&category=music&page_size=1', UA)
+    else if (provider === 'jamendo') { if ((await getJson(`https://api.jamendo.com/v3.0/tracks/?client_id=${encodeURIComponent(secrets.api_key)}&format=json&limit=1`)).headers?.status !== 'success') return false }
+    else if (provider === 'elevenlabs_music') await getJson('https://api.elevenlabs.io/v1/user', { 'xi-api-key': secrets.api_key })
     return true
   } catch { return false }
+}
+
+// ---------- VoiceStudio (aba Vozes): perfis de voz próprios, criados ou clonados ----------
+// Conversa com o servidor local do VoiceStudio por HTTP; o código dele (AGPL) não entra neste projeto.
+const STUDIO = () => process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
+export const STUDIO_FFMPEG = process.env.FFMPEG_PATH
+  ?? (existsSync('/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg') ? '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg' : 'ffmpeg')
+export const STUDIO_SAMPLE_TEXT = 'Olá! Esta é a minha voz. Vou narrar os seus vídeos com calma, clareza e muita naturalidade.'
+// Atributos que o modelo entende (em inglês); a tela mostra em português.
+export const STUDIO_ATTRS = {
+  gender: { male: 'Masculina', female: 'Feminina' },
+  age: { child: 'Criança', teenager: 'Adolescente', 'young adult': 'Jovem adulta', 'middle-aged': 'Meia-idade', elderly: 'Idosa' },
+  pitch: { 'very low pitch': 'Muito grave', 'low pitch': 'Grave', 'moderate pitch': 'Média', 'high pitch': 'Aguda', 'very high pitch': 'Muito aguda' },
+  style: { whisper: 'Sussurrada' },
+  accent: { 'portuguese accent': 'Português', 'american accent': 'Americano', 'british accent': 'Britânico' },
+} as const
+export type StudioAttrs = Partial<Record<keyof typeof STUDIO_ATTRS, string>>
+export const studioInstruct = (a: StudioAttrs) =>
+  (Object.keys(STUDIO_ATTRS) as (keyof typeof STUDIO_ATTRS)[]).map((k) => a[k]).filter((v): v is string => !!v && Object.values(STUDIO_ATTRS).some((m) => v in m)).join(', ')
+
+export class StudioError extends Error {}
+async function studioFetch(path: string, init: RequestInit & { timeoutMs?: number } = {}) {
+  const res = await fetch(STUDIO() + path, { ...init, signal: AbortSignal.timeout(init.timeoutMs ?? 600_000) }).catch(() => null)
+  if (!res) throw new StudioError('O VoiceStudio está desligado. Ligue o VoiceStudio e tente de novo.')
+  if (res.status === 403) throw new StudioError('O modelo de voz do VoiceStudio precisa da licença aceita. Abra o VoiceStudio e aceite a licença do modelo.')
+  if (!res.ok) throw new StudioError(`O VoiceStudio recusou o pedido (${res.status}).`)
+  return res
+}
+
+export async function studioStatus() {
+  const online = await fetch(`${STUDIO()}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false)
+  return { online }
+}
+
+// Fala gerada (WAV). Com profileId usa a voz salva; com instruct, uma voz criada pelos atributos (seed fixa = mesma voz).
+export async function studioGenerate(o: { text: string; profileId?: string; instruct?: string; speed?: number }) {
+  const form = new FormData()
+  form.append('text', o.text); form.append('language', 'Auto'); form.append('speed', String(o.speed ?? 1)); form.append('seed', '42')
+  if (o.profileId) form.append('profile_id', o.profileId)
+  if (o.instruct) form.append('instruct', o.instruct)
+  return Buffer.from(await (await studioFetch('/generate', { method: 'POST', body: form })).arrayBuffer())
+}
+
+export async function studioCreateProfile(name: string, wavPath: string, refText: string) {
+  const { readFile } = await import('node:fs/promises')
+  const form = new FormData()
+  form.append('name', name); form.append('kind', 'clone'); form.append('ref_text', refText); form.append('language', 'Auto')
+  form.append('ref_audio', new Blob([new Uint8Array(await readFile(wavPath))], { type: 'audio/wav' }), 'ref.wav')
+  const r = await (await studioFetch('/profiles', { method: 'POST', body: form })).json() as { id: string }
+  return r.id
+}
+
+export const studioDeleteProfile = (id: string) => studioFetch(`/profiles/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 10_000 }).then(() => {}, () => {})
+
+// Qualquer áudio vira WAV mono 24 kHz de até 30 s. Se o FFmpeg não ler, não é áudio.
+export async function toStudioWav(input: string, out: string) {
+  try { await run(STUDIO_FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', '30', '-vn', '-ac', '1', '-ar', '24000', out]) }
+  catch { throw new StudioError('Não consegui ler esse áudio. Envie MP3, WAV, M4A ou grave de novo.') }
 }

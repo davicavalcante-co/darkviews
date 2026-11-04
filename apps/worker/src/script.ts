@@ -6,6 +6,15 @@ import { checkPlan, ScriptOutput } from '@corte/shared'
 import { askClaude } from './claude.js'
 import { imageSheet } from './media.js'
 
+// Estilo de edição escolhido em Novo vídeo: puxa o roteiro para um tipo de movimento.
+const EDIT_STYLE: Record<string, string> = {
+  auto: '',
+  documentario: 'Estilo pedido: documentário. Prefira ken_burns com ease_in_out e transições cut/fade.',
+  dinamico: 'Estilo pedido: dinâmico. Use muito snap_zoom, punch_in, whip e slide_*, cenas curtas.',
+  revista: 'Estilo pedido: recorte de revista. Use cutout na maioria das fotos, com cut e slide_*.',
+  profundidade: 'Estilo pedido: profundidade 2.5D. Use parallax sempre que a foto tiver um objeto em destaque.',
+}
+
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 
 export async function script(job: Job) {
@@ -15,7 +24,7 @@ export async function script(job: Job) {
   })
   const images = project.assets.filter((a) => a.kind === 'user_image')
   const talkingVideo = project.assets.find((a) => a.kind === 'user_video')
-  const options = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload' }
+  const options = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
   // Pasta temporária só com as imagens do usuário, para o Claude abrir (Read) sem ver o resto do disco.
   const dir = await mkdtemp(join(tmpdir(), 'corte-roteiro-'))
   try {
@@ -34,10 +43,20 @@ export async function script(job: Job) {
       `Pedido do cliente:\n"""\n${project.prompt}\n"""`,
       `Duração alvo: ${project.targetDurationS} s (nunca acima de 1080 s). As cenas devem ser contínuas: cada uma começa onde a anterior termina, a primeira em 0 e a última termina na duração alvo.`,
       `Troque de imagem a cada 3 a 6 segundos, ou no ritmo do perfil de estilo abaixo.`,
+      'Toda cena tem narração, sem silêncio. A única exceção são as cartelas de capítulo: media.type "text_card" com o título curto (2 a 5 palavras, caixa alta), narração vazia e 1,2 a 1,6 s. Use 2 ou 3 cartelas por vídeo, nas viradas de assunto.',
+      'onScreenText (faixa de destaque sobre a imagem) só em 1 a cada 4 cenas, com 2 a 4 palavras de impacto. Nas outras, deixe vazio.',
+      'Siga o visual do perfil de estilo (cores, tipo de cartela, citações, ritmo dos cortes) quando houver referência.',
+      'Edição dinâmica, como um editor profissional: varie transição e movimento a cada cena, sem repetir o mesmo par duas vezes seguidas.',
+      'Transições: cortes secos (cut) na maior parte; punch_in/punch_out para ênfase; whip e slide_* para ritmo; zoom_through e fade só em viradas de assunto.',
+      'Movimento das fotos: ken_burns como base, com easing variado; parallax quando a foto tem um objeto ou pessoa em destaque; snap_zoom em frases de impacto; cutout em trechos explicativos ou listas.',
+      EDIT_STYLE[options.editStyle ?? 'auto'],
       project.reference?.styleProfile ? `Perfil de estilo da referência (imite o estilo, não copie o conteúdo):\n${project.reference.styleProfile}` : 'Sem vídeo de referência: escolha um estilo adequado ao pedido.',
       images.length
         ? `Imagens do cliente (prefira usá-las). Para ver o que mostram, abra com Read só estas folhas, que juntam as imagens em grade de 6 colunas, da esquerda para a direita e de cima para baixo, 24 por folha: ${sheets.join(', ')}. A posição na grade é o índice (a 1ª imagem da folha-2 é o índice 24).\n${names.map((n, i) => `- índice ${i}: legenda: ${images[i].userCaption || 'sem legenda'}`).join('\n')}`
         : 'O cliente não enviou imagens.',
+      options.useStock === false && images.length
+        ? 'O cliente pediu para usar SÓ as imagens dele: não use banco de imagens. Repita as imagens dele quando faltar, variando a ordem e a transição.'
+        : '',
       'Para cenas sem imagem do cliente, use banco de imagens/vídeos com 2 a 3 termos de busca em inglês. Use quadro de texto só quando nada servir. Não use pessoas de banco para representar clientes reais.',
       options.talkingHead === 'upload' && talkingVideo
         ? 'Nos trechos em que a referência mostra uma pessoa falando para a câmera, use media.type "user_video" (o vídeo do cliente, sem som, com a legenda passando).'
@@ -74,7 +93,7 @@ async function save(projectId: string, plan: ScriptOutput, imageIds: string[], t
         projectId, version, body: plan.body, scenePlan: JSON.stringify(plan.scenes), createdBy: 'claude',
         scenes: {
           create: plan.scenes.map((s, index) => ({
-            index, startS: s.startS, endS: s.endS, narration: s.narration, onScreenText: s.onScreenText || null, transition: s.transition,
+            index, startS: s.startS, endS: s.endS, narration: s.narration, onScreenText: s.onScreenText || null, transition: s.transition, motion: s.motion, easing: s.easing,
             assetId: s.media.type === 'user_image' ? imageIds[s.media.imageIndex] : s.media.type === 'user_video' ? talkingVideoId ?? null : null,
             searchQuery: s.media.type === 'stock' ? JSON.stringify(s.media) : s.media.type === 'text_card' ? JSON.stringify(s.media) : null,
           })),

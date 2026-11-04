@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
-import { mkdir, open, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, open, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -59,6 +59,30 @@ export async function adminRoutes(app: FastifyInstance) {
   })
 
   const admin = { preHandler: requireAdmin }
+
+  // Biblioteca de músicas locais (compartilhada): o admin envia MP3, M4A ou WAV pelo botão, sem mexer em pastas.
+  const MUSIC_DIR = join(STORAGE_DIR, 'music')
+  app.get('/api/admin/music', admin, async () => ({ files: (await readdir(MUSIC_DIR).catch(() => [])).filter((f) => /\.(mp3|m4a|wav)$/i.test(f)).sort() }))
+  app.post('/api/admin/music', admin, async (req, reply) => {
+    const part = await req.file()
+    if (!part) return reply.code(400).send({ error: 'Escolha um arquivo de música' })
+    await mkdir(MUSIC_DIR, { recursive: true })
+    const tmp = join(MUSIC_DIR, `envio-${randomUUID()}`)
+    await pipeline(part.file, createWriteStream(tmp))
+    const head = (await readFile(tmp)).subarray(0, 12)
+    const ext = head.subarray(0, 3).toString() === 'ID3' || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) ? 'mp3'
+      : head.subarray(0, 4).toString() === 'RIFF' && head.subarray(8, 12).toString() === 'WAVE' ? 'wav'
+        : head.subarray(4, 8).toString() === 'ftyp' ? 'm4a' : null
+    if (part.file.truncated || !ext || (await stat(tmp)).size > 50 * 1024 * 1024) {
+      await rm(tmp, { force: true })
+      return reply.code(400).send({ error: ext ? 'A música pode ter até 50 MB' : 'Use um arquivo MP3, M4A ou WAV' })
+    }
+    const name = part.filename.replace(/\.[^.]+$/, '').normalize('NFD').replace(/[^\w -]+/g, '').trim().slice(0, 60) || 'musica'
+    await rename(tmp, join(MUSIC_DIR, `${name}-${randomUUID().slice(0, 6)}.${ext}`))
+    await audit(req.user!.id, 'music.upload', 'music', name, { name }, req.ip)
+    return reply.code(201).send({ ok: true })
+  })
+
   const audit = (actorId: string, action: string, targetType: string, targetId: string | null, details: object, ip: string) =>
     prisma.auditLog.create({ data: { actorId, action, targetType, targetId, details: JSON.stringify(details), ip } })
 

@@ -9,6 +9,7 @@ const PATHS: Record<string, ReactNode> = {
   aprovacao: <><circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" /></>,
   admin: <><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></>,
   integracoes: <><path d="M9 7V4M15 7V4" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></>,
+  vozes: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
   sair: <><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" /><path d="m15 16 4-4-4-4M19 12H9" /></>,
   expandir: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M13.5 9.5 16 12l-2.5 2.5" /></>,
   recolher: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M16 9.5 13.5 12l2.5 2.5" /></>,

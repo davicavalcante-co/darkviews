@@ -44,7 +44,13 @@ export function detectPlatform(link: string): Platform | null {
 }
 
 // Fontes liberadas de fábrica; o admin libera ou bloqueia outras na tabela `fonts`.
-export const DEFAULT_FONTS = ['Montserrat', 'Poppins', 'Inter', 'Bebas Neue', 'Roboto'] as const
+// Fontes de fábrica (todas do Google Fonts, baixadas na hora do render): boas para legenda e título de YouTube.
+export const DEFAULT_FONTS = [
+  'Montserrat', 'Poppins', 'Inter', 'Bebas Neue', 'Roboto', 'Anton', 'Oswald', 'Archivo Black', 'Bangers', 'Barlow Condensed',
+  'Bricolage Grotesque', 'Bungee', 'DM Sans', 'Fira Sans', 'Fjalla One', 'Lato', 'League Spartan', 'Lilita One', 'Lexend',
+  'Luckiest Guy', 'Manrope', 'Merriweather', 'Noto Sans', 'Nunito', 'Open Sans', 'Outfit', 'Permanent Marker', 'Playfair Display',
+  'Raleway', 'Righteous', 'Roboto Condensed', 'Rubik', 'Russo One', 'Space Grotesk', 'Teko', 'Titan One', 'Ubuntu', 'Work Sans',
+] as const
 export const HighlightMode = z.enum(['palavra-chave', 'manual', 'karaokê'])
 
 export const IMAGE_MAX_BYTES = 20 * 1024 * 1024
@@ -68,6 +74,13 @@ export const NewProjectInput = z.object({
   voiceTone: z.enum(['calma', 'natural', 'animada']).optional().or(z.literal('').transform(() => undefined)),
   highlightColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().or(z.literal('').transform(() => undefined)),
   captionPosition: z.string().regex(CAPTION_POSITION).optional().or(z.literal('').transform(() => undefined)),
+  captionSize: z.coerce.number().int().min(24).max(140).optional(),
+  captionOutline: z.enum(['0', '1']).optional().transform((v) => (v === undefined ? undefined : v === '1')),
+  bgColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().or(z.literal('').transform(() => undefined)),
+  editStyle: z.enum(['auto', 'documentario', 'dinamico', 'revista', 'profundidade']).optional().or(z.literal('').transform(() => undefined)),
+  musicStyle: z.string().max(20).optional().or(z.literal('').transform(() => undefined)),
+  musicVolume: z.coerce.number().int().min(0).max(100).optional(),
+  useStock: z.enum(['0', '1']).optional().transform((v) => v !== '0'), // false: só as imagens do cliente, sem banco
   captions: z.string().default('[]').transform((s, ctx) => {
     try { return z.array(z.string().max(200)).parse(JSON.parse(s)) } catch {
       ctx.addIssue({ code: 'custom', message: 'Legendas inválidas' }); return z.NEVER
@@ -134,9 +147,18 @@ export const PROVIDERS: CatalogItem[] = [
   { provider: 'openverse', label: 'Openverse', category: 'banco_de_imagens', tier: 'gratis', secrets: [], builtIn: true, priority: 60, config: {},
     help: 'Fotos com licença Creative Commons para uso comercial. Já vem conectado.',
     tutorial: ['Já vem pronto, sem cadastro.', 'Só usa fotos liberadas para uso comercial.', 'O crédito de cada foto entra sozinho na descrição do vídeo.'] },
+  { provider: 'elevenlabs_music', label: 'ElevenLabs Música', category: 'música', tier: 'pago', secrets: ['api_key'], priority: 10, config: {},
+    help: 'Cria uma trilha original no estilo escolhido, do tamanho do vídeo. Liberada para uso comercial nos planos pagos.', signup: 'https://elevenlabs.io/app/settings/api-keys',
+    tutorial: ['Use a mesma conta da ElevenLabs (plano pago para uso comercial).', 'Abra Settings → API Keys, crie uma chave e copie.', 'Cole a chave aqui, ligue o card e clique em Testar.', 'Em Novo vídeo, escolha o estilo: a trilha é composta sob medida.'] },
+  { provider: 'jamendo', label: 'Jamendo', category: 'música', tier: 'gratis_chave', secrets: ['api_key'], priority: 20, config: {},
+    help: 'Mais de 500 mil músicas de artistas independentes. Só usamos as liberadas para uso comercial.', signup: 'https://devportal.jamendo.com/',
+    tutorial: ['Crie uma conta grátis em devportal.jamendo.com.', 'Clique em "Create an app" e dê um nome (ex.: Corte Final).', 'Copie o "Client ID" da app criada.', 'Cole aqui no campo da chave, ligue o card e clique em Testar.'] },
+  { provider: 'openverse_audio', label: 'Openverse Áudio', category: 'música', tier: 'gratis', secrets: [], builtIn: true, priority: 30, config: {},
+    help: 'Músicas Creative Commons liberadas para uso comercial (Jamendo, Freesound, ccMixter e outros). Já vem conectado.',
+    tutorial: ['Já vem pronto, sem cadastro.', 'Só usa músicas liberadas para uso comercial.', 'O crédito da música entra na descrição do vídeo.'] },
   { provider: 'local_music', label: 'Músicas locais', category: 'música', tier: 'gratis', secrets: [], builtIn: true, priority: 50, config: {},
-    help: 'Usa os arquivos MP3/M4A da pasta storage/music (com licença de uso).',
-    tutorial: ['Coloque arquivos MP3, M4A ou WAV na pasta storage/music do projeto.', 'Use só músicas com licença para uso comercial (bibliotecas pagas ou faixas livres de royalties).', 'Uma faixa é sorteada por vídeo e fica baixinha, por baixo da narração.'] },
+    help: 'Suas próprias músicas (com licença de uso). Reserva: entra quando as outras fontes não acham nada.',
+    tutorial: ['Clique em "Enviar músicas" aqui embaixo e escolha arquivos MP3, M4A ou WAV.', 'Use só músicas com licença para uso comercial (bibliotecas pagas ou faixas livres de royalties).', 'Uma faixa é sorteada por vídeo e fica baixinha, por baixo da narração.'] },
 ]
 
 export const IntegrationUpdate = z.object({
@@ -177,16 +199,28 @@ export const CaptionTrackInput = z.object({
   highlightColor: hex,
   highlightMode: HighlightMode,
   position: z.string().regex(CAPTION_POSITION),
+  outline: z.boolean().default(true),
   segments: z.array(CaptionSegmentInput).max(2000),
 })
 export * from './cuts'
 export * from './claude-usage'
 
+// ---------- Trilha sonora: estilos (termos de busca em inglês) ----------
+export const MUSIC_STYLES = [
+  { id: 'auto', label: 'Automático', tags: 'background' }, { id: 'lofi', label: 'Lo-fi', tags: 'lofi chill' },
+  { id: 'eletronica', label: 'Eletrônica', tags: 'electronic' }, { id: 'rock', label: 'Rock', tags: 'rock' },
+  { id: 'classica', label: 'Clássica', tags: 'classical piano' }, { id: 'cinematica', label: 'Cinema', tags: 'cinematic' },
+  { id: 'epica', label: 'Épica', tags: 'epic orchestral' }, { id: 'acustica', label: 'Acústica', tags: 'acoustic guitar' },
+  { id: 'corporativa', label: 'Corporativa', tags: 'corporate' }, { id: 'hiphop', label: 'Hip hop', tags: 'hip hop beat' },
+  { id: 'jazz', label: 'Jazz', tags: 'jazz' }, { id: 'ambiente', label: 'Ambiente', tags: 'ambient' },
+  { id: 'suspense', label: 'Suspense', tags: 'suspense dark' }, { id: 'none', label: 'Sem trilha', tags: '' },
+] as const
+
 // ---------- Voz desejada: opções prontas por fornecedor de voz ----------
 export const VOICE_TONES = [
-  { id: 'calma', label: 'Calma', speed: 0.92 },
-  { id: 'natural', label: 'Natural', speed: 1.0 },
-  { id: 'animada', label: 'Animada', speed: 1.1 },
+  { id: 'calma', label: 'Calma', speed: 1.0 },
+  { id: 'natural', label: 'Natural', speed: 1.1 },
+  { id: 'animada', label: 'Animada', speed: 1.2 },
 ] as const
 export const VOICE_PRESETS: Record<string, { id: string; label: string }[]> = {
   kokoro: [{ id: 'pf_dora', label: 'Dora - Mulher' }, { id: 'pm_alex', label: 'Alex - Homem' }, { id: 'pm_santa', label: 'Santa - Homem, voz grave' }],

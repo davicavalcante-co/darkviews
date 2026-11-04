@@ -5,9 +5,10 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
-import { prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
+import { prisma, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
 import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
-import { activeProviders } from '@corte/providers'
+import { z } from 'zod'
+import { activeProviders, preferProvider } from '@corte/providers'
 import { requireAuth } from './auth.js'
 import { enabledFonts, getSettings } from './settings.js'
 
@@ -87,7 +88,7 @@ export async function projectRoutes(app: FastifyInstance) {
           name: input.name,
           prompt: input.prompt,
           targetDurationS: input.targetDurationS,
-          options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone, highlightColor: input.highlightColor, captionPosition: input.captionPosition }),
+          options: optionsJson(input),
           reference: input.link
             ? { create: { sourceType: 'link', url: input.link, platform: detectPlatform(input.link) } }
             : video[0] ? { create: { sourceType: 'upload', filePath: video[0].path } } : undefined,
@@ -106,13 +107,57 @@ export async function projectRoutes(app: FastifyInstance) {
     }
   })
 
+  // Nova versão do mesmo vídeo com os campos ajustados: mesma referência, roteiro novo, e o vídeo novo entra como próxima versão.
+  // "order" diz a sequência das imagens: {id} para manter uma já enviada, {new: true} para cada arquivo novo (na ordem do envio).
+  app.post<{ Params: { id: string } }>('/api/projects/:id/regenerate', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), include: { assets: { where: { kind: 'user_image' } }, jobs: { where: { status: { in: ['queued', 'running', 'paused'] } } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.jobs.length) return reply.code(409).send({ error: 'Este vídeo ainda está sendo criado. Espere terminar para gerar outra versão.' })
+    const fields: Record<string, string> = {}
+    const files: Saved[] = []
+    try {
+      for await (const part of req.parts()) {
+        if (part.type === 'field') fields[part.fieldname] = String(part.value)
+        else if (part.fieldname === 'images') files.push(await saveUpload(part))
+        else throw httpError(400, 'Nesta tela só dá para enviar imagens')
+      }
+      const input = NewProjectInput.parse({ ...fields, link: undefined })
+      const settings = await getSettings()
+      if (input.targetDurationS > settings.max_duration_s) throw httpError(400, `Duração máxima definida pelo admin: ${Math.floor(settings.max_duration_s / 60)} min`)
+      if (!(await enabledFonts()).includes(input.fontFamily)) throw httpError(400, 'Fonte não liberada pelo admin')
+      const order = RegenOrder.parse(JSON.parse(fields.order ?? '[]'))
+      if (order.filter((o) => 'new' in o).length !== files.length) throw httpError(400, 'Imagens fora de ordem; tente de novo')
+      const owned = new Set(p.assets.map((a) => a.id))
+      if (order.some((o) => 'id' in o && !owned.has(o.id))) throw httpError(400, 'Imagem que não é deste vídeo')
+
+      const kept = new Set(order.flatMap((o) => ('id' in o ? [o.id] : [])))
+      const dropped = p.assets.filter((a) => !kept.has(a.id))
+      let n = 0
+      await prisma.$transaction([
+        prisma.scene.updateMany({ where: { assetId: { in: dropped.map((a) => a.id) } }, data: { assetId: null } }),
+        prisma.asset.deleteMany({ where: { id: { in: dropped.map((a) => a.id) } } }),
+        ...order.map((o, i) => ('id' in o
+          ? prisma.asset.update({ where: { id: o.id }, data: { sortOrder: i, userCaption: o.caption || null } })
+          : prisma.asset.create({ data: { projectId: p.id, kind: 'user_image', filePath: files[n++].path, mime: files[n - 1].mime, sortOrder: i, userCaption: o.caption || null } }))),
+        prisma.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } }), // a legenda nova segue o estilo escolhido
+        prisma.project.update({ where: { id: p.id }, data: { name: input.name, prompt: input.prompt, targetDurationS: input.targetDurationS, status: 'scripting', options: optionsJson(input, JSON.parse(p.options)) } }),
+        prisma.job.create({ data: { projectId: p.id, type: 'script', stage: 'Na fila' } }),
+      ])
+      await Promise.all(dropped.map((a) => rm(a.filePath, { force: true })))
+      return reply.code(202).send({ id: p.id })
+    } catch (e) {
+      await Promise.all(files.map((f) => rm(f.path, { force: true })))
+      throw e
+    }
+  })
+
   app.get('/api/projects', { preHandler: requireAuth }, async (req) => {
     const rows = await prisma.project.findMany({
       where: req.user!.role === 'admin' ? {} : { ownerId: req.user!.id },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, name: true, prompt: true, status: true, targetDurationS: true, aspect: true, createdAt: true, owner: { select: { name: true } },
-        videoVersions: { where: { isCurrent: true }, select: { version: true, durationS: true } },
+        videoVersions: { orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true } },
         jobs: { where: { status: { in: ['queued', 'running', 'paused'] } }, orderBy: { createdAt: 'desc' }, take: 1, select: { stage: true, progress: true, status: true, etaS: true } },
         _count: { select: { assets: { where: { kind: 'user_image' } } } },
       },
@@ -120,7 +165,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const tokens = await tokensByProject(rows.map((r) => r.id))
     // Formato da lista e do feed "Criações": prompt resumido, vídeo atual, tarefa em andamento e tokens gastos.
     return rows.map(({ videoVersions, jobs, _count, prompt, ...p }) => ({
-      ...p, prompt: prompt.slice(0, 220), video: videoVersions[0] ?? null, job: jobs[0] ?? null, images: _count.assets, tokens: tokens.get(p.id) ?? 0,
+      ...p, prompt: prompt.slice(0, 220), video: videoVersions.find((v) => v.isCurrent) ?? null, versions: videoVersions, job: jobs[0] ?? null, images: _count.assets, tokens: tokens.get(p.id) ?? 0,
     }))
   })
 
@@ -176,9 +221,11 @@ export async function projectRoutes(app: FastifyInstance) {
     req.raw.on('close', () => clearInterval(timer))
   })
 
-  // Vídeo atual, com suporte a Range (o player do navegador pede pedaços). O caminho do arquivo nunca sai daqui.
+  // Vídeo (atual ou a versão pedida), com suporte a Range (o player do navegador pede pedaços). O caminho do arquivo nunca sai daqui.
   app.get<{ Params: { id: string } }>('/api/projects/:id/video', { preHandler: requireAuth }, async (req, reply) => {
-    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { videoVersions: { where: { isCurrent: true } } } })
+    // ?v=N abre uma versão específica (os cards mostram todas); sem ?v, a atual.
+    const wanted = Number((req.query as { v?: string }).v) || null
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { videoVersions: { where: wanted ? { version: wanted } : { isCurrent: true } } } })
     const v = p?.videoVersions[0]
     if (!v) return reply.code(404).send({ error: 'Vídeo não encontrado' })
     const size = (await stat(v.filePath)).size
@@ -195,11 +242,16 @@ export async function projectRoutes(app: FastifyInstance) {
   // Voz que vai narrar os vídeos deste usuário (a primeira pronta) e as opções prontas para escolher em Novo vídeo.
   // Todas as vozes prontas para este usuário, com a origem: "Faber - Masculina (Piper)". O id é "fornecedor:voz".
   app.get('/api/voices', { preHandler: requireAuth }, async (req) => {
-    const active = await activeProviders('voz', req.user!.id)
-    const voices = active.flatMap((a) => {
+    const active = preferProvider(await activeProviders('voz', req.user!.id)) // Piper e macOS por último (erram mais a pronúncia)
+    // OmniVoice fica de fora: o modelo dele é não comercial e costuma estar bloqueado pela licença.
+    const voices = active.filter((a) => a.provider !== 'omnivoice').flatMap((a) => {
       const label = (PROVIDERS.find((x) => x.provider === a.provider)?.label ?? a.provider).split(' · ')[0].split(' (')[0]
       return (VOICE_PRESETS[a.provider] ?? []).map((v) => ({ id: `${a.provider}:${v.id}`, label: `${v.label} (${label})`, provider: a.provider, freeText: a.provider === 'omnivoice' }))
     })
+    // Vozes próprias publicadas na aba Vozes vêm primeiro.
+    const own = (await prisma.studioVoice.findMany({ where: { ownerId: req.user!.id, status: 'published' }, orderBy: { name: 'asc' } }))
+      .map((v) => ({ id: `studio:${v.id}`, label: `${v.name} (Minha voz)`, provider: 'studio', freeText: false }))
+    voices.unshift(...own)
     const first = active[0]
     const current = first && `${first.provider}:${first.config.voice ?? ''}`
     return { voices, current: voices.some((v) => v.id === current) ? current : voices[0]?.id ?? null, tones: VOICE_TONES }
@@ -221,10 +273,8 @@ export async function projectRoutes(app: FastifyInstance) {
       await prisma.asset.create({ data: { projectId: p.id, kind: 'user_video', filePath: saved.path, mime: saved.mime, sortOrder: 0 } })
       choice = 'upload'
     } else if ((req.body as { choice?: string } | null)?.choice !== 'stock') return reply.code(400).send({ error: 'Escolha inválida' })
-    await prisma.$transaction([
-      prisma.project.update({ where: { id: p.id }, data: { status: 'scripting', options: JSON.stringify({ ...JSON.parse(p.options), talkingHead: choice }) } }),
-      prisma.job.create({ data: { projectId: p.id, type: 'script', stage: 'Na fila' } }),
-    ])
+    const ok = await advance(p.id, 'talking_head', { status: 'scripting', options: JSON.stringify({ ...JSON.parse(p.options), talkingHead: choice }) }, 'script')
+    if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando essa escolha' })
     return reply.code(202).send({ choice })
   })
 
@@ -257,14 +307,11 @@ export async function projectRoutes(app: FastifyInstance) {
     if (p.status !== 'image_review') return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     const { rejected } = ReviewInput.parse(req.body)
     const scenes = await prisma.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', index: { in: rejected } }, include: { asset: true } })
-    await prisma.$transaction([
-      ...scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
-        const q = JSON.parse(s.searchQuery!)
-        return prisma.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
-      }),
-      prisma.project.update({ where: { id: p.id }, data: { status: 'media' } }),
-      prisma.job.create({ data: { projectId: p.id, type: scenes.length ? 'media' : 'voice', stage: 'Na fila' } }),
-    ])
+    const ok = await advance(p.id, 'image_review', { status: 'media' }, scenes.length ? 'media' : 'voice', (tx) => Promise.all(scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
+      const q = JSON.parse(s.searchQuery!)
+      return tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
+    })))
+    if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
   })
 
@@ -294,26 +341,37 @@ export async function projectRoutes(app: FastifyInstance) {
     if (await prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } } })) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
     const failed = await prisma.job.findFirst({ where: { projectId: p.id, status: 'failed' }, orderBy: { createdAt: 'desc' } })
     if (!failed || p.status !== 'failed') return reply.code(409).send({ error: 'Não há etapa com falha para repetir' })
-    await prisma.$transaction([
-      prisma.job.create({ data: { projectId: p.id, type: failed.type, payload: failed.payload, stage: 'Na fila' } }),
-      prisma.project.update({ where: { id: p.id }, data: { status: RETRY_STATUS[failed.type] ?? 'queued' } }),
-    ])
+    if (!(await advance(p.id, 'failed', { status: RETRY_STATUS[failed.type] ?? 'queued' }, failed.type, undefined, failed.payload))) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
     return reply.code(202).send({ retried: failed.type })
   })
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({
       where: projectScope(req, req.params.id),
-      select: { id: true, status: true, reference: { select: { filePath: true } }, assets: { select: { filePath: true } } },
+      select: { id: true, status: true, reference: { select: { filePath: true } }, assets: { select: { filePath: true } }, jobs: { where: { status: 'running' }, select: { id: true } } },
     })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    // Com o worker no meio do trabalho ele regravaria os arquivos depois de apagados.
+    if (p.jobs.length) return reply.code(409).send({ error: 'Este vídeo ainda está sendo criado. Espere terminar para excluir.' })
     if (req.user!.role !== 'admin' && p.status === 'approved') return reply.code(403).send({ error: 'Projeto aprovado não pode ser excluído' })
     await prisma.project.delete({ where: { id: p.id } })
     // Apaga tudo o que o vídeo usou: envios, referência, imagens, narração, renders, cortes e miniaturas.
-    const paths = [p.reference?.filePath, ...p.assets.map((a) => a.filePath)].filter((x): x is string => !!x)
+    // A biblioteca de músicas locais é compartilhada: nunca apaga de lá.
+    const paths = [p.reference?.filePath, ...p.assets.filter((a) => !a.filePath.startsWith(join(STORAGE_DIR, 'music'))).map((a) => a.filePath)].filter((x): x is string => !!x)
     const dirs = ['media', 'renders', 'cuts', 'thumbs'].map((d) => join(STORAGE_DIR, d, p.id))
-    await Promise.all([...paths, ...dirs].map((f) => rm(f, { force: true, recursive: true })))
+    await Promise.all([...paths, ...paths.map((f) => `${f}.mask.png`), ...dirs].map((f) => rm(f, { force: true, recursive: true }))) // .mask.png: recorte do parallax
     return { ok: true }
+  })
+}
+
+// Avança o projeto só se ele ainda estiver no status esperado: num clique duplo o segundo pedido não troca nada e não cria outra tarefa.
+async function advance(id: string, from: string, data: { status: string; options?: string }, jobType: string, extra?: (tx: Prisma.TransactionClient) => Promise<unknown>, payload?: string | null) {
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.project.updateMany({ where: { id, status: from }, data })
+    if (!count) return false
+    await extra?.(tx)
+    await tx.job.create({ data: { projectId: id, type: jobType, payload: payload ?? undefined, stage: 'Na fila' } })
+    return true
   })
 }
 
@@ -330,3 +388,14 @@ async function tokensByProject(ids: string[]) {
   }
   return out
 }
+
+// Opções do vídeo guardadas no projeto. Na nova versão, mantém o que veio antes (ex.: a escolha de pessoa falando).
+function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    ...prev, fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
+    highlightColor: input.highlightColor, captionPosition: input.captionPosition, captionSize: input.captionSize, captionOutline: input.captionOutline,
+    bgColor: input.bgColor, useStock: input.useStock, musicStyle: input.musicStyle, musicVolume: input.musicVolume, editStyle: input.editStyle,
+  })
+}
+
+const RegenOrder = z.array(z.union([z.object({ id: z.string().uuid(), caption: z.string().max(200).default('') }), z.object({ new: z.literal(true), caption: z.string().max(200).default('') })])).max(200)

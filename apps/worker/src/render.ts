@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, STORAGE_DIR, type Job } from '@corte/db'
@@ -6,41 +6,112 @@ import { MAX_DURATION_S } from '@corte/shared'
 import { buildSegments, toAss, type CaptionStyle, type Segment, type TimedScene } from './captions.js'
 import { assertLibass, durationOf, FFMPEG, run } from './ffmpeg.js'
 import { ensureFont, FONTS_DIR } from './fonts.js'
+import { subjectMask } from './subject.js'
 
 const FPS = 30
 const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
-export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null }
+export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
-export type RenderInput = { scenes: RenderScene[]; music: string | null; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
+export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
 
 // Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
-const TRANSITIONS: Record<string, [string, number]> = { fade: ['fade', 0.45], slide: ['slideleft', 0.45], zoom: ['zoomin', 0.45], cut: ['fade', 0.12] }
+// Os cortes secos usam 1 quadro de transição (na prática, corte direto).
+const TRANSITIONS: Record<string, [string, number]> = {
+  fade: ['fade', 0.45], cut: ['fade', 1 / FPS], punch_in: ['fade', 1 / FPS], punch_out: ['fade', 1 / FPS],
+  zoom_through: ['zoomin', 0.5], zoom: ['zoomin', 0.45],
+  slide_left: ['slideleft', 0.35], slide_right: ['slideright', 0.35], slide_up: ['slideup', 0.35], slide_down: ['slidedown', 0.35], slide: ['slideleft', 0.35],
+  whip: ['hblur', 0.3], // chicote: troca rápida com borrão horizontal
+}
+
+// Curvas de animação sobre o progresso p (0 → 1) da cena.
+function ease(easing: string | undefined, p: string) {
+  if (easing === 'linear') return p
+  if (easing === 'ease_in') return `(${p})*(${p})`
+  if (easing === 'ease_out') return `(1-(1-${p})*(1-${p}))`
+  return `if(lt(${p},0.5),2*(${p})*(${p}),1-pow(-2*(${p})+2,2)/2)` // ease_in_out
+}
+const ENC = (frames: number, out: string) => ['-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
+
+// Efeitos para fotos. Devolve null quando não se aplica (cai no Ken Burns).
+function imageEffect(s: RenderScene, i: number, len: number, frames: number, out: string): string[] | null {
+  const P = `min(1,on/${frames})`, E = ease(s.easing, P)
+  if (s.motion === 'static') return ['-i', s.path!, '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,loop=-1:1,fps=${FPS}`, ...ENC(frames, out)]
+  if (s.motion === 'snap_zoom') {
+    // Zoom brusco: parado até ~35% da cena, salta para 1,3x em 6 quadros (ease out) e segue aproximando devagar.
+    const at = Math.round(frames * 0.35)
+    const z = `if(lt(on,${at}),1,1.3*(1-pow(1-min(1,(on-${at})/6),3))+(1-(1-pow(1-min(1,(on-${at})/6),3)))+0.04*(on-${at})/${frames})`
+    return ['-i', s.path!, '-vf', `scale=2880:1620:force_original_aspect_ratio=increase,crop=2880:1620,zoompan=z='${z}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${frames}:s=1920x1080:fps=${FPS}`, ...ENC(frames, out)]
+  }
+  if (s.motion === 'cutout') {
+    // Recorte de revista: foto com borda branca e sombra sobre papel, entrando em degraus e tremendo a cada 4 quadros (stop-motion).
+    const tilt = [0.025, -0.02, 0.015, -0.03][i % 4]
+    const jx = '6*sin(floor(n/4)*2.3)', jy = '5*cos(floor(n/4)*1.7)', enter = `140*max(0,1-floor(t*8)/4)`
+    const g = [
+      `color=c=0xEDE4D0:s=1920x1080:r=${FPS}:d=${len.toFixed(3)},noise=alls=10:allf=u,format=yuv420p[bg]`,
+      `[0]scale=1440:800:force_original_aspect_ratio=decrease,pad=iw+40:ih+40:20:20:color=white,format=rgba,loop=-1:1,fps=${FPS},rotate=a='${tilt}+0.012*sin(floor(n/4)*2.1)':c=none:ow=rotw(0.08):oh=roth(0.08),split[f][s0]`,
+      `[s0]colorchannelmixer=rr=0:gg=0:bb=0:aa=0.45,boxblur=14[sh]`,
+      `[bg][sh]overlay=x='(W-w)/2+16+${jx}':y='(H-h)/2+20+${jy}+${enter}':shortest=1[b1]`,
+      `[b1][f]overlay=x='(W-w)/2+${jx}':y='(H-h)/2+${jy}+${enter}':shortest=1,format=yuv420p`,
+    ].join(';')
+    return ['-i', s.path!, '-filter_complex', g, ...ENC(frames, out)]
+  }
+  if (s.motion === 'parallax' && s.mask) {
+    // 2.5D: o fundo aproxima devagar e o objeto (recortado pela máscara) desliza mais rápido por cima.
+    const Et = ease(s.easing, `min(1,t/${len.toFixed(3)})`), dir = i % 2 ? 1 : -1
+    const g = [
+      `[0]scale=2304:1296:force_original_aspect_ratio=increase,crop=2304:1296,boxblur=2,zoompan=z='1+0.06*${E}':x='(iw-iw/zoom)*(0.5+${0.25 * dir}*${E})':y='ih/2-(ih/zoom/2)':d=${frames}:s=1920x1080:fps=${FPS}[bg]`,
+      `[1]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,loop=-1:1,fps=${FPS}[fi]`,
+      `[2]scale=2112:1188:force_original_aspect_ratio=increase,crop=2112:1188,format=gray,loop=-1:1,fps=${FPS}[m]`,
+      `[fi][m]alphamerge[fg]`,
+      `[bg][fg]overlay=x='(W-w)/2+${-80 * dir}*${Et}':y='(H-h)/2-24*${Et}':shortest=1,format=yuv420p`,
+    ].join(';')
+    return ['-i', s.path!, '-i', s.path!, '-i', s.mask, '-filter_complex', g, ...ENC(frames, out)]
+  }
+  return null
+}
 
 // extraS: o clipe dura um pouco mais que a cena para sobrepor com a próxima na transição (o total não muda).
 function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] {
   const len = s.durationS + extraS
   const frames = Math.round(len * FPS)
   const fade = ''
+  // Zoom seco: imagem parada que, no meio da cena, salta para mais perto (punch_in) ou mais longe (punch_out), como trocar de câmera.
+  if ((s.transition === 'punch_in' || s.transition === 'punch_out') && s.kind !== 'card') {
+    const half = Math.round(frames / 2), [a, b] = s.transition === 'punch_in' ? [1, 1.3] : [1.3, 1]
+    const n = s.kind === 'image' ? 'on' : 'in'
+    const zp = `zoompan=z='if(lt(${n},${half}),${a},${b})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${s.kind === 'image' ? frames : 1}:s=1920x1080:fps=${FPS}`
+    return s.kind === 'image'
+      ? ['-i', s.path!, '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,${zp}`, '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
+      : ['-stream_loop', '-1', '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS},${zp}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
+  }
   if (s.kind === 'image') {
-    // Movimento contínuo e variado, cena a cena: aproxima, afasta, desliza para a direita e para a esquerda.
+    const fx = imageEffect(s, i, len, frames, out)
+    if (fx) return fx
+    // Ken Burns: movimento contínuo e variado, cena a cena: aproxima, afasta, desliza para a direita e para a esquerda.
     // A intensidade acompanha a duração (on = quadro atual, d = total), então cenas curtas também se mexem.
-    const zIn = `1+0.22*on/${frames}`, zOut = `1.22-0.22*on/${frames}`
+    // Zoom combinado com um leve pan, na curva escolhida (easing).
+    const E = ease(s.easing, `min(1,on/${frames})`)
     const motion = [
-      { z: zIn, x: 'iw/2-(iw/zoom/2)', y: 'ih/2-(ih/zoom/2)' },
-      { z: '1.18', x: `(iw-iw/zoom)*on/${frames}`, y: 'ih/2-(ih/zoom/2)' },
-      { z: zOut, x: 'iw/2-(iw/zoom/2)', y: 'ih/2-(ih/zoom/2)' },
-      { z: '1.18', x: `(iw-iw/zoom)*(1-on/${frames})`, y: 'ih/2-(ih/zoom/2)' },
+      { z: `1+0.12*${E}`, x: `(iw-iw/zoom)*(0.4+0.2*${E})`, y: 'ih/2-(ih/zoom/2)' },
+      { z: `1.12-0.12*${E}`, x: `(iw-iw/zoom)*(0.6-0.2*${E})`, y: 'ih/2-(ih/zoom/2)' },
+      { z: `1.04+0.08*${E}`, x: 'iw/2-(iw/zoom/2)', y: `(ih-ih/zoom)*(0.55-0.2*${E})` },
+      { z: '1.1', x: `(iw-iw/zoom)*(0.8-0.6*${E})`, y: 'ih/2-(ih/zoom/2)' },
     ][i % 4]
     return ['-i', s.path!, '-vf',
-      `scale=2304:1296:force_original_aspect_ratio=increase,crop=2304:1296,zoompan=z='${motion.z}':x='${motion.x}':y='${motion.y}':d=${frames}:s=1920x1080:fps=${FPS}${fade}`,
+      `scale=2880:1620:force_original_aspect_ratio=increase,crop=2880:1620,zoompan=z='${motion.z}':x='${motion.x}':y='${motion.y}':d=${frames}:s=1920x1080:fps=${FPS}${fade}`,
       '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   if (s.kind === 'video') {
     return ['-stream_loop', '-1', '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
       `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS}${fade}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
-  return ['-f', 'lavfi', '-i', `color=c=0x111418:s=1920x1080:r=${FPS}:d=${len.toFixed(3)}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
+  // Cartela: a foto da cena vizinha desfocada e tingida com a cor de fundo (como as cartelas de capítulo das referências).
+  if (s.path) {
+    const g = `[0]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=18,eq=saturation=0.35:brightness=-0.08,loop=-1:1,fps=${FPS}[b];color=c=0x${(s.bg ?? '#111418').slice(1)}@0.72:s=1920x1080:r=${FPS}:d=${len.toFixed(3)}[t];[b][t]overlay=shortest=1,zoompan=z='1+0.05*on/${frames}':d=1:s=1920x1080:fps=${FPS},format=yuv420p`
+    return ['-i', s.path, '-filter_complex', g, ...ENC(frames, out)]
+  }
+  return ['-f', 'lavfi', '-i', `color=c=0x${(s.bg ?? '#111418').slice(1)}:s=1920x1080:r=${FPS}:d=${len.toFixed(3)}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
 }
 
 // Monta o vídeo final 1920x1080 30 fps: clipes por cena, locução casada com as cenas, trilha baixa e legenda ASS queimada.
@@ -53,9 +124,21 @@ export async function renderVideo(input: RenderInput) {
   try {
     const clips: string[] = [], audios: string[] = []
     const into = input.scenes.map((s, i) => (i === 0 ? null : TRANSITIONS[s.transition] ?? TRANSITIONS.fade))
-    for (const [i, s] of input.scenes.entries()) {
+    for (const [i, s0] of input.scenes.entries()) {
       const clip = `clip-${String(i).padStart(4, '0')}.mp4`
-      await ff(clipArgs(s, i, clip, into[i + 1]?.[1] ?? 0))
+      const s = s0.kind === 'image' ? await fitImage(s0, i, work, ff) : s0
+      const len = s.durationS + (into[i + 1]?.[1] ?? 0)
+      await ff(clipArgs(s, i, clip, into[i + 1]?.[1] ?? 0)).catch(async (e) => {
+        // Efeito que falhou nesta imagem: refaz a cena com o movimento simples, em vez de derrubar o vídeo.
+        if (s.kind !== 'image' || !s.motion || s.motion === 'ken_burns') throw e
+        await ff(clipArgs({ ...s, motion: 'ken_burns' }, i, clip, into[i + 1]?.[1] ?? 0))
+      })
+      // Cena curta demais quebra a montagem (o vídeo congelava no meio): completa repetindo o último quadro.
+      if ((await durationOf(join(work, clip))) < len - 0.08) {
+        const fixed = `fix-${clip}`
+        await ff(['-i', clip, '-vf', `tpad=stop_mode=clone:stop_duration=${len.toFixed(3)}`, '-t', len.toFixed(3), ...X264, '-preset', 'veryfast', '-crf', '18', fixed])
+        await rename(join(work, fixed), join(work, clip))
+      }
       // Áudio da cena com a duração exata dela: fala + silêncio até o fim.
       const wav = `audio-${String(i).padStart(4, '0')}.wav`
       await ff(s.voice
@@ -70,28 +153,42 @@ export async function renderVideo(input: RenderInput) {
     } else {
       // Dissolvências entre as cenas: a transição k começa onde a cena k-1 terminaria, então a voz continua sincronizada.
       let graph = clips.map((_, k) => `[${k}:v]settb=AVTB,setpts=PTS-STARTPTS[c${k}]`).join(';')
-      let prev = 'c0', offset = 0
+      // Offsets pela duração real de cada clipe (arredondada em quadros): somar as durações das cenas deixava
+      // a transição passar do fim do trecho anterior e o FFmpeg cortava o resto do vídeo.
+      const lens = await Promise.all(clips.map((c) => durationOf(join(work, c))))
+      let prev = 'c0', offset = 0, chain = lens[0]
       for (let k = 1; k < clips.length; k++) {
-        offset += input.scenes[k - 1].durationS
         const [type, d] = into[k]!
-        graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${offset.toFixed(3)}[x${k}]`
+        offset = chain - d
+        chain = offset + lens[k]
+        graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${(Math.floor(offset * 1000) / 1000).toFixed(3)}[x${k}]`
         prev = `x${k}`
       }
       await ff([...clips.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', 'video.mp4'])
     }
+    // O vídeo montado precisa ter a duração toda; se não tiver, para aqui com o motivo em vez de entregar um vídeo congelado.
+    const built = await durationOf(join(work, 'video.mp4'))
+    if (built < total - 0.5) throw new Error(`A montagem das cenas saiu com ${built.toFixed(1)} s de ${total.toFixed(1)} s`)
     await ff(['-f', 'concat', '-safe', '0', '-i', 'audios.txt', '-c', 'copy', 'narracao.wav'])
+    // Efeitos sonoros nas transições e nos zooms rápidos (gerados aqui mesmo, sem licença de terceiros).
+    const sfx = await buildSfx(input.scenes, into, work, ff, total)
     await writeFile(join(work, 'legendas.ass'), input.ass)
     await symlink(input.fontsDir, join(work, 'fonts'))
     await input.onProgress?.(80)
 
-    const args = ['-i', 'video.mp4', '-i', 'narracao.wav']
+    const args = ['-i', 'video.mp4', '-i', 'narracao.wav', ...(sfx ? ['-i', sfx] : [])]
+    const sfxIn = sfx ? 2 : -1, musicIn = sfx ? 3 : 2
     // Narração: corta o grave que embola, compressão leve (voz presente e constante) e volume no padrão do YouTube (-16 LUFS).
     const voiceChain = 'highpass=f=70,acompressor=threshold=-20dB:ratio=3:attack=8:release=180:makeup=2,loudnorm=I=-16:TP=-1.5:LRA=9'
-    let audio = `[1:a]${voiceChain}[a]`
+    // Mistura: voz (+ música com ducking) (+ efeitos sonoros).
+    const mix = (inputs: string[]) => (inputs.length === 1 ? `${inputs[0]}anull[a]` : `${inputs.join('')}amix=inputs=${inputs.length}:duration=first:dropout_transition=0:normalize=0[a]`)
+    let audio: string
     if (input.music) {
       args.push('-stream_loop', '-1', '-i', input.music)
       // Música abaixa sozinha enquanto há fala e volta nas pausas (ducking).
-      audio = `[1:a]${voiceChain},asplit=2[v][key];[2:a]volume=0.35[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];[v][m]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[a]`
+      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=0.55[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
+    } else {
+      audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=0.55[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
     }
     await mkdir(join(input.out, '..'), { recursive: true })
     await ff([...args, '-filter_complex', `[0:v]subtitles=legendas.ass:fontsdir=fonts[v];${audio}`, '-map', '[v]', '-map', '[a]',
@@ -117,8 +214,8 @@ export function timedScenes(scenes: SceneRow[], voices: Map<number, { durationS:
   })
 }
 
-export function trackStyle(t: { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string }): CaptionStyle {
-  return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position }
+export function trackStyle(t: { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean }): CaptionStyle {
+  return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position, outline: t.outline }
 }
 
 const DEFAULT_STYLE = { size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom-center' }
@@ -135,7 +232,7 @@ export async function render(job: Job) {
   })
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
-  const opts = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; highlightColor?: string; captionPosition?: string }
+  const opts = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; highlightColor?: string; captionPosition?: string; captionSize?: number; captionOutline?: boolean; bgColor?: string; musicVolume?: number }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   const music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
@@ -149,7 +246,7 @@ export async function render(job: Job) {
     const segs = buildSegments(timed, opts.highlightMode ?? 'palavra-chave', keywords)
     track = await prisma.captionTrack.create({
       data: {
-        projectId: project.id, version: 1, fontFamily, fontWeight: 700, ...DEFAULT_STYLE, ...(opts.highlightColor && { highlightColor: opts.highlightColor }), ...(opts.captionPosition && { position: opts.captionPosition }), highlightMode: opts.highlightMode ?? 'palavra-chave',
+        projectId: project.id, version: 1, fontFamily, fontWeight: 700, ...DEFAULT_STYLE, ...(opts.highlightColor && { highlightColor: opts.highlightColor }), ...(opts.captionPosition && { position: opts.captionPosition }), ...(opts.captionSize && { size: opts.captionSize }), ...(opts.captionOutline === false && { outline: false }), highlightMode: opts.highlightMode ?? 'palavra-chave',
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },
@@ -163,13 +260,22 @@ export async function render(job: Job) {
   const version = ((await prisma.videoVersion.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1
   const out = join(STORAGE_DIR, 'renders', project.id, `v${version}.mp4`)
   const cleanOut = join(STORAGE_DIR, 'renders', project.id, `v${version}-sem-legenda.mp4`)
+  // Cartela sem imagem própria usa a foto da cena mais próxima como fundo tingido.
+  const photos = scenes.filter((x) => x.asset && !x.asset.kind.endsWith('video'))
+  const nearPhoto = (idx: number) => photos.reduce<typeof photos[number] | null>((b, x) => (!b || Math.abs(x.index - idx) < Math.abs(b.index - idx) ? x : b), null)?.asset?.filePath
+
+  // Recorte do objeto só para as fotos com parallax.
+  const masks = new Map<number, string>()
+  for (const s of scenes) if (s.motion === 'parallax' && s.asset && !s.asset.kind.endsWith('video')) { const m = await subjectMask(s.asset.filePath); if (m) masks.set(s.index, m) }
+
   await renderVideo({
     scenes: scenes.map((s) => ({
       durationS: s.endS - s.startS,
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
-      path: s.asset?.filePath, transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null,
+      path: s.asset?.filePath ?? nearPhoto(s.index), transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor,
+      motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
     })),
-    music, ass: toAss(segments, timed, style), fontsDir: FONTS_DIR, out, cleanOut,
+    music, musicVolume: opts.musicVolume, ass: toAss(segments, timed, style), fontsDir: FONTS_DIR, out, cleanOut,
     onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Criando vídeo: cenas' : 'Criando vídeo: legendas e áudio', progress: p } }),
   })
 
@@ -185,7 +291,7 @@ export async function render(job: Job) {
 
 // A descrição final já sai com os créditos exigidos pelos bancos de imagens.
 async function addCredits(projectId: string) {
-  const credits = (await prisma.asset.findMany({ where: { projectId, attribution: { not: null }, scenes: { some: {} } }, select: { attribution: true } }))
+  const credits = (await prisma.asset.findMany({ where: { projectId, attribution: { not: null }, OR: [{ scenes: { some: {} } }, { kind: 'music' }] }, select: { attribution: true } }))
     .map((a) => a.attribution!).filter((v, i, a) => a.indexOf(v) === i)
   if (!credits.length) return
   const current = await prisma.metadataField.findFirst({ where: { projectId, field: 'description', isCurrent: true } })
@@ -196,4 +302,39 @@ async function addCredits(projectId: string) {
     prisma.metadataField.updateMany({ where: { projectId, field: 'description' }, data: { isCurrent: false } }),
     prisma.metadataField.create({ data: { projectId, field: 'description', version: (current?.version ?? 0) + 1, value, createdBy: 'system' } }),
   ])
+}
+
+type FF = (args: string[]) => Promise<unknown>
+
+// Foto fora do 16:9 (retrato, quadrada, panorâmica) não é ampliada até cortar o assunto:
+// fica inteira no centro, sobre uma cópia dela desfocada preenchendo a tela.
+async function fitImage(s: RenderScene, i: number, work: string, ff: FF): Promise<RenderScene> {
+  const out = `foto-${i}.jpg`
+  const [w, h] = (await run('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', s.path!])).stdout.trim().split(',').map(Number)
+  if (!w || !h || (w / h >= 1.5 && w / h <= 2.0)) return s
+  await ff(['-i', s.path!, '-filter_complex', '[0]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,boxblur=30,eq=brightness=-0.1[b];[0]scale=1920:1080:force_original_aspect_ratio=decrease[f];[b][f]overlay=(W-w)/2:(H-h)/2', '-q:v', '2', out])
+  // O recorte do parallax foi feito na foto original: com a foto ajustada, usa Ken Burns.
+  return { ...s, path: join(work, out), ...(s.motion === 'parallax' && { motion: 'ken_burns', mask: undefined }) }
+}
+
+// Efeitos sonoros: "whoosh" nas transições com movimento e "impacto" nos zooms secos, nos tempos certos das cenas.
+async function buildSfx(scenes: RenderScene[], into: ([string, number] | null)[], work: string, ff: FF, total: number) {
+  const WHOOSH = new Set(['whip', 'slide_left', 'slide_right', 'slide_up', 'slide_down', 'slide', 'zoom_through', 'zoom'])
+  const HIT = new Set(['punch_in', 'punch_out'])
+  const hits: { at: number; kind: 'whoosh' | 'hit' }[] = []
+  let t = 0
+  scenes.forEach((s, k) => {
+    if (k > 0 && WHOOSH.has(s.transition)) hits.push({ at: Math.max(0, t - 0.25), kind: 'whoosh' })
+    if (k > 0 && HIT.has(s.transition)) hits.push({ at: t, kind: 'hit' })
+    if (s.kind === 'image' && s.motion === 'snap_zoom') hits.push({ at: t + s.durationS * 0.35, kind: 'hit' })
+    t += s.durationS
+  })
+  if (!hits.length) return null
+  // Whoosh: ruído rosa filtrado subindo e descendo; impacto: grave curto com estalo.
+  await ff(['-f', 'lavfi', '-i', 'anoisesrc=color=pink:duration=0.6:amplitude=0.9', '-af', 'highpass=f=300,lowpass=f=4000,afade=t=in:d=0.3:curve=exp,afade=t=out:st=0.3:d=0.3,volume=0.8', '-ar', '48000', '-ac', '2', 'whoosh.wav'])
+  await ff(['-f', 'lavfi', '-i', 'sine=frequency=55:duration=0.5', '-f', 'lavfi', '-i', 'anoisesrc=color=white:duration=0.05:amplitude=0.6', '-filter_complex', '[0]afade=t=out:st=0:d=0.5:curve=exp,volume=1.6[a];[1]lowpass=f=1800[b];[a][b]amix=inputs=2:normalize=0', '-ar', '48000', '-ac', '2', 'hit.wav'])
+  const inputs = hits.flatMap((h) => ['-i', `${h.kind}.wav`])
+  const graph = hits.map((h, k) => `[${k}]adelay=${Math.round(h.at * 1000)}:all=1[s${k}]`).join(';') + `;${hits.map((_, k) => `[s${k}]`).join('')}amix=inputs=${hits.length}:normalize=0,apad,atrim=0:${total.toFixed(3)}`
+  await ff([...inputs, '-filter_complex', graph, '-ar', '48000', '-ac', '2', 'efeitos.wav'])
+  return 'efeitos.wav'
 }

@@ -559,3 +559,76 @@ button.danger { background: #c0392b; }
 .font-select-list .muted { font-size: 14px; }
 .color-input { width: 56px; height: 44px; padding: 4px; }
 .caption-preview.top { top: 8%; } .caption-preview.left { text-align: left; } .caption-preview.right { text-align: right; }
+.caption-preview.no-outline { text-shadow: 0 1px 2px rgb(0 0 0 / .5); }
+.cap-preview { position: relative; container-type: inline-size; aspect-ratio: 16 / 9; border-radius: 4px; border: 1px solid var(--line, #2a2e35); overflow: hidden; }
+.cap-preview-tag { position: absolute; top: 8px; left: 8px; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: rgb(255 255 255 / .6); }
+.cap-line { position: absolute; left: 6%; right: 6%; margin: 0; color: #fff; font-weight: 700; line-height: 1.2; text-align: center;
+  -webkit-text-stroke: .12em #000; paint-order: stroke fill; text-shadow: 0 .05em .1em rgb(0 0 0 / .6); }
+.cap-line.no-outline { -webkit-text-stroke: 0; }
+.cap-line.bottom { bottom: 8%; } .cap-line.middle { top: 50%; transform: translateY(-50%); } .cap-line.top { top: 8%; }
+.cap-line.left { text-align: left; } .cap-line.right { text-align: right; }
+.creation.picked { outline: 2px solid var(--accent); }
+button.creation-title { background: none; border: 0; padding: 0; text-align: left; color: inherit; font-weight: inherit; cursor: pointer; }
+.frame.version { margin: 0; position: relative; } .frame.version video { width: 100%; height: 100%; object-fit: cover; display: block; background: #000; }
+.frame.empty { background: transparent; }
+/* Versões em grade fixa de 4 (como os quadros de antes): cada versão ocupa um quadro, nunca a largura toda. */
+.frames { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.frames .frame { flex: none; }
+.frames .frame.working { grid-column: 1 / -1; }
+.frame.empty { background: transparent; }
+@media (max-width: 720px) { .frames { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Coluna de criação: campos em colunas iguais, sem sobras, e cantos de no máximo 2px. */
+.controls.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s3); align-items: start; }
+.controls.grid2 .control { min-width: 0; }
+.controls.grid2 .span2 { grid-column: 1 / -1; }
+.controls.grid2 .stepper, .controls.grid2 .chip, .controls.grid2 .color-input, .controls.grid2 .choice-row { width: 100%; }
+.controls.grid2 .choice-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }
+.controls.grid2 .stepper { display: flex; justify-content: space-between; }
+.composer :is(input, select, textarea, button, .btn, .chip, .stepper, .choice, .font-select-btn, .font-select-list, .notice, .thumb, .add-tile, .drop, .cap-preview) { border-radius: 2px; }
+.composer div.field-label { display: flex; justify-content: space-between; align-items: center; }
+.creation { cursor: pointer; }
+.creation .creation-title { display: flex; gap: var(--s2); min-width: 0; }
+button.frame.version { padding: 0; border: 0; cursor: pointer; }
+button.frame.version video { pointer-events: none; }
+.frame-play { position: absolute; inset: 0; display: grid; place-items: center; font-size: 28px; color: #fff; text-shadow: 0 2px 8px #000; opacity: .85; }
+/* Fonte da legenda: 70% para escolher a fonte, 30% para enviar uma nova. */
+.controls.grid2 .font-row { display: grid; grid-template-columns: 7fr 3fr; gap: var(--s2); }
+.controls.grid2 .font-row .font-select-btn { height: 100%; }
+.controls.grid2 .font-row .upload-chip { display: flex; align-items: center; justify-content: center; height: auto; }
+.choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.composer .range-row { display: grid; grid-template-columns: auto 1fr 3.5em; align-items: center; gap: var(--s2); font-size: 14px; }
+.composer .range-row input { width: 100%; accent-color: var(--accent); }
+.choice-grid .choice { padding: 8px 4px; font-size: 13px; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+
+/* ---------- Coluna de criação em bento grid: cada bloco é um bloco próprio, campos com largura igual ---------- */
+.composer-body { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s2); padding: var(--s3); align-content: start; }
+.composer-body > * { grid-column: 1 / -1; min-width: 0; margin: 0; }
+.composer-body > :is(.field, label.field-label) { background: var(--bg, #0e1013); border: 1px solid var(--border); border-radius: 2px; padding: var(--s3); }
+.composer-body :is(input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), select, textarea, .font-select, .drop) { width: 100%; box-sizing: border-box; }
+/* Grupos de botões dividem a linha por igual. */
+.composer :is(.choice-row) { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; }
+.composer .choice { min-width: 0; padding-inline: 4px; text-align: center; }
+/* Dentro da Legenda, cada opção vira um sub-bloco. */
+.composer-body .controls.grid2 > .control { background: var(--card); border: 1px solid var(--border); border-radius: 2px; padding: var(--s2); }
+.composer-body .controls.grid2 .color-input { height: 40px; }
+/* Rodapé: Duração e Formato em blocos iguais. */
+.composer-foot .controls.grid2 > .control { background: var(--bg, #0e1013); border: 1px solid var(--border); border-radius: 2px; padding: var(--s2); }
+.composer-foot .controls.grid2 .chip { display: flex; align-items: center; justify-content: center; height: 40px; }
+/* Sem quebrar palavras no meio: com pouco espaço, o grid passa de 3 para 2 colunas. */
+.choice-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+.choice-grid .choice { overflow-wrap: normal; word-break: normal; hyphens: none; }
+/* Bento só nos campos: sem caixas de fundo ao redor das seções nem das opções; linhas com altura igual. */
+.composer-body > :is(.field, label.field-label) { background: none; border: 0; padding: 0; }
+.composer-body .controls.grid2 > .control, .composer-foot .controls.grid2 > .control { background: none; border: 0; padding: 0; }
+.composer-body { gap: var(--s4); padding: var(--s4); }
+.controls.grid2 { align-items: stretch; }
+.controls.grid2 > .control { display: flex; flex-direction: column; gap: 6px; }
+.controls.grid2 > .control > :last-child { margin-top: auto; }
+.controls.grid2 .control-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.controls.grid2 :is(.stepper, .color-input, .choice-row, .chip, .font-row) { height: 44px; box-sizing: border-box; }
+.controls.grid2 .choice-row .choice, .controls.grid2 .font-row > * { height: 100%; }
+.controls.grid2 .span2 .choice-row { height: 40px; }
+
+/* Vozes */
+.voice-card { display: flex; flex-direction: column; gap: var(--s3); }
+.voice-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s2); }

@@ -12,6 +12,7 @@ import { Icon } from './icons'
 import { MyIntegrations } from './integrations'
 import { EditPage } from './edit'
 import { ApprovePage } from './approve'
+import { VoicesPage } from './voices'
 import './style.css'
 
 type Session = { user: PublicUser; csrfToken: string }
@@ -90,6 +91,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
     { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') },
     { href: '#/edicao', label: 'Edição', icon: 'edicao', match: (h: string) => h === '#/edicao' || h.startsWith('#/editar/') },
     { href: '#/aprovacao', label: 'Aprovação', icon: 'aprovacao', match: (h: string) => h === '#/aprovacao' || h.startsWith('#/aprovar/') },
+    { href: '#/vozes', label: 'Vozes', icon: 'vozes', match: (h: string) => h === '#/vozes' },
     { href: '#/integracoes', label: 'Integrações', icon: 'integracoes', match: (h: string) => h === '#/integracoes' },
     ...(user.role === 'admin' ? [{ href: '#/admin', label: 'Admin', icon: 'admin', match: (h: string) => h === '#/admin' }] : []),
   ]
@@ -138,6 +140,7 @@ function App() {
         <ClaudePill isAdmin={isAdmin} />
         {hash === '#/novo' ? <NewVideo />
           : hash === '#/integracoes' ? <MyIntegrations />
+          : hash === '#/vozes' ? <VoicesPage />
           : hash === '#/projetos' ? <ProjectList isAdmin={isAdmin} />
           : hash === '#/edicao' ? <ProjectList isAdmin={isAdmin} title="Edição" statuses={['editing', 'in_approval', 'failed']} href={(id) => `#/editar/${id}`} empty="Nenhum vídeo pronto para editar. Os vídeos aparecem aqui quando terminam de ser criados." />
           : hash === '#/aprovacao' ? <ProjectList isAdmin={isAdmin} title="Aprovação" statuses={['in_approval', 'editing', 'approved']} href={(id) => `#/aprovar/${id}`} empty="Nenhum vídeo para aprovar ainda." />

@@ -43,7 +43,11 @@ export const Scene = z.object({
   narration: z.string(),
   onScreenText: z.string().describe('Texto curto na tela, ou vazio'),
   media: Media,
-  transition: z.enum(['cut', 'fade', 'slide', 'zoom']),
+  transition: z.enum(['cut', 'punch_in', 'punch_out', 'fade', 'zoom_through', 'slide_left', 'slide_right', 'slide_up', 'slide_down', 'whip', 'slide', 'zoom'])
+    .describe('Entrada da cena. cut = corte seco; punch_in/punch_out = corte seco com zoom, como trocar de câmera; zoom_through = a câmera entra na imagem anterior e revela esta; slide_* = desliza rápido para o lado/cima/baixo; whip = chicote rápido com borrão; fade = dissolve'),
+  motion: z.enum(['ken_burns', 'parallax', 'cutout', 'snap_zoom', 'static'])
+    .describe('Movimento da imagem (só fotos). ken_burns = zoom e pan lentos; parallax = objeto e fundo em velocidades diferentes (2.5D), melhor com um objeto/pessoa em destaque; cutout = recorte de revista em papel, com stop-motion; snap_zoom = zoom rápido de ênfase; static = parada'),
+  easing: z.enum(['ease_in_out', 'ease_in', 'ease_out', 'linear']).describe('Curva do movimento: ease_in_out = suave nas pontas (padrão); ease_in = começa lento e acelera; ease_out = começa rápido e desacelera'),
 })
 
 export const ScriptOutput = z.object({
@@ -67,6 +71,7 @@ export function checkPlan(plan: ScriptOutput, targetDurationS: number, imageCoun
     const prevEnd = i === 0 ? 0 : plan.scenes[i - 1].endS
     if (Math.abs(s.startS - prevEnd) > 0.05) errors.push(`Cena ${i + 1} não começa onde a anterior termina`)
     if (s.endS <= s.startS) errors.push(`Cena ${i + 1} tem duração zero ou negativa`)
+    if (s.media.type === 'text_card' && !s.media.text.trim()) errors.push(`Cena ${i + 1} é um quadro de texto vazio: escreva o texto ou use uma imagem`)
     if (s.media.type === 'user_image' && s.media.imageIndex >= imageCount) errors.push(`Cena ${i + 1} usa a imagem ${s.media.imageIndex}, que não existe`)
   })
   return errors

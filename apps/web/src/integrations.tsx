@@ -169,6 +169,8 @@ function Setup({ item, scope, base, inUse, onClose, reload, makePrimary }: {
         </div>
       )}
 
+      {item.provider === 'local_music' && scope === 'system' && <MusicLibrary />}
+
       {msg && <p className={msg.ok ? 'notice ok-box' : 'notice alert'} role="status">{msg.ok ? '✓' : '✕'} {msg.text}</p>}
 
       <footer className="modal-actions">
@@ -188,6 +190,33 @@ export function MyIntegrations() {
     <div className="page">
       <PageHead kicker="Voz, fotos e música" title="Integrações" />
       <Integrations scope="me" />
+    </div>
+  )
+}
+
+// Músicas locais: o admin envia os arquivos pelo botão (sem mexer em pastas).
+function MusicLibrary() {
+  const [files, setFiles] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const load = () => api<{ files: string[] }>('/admin/music').then((r) => setFiles(r.files)).catch(() => {})
+  useEffect(() => { load() }, [])
+  async function send(list: FileList | null) {
+    const all = [...(list ?? [])]
+    setBusy(true); setError('')
+    for (const f of all) {
+      const body = new FormData(); body.append('music', f)
+      try { await api('/admin/music', { method: 'POST', body }) } catch (e) { setError(`${f.name}: ${(e as Error).message}`) }
+    }
+    setBusy(false); load()
+  }
+  return (
+    <div className="setup-fields">
+      <p className="muted">{files.length ? `${files.length} ${files.length === 1 ? 'música' : 'músicas'} na biblioteca.` : 'Nenhuma música ainda.'}</p>
+      <label className="btn ghost">{busy ? 'Enviando…' : 'Enviar músicas'}
+        <input type="file" hidden multiple accept="audio/mpeg,audio/mp4,audio/x-m4a,audio/wav,.mp3,.m4a,.wav" disabled={busy} onChange={(e) => { send(e.target.files); e.target.value = '' }} />
+      </label>
+      {error && <p className="notice alert" role="alert">✕ {error}</p>}
     </div>
   )
 }

@@ -5,7 +5,7 @@ import { CaptionPosition, FontSelect, Modal, PageHead } from './ui'
 import { ThumbnailTab } from './thumbnail'
 
 type Segment = { startS: number; endS: number; text: string; highlights: number[] }
-type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; segments: Segment[] }
+type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean; segments: Segment[] }
 type ChangeReq = { id: string; part: Part; frameTimeS: number | null; type: string; text: string; status: string; author: string; appliedInVersion: number | null }
 type Meta = { field: string; version: number; value: string; isCurrent: boolean; createdBy: string; createdAt: string }
 type EditData = {
@@ -200,7 +200,7 @@ function CaptionTab(props: TabProps) {
             onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
           {/* Prévia: a legenda deste instante com a fonte e as cores escolhidas. */}
           {cur && (
-            <div className={`caption-preview ${track.position.replace('-', ' ')}`} style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight, fontSize: `clamp(14px, ${track.size / 24}vw, ${track.size / 2.2}px)` }}>
+            <div className={`caption-preview ${track.position.replace("-", " ")}${track.outline === false ? " no-outline" : ""}`} style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight, fontSize: `clamp(14px, ${track.size / 24}vw, ${track.size / 2.2}px)` }}>
               {cur.text.split(/\s+/).filter(Boolean).map((w, j) => <span key={j} style={{ color: color(j, cur) }}>{w} </span>)}
             </div>
           )}
@@ -269,6 +269,7 @@ function CaptionTab(props: TabProps) {
           <div className="field"><span className="field-label">Fonte</span><FontSelect value={track.fontFamily} fonts={allowed} onChange={(f) => set({ fontFamily: f })} /></div>
           <label>Peso<select value={track.fontWeight} onChange={(e) => set({ fontWeight: Number(e.target.value) })}><option value={400}>Normal</option><option value={700}>Negrito</option><option value={900}>Extra</option></select></label>
           <label>Tamanho<input type="number" min={24} max={140} value={track.size} onChange={(e) => set({ size: Number(e.target.value) })} /></label>
+          <label className="check"><input type="checkbox" checked={track.outline !== false} onChange={(e) => set({ outline: e.target.checked })} /> Traçado nas letras</label>
           <div className="field"><span className="field-label">Posição</span><CaptionPosition value={track.position} onChange={(position) => set({ position })} /></div>
           <label>Cor<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
           <label>Cor do destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
