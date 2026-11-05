@@ -30,7 +30,8 @@ const Media = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('stock'),
     kind: z.enum(['image', 'video']),
-    queries: z.array(z.string()).min(1).max(3).describe('2 a 3 termos de busca em inglês'),
+    queries: z.array(z.string()).min(1).max(8).describe('Termos de busca do mais fiel ao mais genérico: 1 ou 2 por nível, nível 1 primeiro'),
+    levels: z.array(z.number().int().min(1).max(4)).max(8).optional().describe('Nível de cada termo, na mesma ordem (1 = exato … 4 = pouca relação)'),
     orientation: z.enum(['landscape', 'portrait', 'square']),
   }),
   z.object({ type: z.literal('user_video'), note: z.string().describe('O que o vídeo do cliente mostra neste trecho') }),

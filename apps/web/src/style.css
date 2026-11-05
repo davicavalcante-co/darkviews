@@ -982,3 +982,4 @@ body.editor-full .top-bar { display: none; }
 
 /* Botões no azul claro ganham destaque ao passar o mouse */
 button:not(.link):not(.ghost-btn):not(.icon-btn):hover, .btn:not(.ghost):hover { filter: brightness(1.18); }
+.copyright { display: inline-block; margin-top: 2px; padding: 1px 6px; font-size: .72rem; font-weight: 600; color: var(--warn-fg); background: var(--warn-bg); border-radius: 2px; }

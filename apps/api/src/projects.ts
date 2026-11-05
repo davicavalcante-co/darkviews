@@ -278,7 +278,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
 
   // ---------- Aprovação das imagens (antes da narração) ----------
-  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse' }
+  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
   // A referência tem uma pessoa falando: o cliente escolhe vídeo de banco (JSON {choice:'stock'}) ou envia o vídeo dele (multipart, campo "video").
   app.post<{ Params: { id: string } }>('/api/projects/:id/talking-head', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
@@ -302,11 +302,11 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const scenes = await prisma.scene.findMany({
       where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, orderBy: { index: 'asc' },
-      select: { index: true, narration: true, asset: { select: { id: true, kind: true, sourceProvider: true, attribution: true } } },
+      select: { index: true, narration: true, asset: { select: { id: true, kind: true, sourceProvider: true, attribution: true, license: true } } },
     })
     return {
       status: p.status,
-      scenes: scenes.map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution })),
+      scenes: scenes.map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution, copyright: /não verificad|sem licença/i.test(s.asset!.license ?? '') })),
     }
   })
 

@@ -116,7 +116,7 @@ function sceneMedia(s: SceneRow) {
   return '—'
 }
 
-type ReviewScene = { index: number; narration: string | null; assetId: string; kind: 'image' | 'video'; bank: string; credit: string | null }
+type ReviewScene = { index: number; narration: string | null; assetId: string; kind: 'image' | 'video'; bank: string; credit: string | null; copyright?: boolean }
 
 // Aprovação antecipada das imagens: tudo começa aprovado; "Trocar" pede uma nova opção só para aquela cena.
 // A referência tem uma pessoa falando para a câmera: o cliente escolhe como fazer esses trechos.
@@ -190,6 +190,7 @@ function ImageReview({ id }: { id: string }) {
             <p className="review-text">{s.narration}</p>
             <div className="row">
               <small className="muted">{s.bank}</small>
+              {s.copyright && <small className="copyright" title={s.credit ?? ""}>Tem direitos autorais do dono</small>}
               <button type="button" className={swap.has(s.index) ? 'ghost-btn on' : 'ghost-btn'} aria-pressed={swap.has(s.index)} onClick={() => toggle(s.index)}>
                 {swap.has(s.index) ? 'Vai trocar ✕' : 'Trocar'}
               </button>
