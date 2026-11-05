@@ -992,3 +992,25 @@ button:not(.link):not(.ghost-btn):not(.icon-btn):hover, .btn:not(.ghost):hover {
 body { font-family: var(--font-display); font-weight: 500; letter-spacing: normal; }
 h1, .page-head h1, .composer-head h1, .login .card h1, .connect-copy h2 { font-family: var(--font-title); font-size: var(--title); letter-spacing: -.02em; }
 b, strong, th, summary, button, .btn { font-weight: 500; }
+/* Texto dentro dos campos: sempre o mesmo tamanho e peso, em qualquer tela. */
+:is(input, select, textarea, .font-select-btn) { font-size: 15px !important; font-weight: 500 !important; }
+/* Coluna "Novo vídeo": tudo encostado nas mesmas margens, rótulo→campo com 8 px e controles da mesma altura e largura. */
+.composer .notice { padding: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.composer .notice .choice-row { width: 100%; }
+.composer .control, .composer .controls.grid2 > .control { gap: var(--s2); }
+.composer-foot .controls.grid2 > .control { flex: 1 1 0; }
+.composer-foot .controls.grid2 :is(.stepper, .chip) { height: 44px; width: 100%; margin: 0; }
+
+/* ---------- Regra de espaçamento: 12 px entre elementos do mesmo bloco; 24 px entre blocos diferentes ---------- */
+:root { --gap-in: 12px; --gap-block: 24px; }
+/* Dentro de um bloco */
+.panel, fieldset, .field, .control, .controls.grid2 > .control, .composer .notice, .composer-foot, .stack-sm, .modal-body, .meta-card,
+.int-card, .voice-card, .review-card, .creation, .tune, .recorder { gap: var(--gap-in); }
+.composer .controls.grid2, .composer-foot .controls.grid2 { gap: var(--gap-in); }
+/* Entre blocos */
+.composer-body, .stack, .section, .feed, .publish-fields, .voice-form { gap: var(--gap-block); }
+.composer-head { padding: var(--gap-block) var(--gap-block) var(--gap-in); }
+.composer-body { padding: var(--gap-block); }
+.composer-foot { padding: var(--gap-block); }
+label.field-label > :is(input, textarea, select), .composer-body > label > :is(input, textarea, select) { margin-top: var(--gap-in); }
+.composer :is(.field, .control, .notice) > * { margin-top: 0; margin-bottom: 0; } .composer .control, .composer .controls.grid2 > .control { gap: var(--gap-in); }
