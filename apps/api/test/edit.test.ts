@@ -158,3 +158,30 @@ describe('versões: favoritar e excluir sem apagar o projeto', () => {
     expect(await prisma.project.count({ where: { id: projectId } })).toBe(1)
   })
 })
+
+describe('aprovação das imagens em rodadas', () => {
+  it('as aprovadas não voltam; a próxima rodada mostra só as que foram recusadas', async () => {
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.project.update({ where: { id: projectId }, data: { status: 'image_review' } })
+    const img = (n: number) => prisma.asset.create({ data: { projectId, kind: 'stock_image', filePath: `/nao/${n}.jpg`, mime: 'image/jpeg', sourceProvider: 'web', sourceId: String(n), license: 'Direitos autorais do dono (não verificado)' } })
+    const [a, b, c] = await Promise.all([img(1), img(2), img(3)])
+    const q = JSON.stringify({ type: 'stock', kind: 'image', orientation: 'landscape', queries: ['x'] })
+    await prisma.script.create({ data: { projectId, version: 30, body: '{}', scenePlan: '[]', createdBy: 'claude', scenes: { create: [
+      { index: 0, startS: 0, endS: 2, narration: 'a', assetId: a.id, searchQuery: q },
+      { index: 1, startS: 2, endS: 4, narration: 'b', assetId: b.id, searchQuery: q },
+      { index: 2, startS: 4, endS: 6, narration: 'c', assetId: c.id, searchQuery: q },
+    ] } } })
+    const first = (await app.inject({ url: `/api/projects/${projectId}/review`, headers: dono })).json()
+    expect(first.scenes.map((s: { index: number }) => s.index)).toEqual([0, 1, 2])
+    expect(first.scenes[0].copyright).toBe(true)
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/review`, headers: dono, payload: { rejected: [1] } })).json().replaced).toBe(1)
+    // Nova imagem para a cena recusada (o worker faria isso) e volta para a aprovação.
+    const d = await img(4)
+    const s1 = await prisma.scene.findFirstOrThrow({ where: { script: { projectId, version: 30 }, index: 1 } })
+    await prisma.scene.update({ where: { id: s1.id }, data: { assetId: d.id } })
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.project.update({ where: { id: projectId }, data: { status: 'image_review' } })
+    const second = (await app.inject({ url: `/api/projects/${projectId}/review`, headers: dono })).json()
+    expect(second.scenes.map((s: { index: number }) => s.index)).toEqual([1])
+  })
+})

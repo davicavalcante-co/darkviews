@@ -115,7 +115,9 @@ export async function media(job: Job) {
   }
 
   // Para aqui e espera o usuário aprovar as imagens do banco (tela de Andamento). Sem imagens de banco, segue direto.
-  const stock = await prisma.scene.count({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } } })
+  // Só para de novo se sobrou imagem de banco sem aprovar (as aprovadas antes não voltam para a aprovação).
+  const stock = (await prisma.scene.findMany({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { searchQuery: true } }))
+    .filter((s) => !(s.searchQuery && JSON.parse(s.searchQuery).approved === true)).length
   if (stock) {
     await prisma.project.update({ where: { id: project.id }, data: { status: 'image_review' } })
   } else {
