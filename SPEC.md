@@ -1,10 +1,10 @@
-# Corte Final — Prompt de construção
+# Darkviews — Prompt de construção
 
 Nov 3, 2026 · @Davi Cavalcante
 
 ## Visão geral
 
-O Corte Final é uma aplicação local (localhost) que cria vídeos de até 18 minutos a partir de um prompt, de um link de referência e de imagens enviadas pelo usuário. Depois do vídeo pronto, ele gera cortes verticais 9:16 para Shorts, Reels, TikTok e Stories. O Claude roda na máquina do cliente e faz o planejamento: analisa a referência, escreve o roteiro, escolhe as cenas e monta o plano de edição. A renderização fica a cargo do FFmpeg.
+O Darkviews é uma aplicação local (localhost) que cria vídeos de até 18 minutos a partir de um prompt, de um link de referência e de imagens enviadas pelo usuário. Depois do vídeo pronto, ele gera cortes verticais 9:16 para Shorts, Reels, TikTok e Stories. O Claude roda na máquina do cliente e faz o planejamento: analisa a referência, escreve o roteiro, escolhe as cenas e monta o plano de edição. A renderização fica a cargo do FFmpeg.
 
 Como usar este documento:
 
@@ -19,7 +19,7 @@ Fluxo do vídeo dentro do sistema: **Referência e imagens → Análise → Rote
 Cole o texto abaixo no Claude Code, numa pasta vazia que já contenha este documento salvo como `SPEC.md`.
 
 ```markdown
-Você vai construir o "Corte Final", uma aplicação web que roda em localhost e cria vídeos a partir de prompt, link de referência e imagens enviadas. Leia o arquivo SPEC.md inteiro antes de começar: ele define permissões, modelagem de dados, segurança, integrações e regras de negócio. Em caso de dúvida, o SPEC.md vale mais que este prompt.
+Você vai construir o "Darkviews", uma aplicação web que roda em localhost e cria vídeos a partir de prompt, link de referência e imagens enviadas. Leia o arquivo SPEC.md inteiro antes de começar: ele define permissões, modelagem de dados, segurança, integrações e regras de negócio. Em caso de dúvida, o SPEC.md vale mais que este prompt.
 
 ## Stack
 - Monorepo com pnpm: apps/web (React + Vite + TypeScript), apps/api (Node 20 + Fastify + TypeScript), apps/worker (processo separado para jobs pesados), packages/shared (tipos e validações com Zod).

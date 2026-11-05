@@ -15,7 +15,7 @@ import { durationOf, FFMPEG, run } from './ffmpeg.js'
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 
 // Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
-const UA = 'CorteFinal/1.0 (local video tool; https://github.com/davicavalcante-co/corte-final)' // só ASCII: acento no User-Agent dá 403
+const UA = 'Darkviews/1.0 (local video tool; https://github.com/davicavalcante-co/darkviews)' // só ASCII: acento no User-Agent dá 403
 async function download(url: string, dir: string) {
   let res: Response | null = null
   for (let attempt = 0; attempt < 4; attempt++) {

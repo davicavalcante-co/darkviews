@@ -11,9 +11,10 @@ import { requireAdmin } from './auth.js'
 const run = promisify(execFile)
 const ROOT = resolve(import.meta.dirname, '../../..')
 const DESKTOP_CONFIG = join(homedir(), 'Library/Application Support/Claude/claude_desktop_config.json')
-const NAME = 'corte-final'
+const NAME = 'darkviews'
+const OLD_NAME = 'corte-final' // nome antigo do sistema: sai do Claude ao reconectar
 
-// Como o Claude inicia o servidor MCP do Corte Final: caminhos absolutos (o app Claude não herda o PATH do terminal).
+// Como o Claude inicia o servidor MCP do Darkviews: caminhos absolutos (o app Claude não herda o PATH do terminal).
 // O Homebrew guarda o Node num caminho com a versão (some na atualização); /opt/homebrew/opt/<pacote> é o atalho estável.
 function nodePath() {
   const m = process.execPath.match(/^(.*)\/Cellar\/([^/]+)\/[^/]+\/bin\/node$/)
@@ -25,7 +26,7 @@ function serverCommand(email: string) {
   return {
     command: nodePath(),
     args: [join(ROOT, 'apps/mcp/node_modules/tsx/dist/cli.mjs'), `--env-file=${join(ROOT, '.env')}`, join(ROOT, 'apps/mcp/src/index.ts')],
-    env: { CORTE_FINAL_EMAIL: email },
+    env: { DARKVIEWS_EMAIL: email },
   }
 }
 
@@ -40,7 +41,7 @@ async function status() {
   return { desktop: !!(desktop?.mcpServers as Record<string, unknown> | undefined)?.[NAME], code }
 }
 
-// Um botão no Painel conecta o Corte Final ao Claude (app e Claude Code), agindo como o admin logado.
+// Um botão no Painel conecta o Darkviews ao Claude (app e Claude Code), agindo como o admin logado.
 export async function claudeMcpRoutes(app: FastifyInstance) {
   const admin = { preHandler: requireAdmin }
 
@@ -54,15 +55,16 @@ export async function claudeMcpRoutes(app: FastifyInstance) {
     const desktop = await readDesktop()
     if (desktop === null) return reply.code(409).send({ error: 'O arquivo de configuração do app Claude está com erro. Abra o app Claude uma vez e tente de novo.' })
     await mkdir(dirname(DESKTOP_CONFIG), { recursive: true })
-    if (existsSync(DESKTOP_CONFIG)) await copyFile(DESKTOP_CONFIG, `${DESKTOP_CONFIG}.antes-do-corte-final`)
+    if (existsSync(DESKTOP_CONFIG)) await copyFile(DESKTOP_CONFIG, `${DESKTOP_CONFIG}.antes-do-darkviews`)
     const servers = (desktop.mcpServers ?? {}) as Record<string, unknown>
-    await writeFile(DESKTOP_CONFIG, JSON.stringify({ ...desktop, mcpServers: { ...servers, [NAME]: cmd } }, null, 2))
+    const { [OLD_NAME]: _old, ...kept } = servers
+    await writeFile(DESKTOP_CONFIG, JSON.stringify({ ...desktop, mcpServers: { ...kept, [NAME]: cmd } }, null, 2))
     done.push('desktop')
 
     // Claude Code: registro no escopo do usuário (vale em qualquer pasta). Remove o antigo antes, para atualizar.
-    await run('claude', ['mcp', 'remove', NAME, '--scope', 'user'], { timeout: 20_000 }).catch(() => {})
+    for (const n of [OLD_NAME, NAME]) await run('claude', ['mcp', 'remove', n, '--scope', 'user'], { timeout: 20_000 }).catch(() => {})
     try {
-      await run('claude', ['mcp', 'add', NAME, '--scope', 'user', '-e', `CORTE_FINAL_EMAIL=${cmd.env.CORTE_FINAL_EMAIL}`, '--', cmd.command, ...cmd.args], { timeout: 30_000 })
+      await run('claude', ['mcp', 'add', NAME, '--scope', 'user', '-e', `DARKVIEWS_EMAIL=${cmd.env.DARKVIEWS_EMAIL}`, '--', cmd.command, ...cmd.args], { timeout: 30_000 })
       done.push('code')
     } catch { /* Claude Code não instalado: o app Claude já está conectado */ }
 

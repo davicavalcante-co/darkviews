@@ -8,7 +8,7 @@ if ! command -v uv >/dev/null; then
   echo "→ instalando uv (gerenciador de Python) via Homebrew"
   brew install uv
 fi
-# Versão testada com o Corte Final (a API do VoiceStudio muda entre versões).
+# Versão testada com o Darkviews (a API do VoiceStudio muda entre versões).
 VERSION="5875fa91b8449c06998ad8394f3af4d6beb68cc9"
 if [ ! -d "$HOME_DIR/.git" ]; then
   echo "→ baixando VoiceStudio em $HOME_DIR"; git clone -q https://github.com/debpalash/OmniVoice-Studio.git "$HOME_DIR"

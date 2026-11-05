@@ -4,8 +4,9 @@ import { claudeWarnings, DEFAULT_SETTINGS, MAX_DURATION_S, NewProjectInput, Part
 // Regras iguais às da API: usuário comum só mexe nos próprios projetos (o resto "não existe"); admin vê todos.
 export class ToolError extends Error {}
 
-export async function actingUser(email = process.env.CORTE_FINAL_EMAIL): Promise<User> {
-  if (!email) throw new ToolError('Defina CORTE_FINAL_EMAIL no .env com o e-mail de um usuário do Darkviews.')
+// CORTE_FINAL_EMAIL: nome antigo da variável, ainda aceito para o .env de quem já tinha o sistema instalado.
+export async function actingUser(email = process.env.DARKVIEWS_EMAIL ?? process.env.CORTE_FINAL_EMAIL): Promise<User> {
+  if (!email) throw new ToolError('Defina DARKVIEWS_EMAIL no .env com o e-mail de um usuário do Darkviews.')
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
   if (!user || user.status !== 'active') throw new ToolError(`Usuário ${email} não encontrado ou desativado.`)
   return user

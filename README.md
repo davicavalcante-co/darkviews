@@ -101,9 +101,9 @@ Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda sepa
 
 ## Claude via MCP
 
-`apps/mcp` é um servidor MCP do Darkviews: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `CORTE_FINAL_EMAIL` (no `.env`), com as mesmas permissões do site.
+`apps/mcp` é um servidor MCP do Darkviews: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `DARKVIEWS_EMAIL` (no `.env`), com as mesmas permissões do site.
 
-- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `corte-final` e `omnivoice`; aprove os dois na primeira vez.
+- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `darkviews` e `omnivoice`; aprove os dois na primeira vez.
 - **App Claude (Desktop):** Integrações → Claude · MCP → "Como conectar no app Claude" mostra o trecho de configuração.
 
 ## Integrações
