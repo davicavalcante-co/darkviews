@@ -65,16 +65,16 @@ export async function editRoutes(app: FastifyInstance) {
       prisma.metadataField.findMany({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { field: true, version: true, value: true, isCurrent: true, createdBy: true, createdAt: true } }),
       prisma.changeRequest.findMany({ where: { projectId: p.id }, orderBy: { createdAt: 'desc' }, include: { author: { select: { name: true } } } }),
       prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } }, select: { type: true, status: true, stage: true, progress: true } }),
-      prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { scenes: { orderBy: { index: 'asc' }, select: { index: true, startS: true, endS: true, narration: true, onScreenText: true, motion: true, easing: true, transition: true, assetId: true, asset: { select: { kind: true } } } } } }),
+      prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { scenes: { orderBy: { index: 'asc' }, select: { index: true, startS: true, endS: true, narration: true, onScreenText: true, motion: true, easing: true, transition: true, assetId: true, searchQuery: true, asset: { select: { kind: true } } } } } }),
       prisma.asset.findMany({ where: { projectId: p.id, kind: { in: ['voice', 'music'] } }, select: { id: true, kind: true, sortOrder: true, attribution: true } }),
     ])
     const current = tracks.find((t) => t.isCurrent) ?? null
     return {
       name: p.name, status: p.status, job, captionsOn: JSON.parse(p.options).captionsOn === true,
       // Camadas do editor: cada cena com enunciado, movimento, transição e a narração dela; trilha e opções gerais.
-      scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, ...s }) => ({ ...s, kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
+      scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, searchQuery, ...s }) => ({ ...s, onScreenText: s.onScreenText ?? (!asset && searchQuery ? (JSON.parse(searchQuery) as { text?: string }).text ?? null : null), kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
       music: audio.find((a) => a.kind === 'music') ?? null,
-      options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = null, bgColor = '#111418', musicStyle = 'none' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle }))(JSON.parse(p.options)),
+      options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = null, bgColor = '#111418', musicStyle = 'none', voicePreset = '', voiceTone = 'natural' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle, voicePreset, voiceTone }))(JSON.parse(p.options)),
       videos: videos.map(({ renderSettings, ...v }) => ({ ...v, changes: (JSON.parse(renderSettings).changes ?? null) as string[] | null })),
       caption: current && { ...current, segments: current.segments.map((s) => ({ ...s, highlights: JSON.parse(s.highlights) })) },
       captionVersions: tracks.map((t) => ({ version: t.version, isCurrent: t.isCurrent, createdAt: t.createdAt, fontFamily: t.fontFamily, segments: t.segments.length })),
@@ -198,7 +198,9 @@ export async function editRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     if (!EDITABLE.includes(p.status)) return reply.code(409).send({ error: 'O vídeo ainda está sendo criado' })
     if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
-    await prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila' } })
+    // titlesOnly: só enunciados mudaram; o worker escreve os títulos sobre o vídeo atual, sem montar tudo de novo.
+    const titlesOnly = (req.body as { titlesOnly?: boolean } | null)?.titlesOnly === true
+    await prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila', ...(titlesOnly && { payload: JSON.stringify({ titlesOnly }) }) } })
     await prisma.project.update({ where: { id: p.id }, data: { status: 'rendering' } })
     return reply.code(202).send({ ok: true })
   })
@@ -229,9 +231,24 @@ export async function editRoutes(app: FastifyInstance) {
     const where = { scriptId: script?.id ?? '', index: Number(req.params.index) }
     const before = await prisma.scene.findFirst({ where })
     if (!before) return reply.code(404).send({ error: 'Cena não encontrada' })
-    await prisma.scene.updateMany({ where, data })
+    const { durationS, ...fields } = data
+    if (durationS !== undefined && before.narration?.trim()) return reply.code(400).send({ error: 'Cena com narração dura o tempo da fala; só cartelas e cenas sem fala mudam de duração' })
+    await prisma.scene.updateMany({ where, data: fields })
+    if (durationS !== undefined) {
+      const delta = Math.round((durationS - (before.endS - before.startS)) * 100) / 100
+      if (delta) {
+        const cut = before.endS - 0.01
+        const track = await prisma.captionTrack.findFirst({ where: { projectId: p.id, isCurrent: true }, select: { id: true } })
+        await prisma.$transaction([
+          prisma.scene.update({ where: { id: before.id }, data: { endS: before.endS + delta } }),
+          prisma.scene.updateMany({ where: { scriptId: before.scriptId, index: { gt: before.index } }, data: { startS: { increment: delta }, endS: { increment: delta } } }),
+          ...(track ? [prisma.captionSegment.updateMany({ where: { trackId: track.id, startS: { gte: cut } }, data: { startS: { increment: delta }, endS: { increment: delta } } })] : []),
+        ])
+        await noteChanges(p.id, [`Cena ${before.index + 1} · duração: ${(before.endS - before.startS).toFixed(1)} s → ${durationS.toFixed(1)} s`])
+      }
+    }
     const n = Number(req.params.index) + 1, names = { onScreenText: 'enunciado', motion: 'motion', easing: 'curva do movimento', transition: 'transição' } as const
-    await noteChanges(p.id, (Object.keys(data) as (keyof typeof names)[]).filter((k) => data[k] !== undefined && (before[k] ?? null) !== (data[k] ?? null))
+    await noteChanges(p.id, (Object.keys(fields) as (keyof typeof names)[]).filter((k) => data[k] !== undefined && (before[k] ?? null) !== (data[k] ?? null))
       .map((k) => k === 'onScreenText' ? `Cena ${n} · enunciado: "${before.onScreenText ?? ''}" → "${data.onScreenText ?? ''}"` : `Cena ${n} · ${names[k]}: ${say(k, before[k])} → ${say(k, data[k])}`))
     return { ok: true }
   })
@@ -249,11 +266,39 @@ export async function editRoutes(app: FastifyInstance) {
     if (patch.musicVolume !== undefined && patch.musicVolume !== old.musicVolume) notes.push(`Volume da trilha: ${old.musicVolume}% → ${patch.musicVolume}%`)
     if (patch.sfxVolume !== undefined && patch.sfxVolume !== old.sfxVolume) notes.push(`Efeitos sonoros: ${old.sfxVolume}% → ${patch.sfxVolume}%`)
     if (patch.titleStyle && JSON.stringify(patch.titleStyle) !== JSON.stringify(old.titleStyle ?? null)) notes.push(`Estilo dos enunciados: ${ts(old.titleStyle)} → ${ts(patch.titleStyle)}`)
+    if (patch.voicePreset && patch.voicePreset !== old.voicePreset) notes.push(`Voz da narração: ${old.voicePreset ?? 'padrão'} → ${patch.voicePreset}`)
+    if (patch.voiceTone && patch.voiceTone !== old.voiceTone) notes.push(`Ritmo da narração: ${old.voiceTone ?? 'natural'} → ${patch.voiceTone}`)
     if (patch.bgColor && patch.bgColor !== old.bgColor) notes.push(`Cor do fundo: ${old.bgColor ?? 'padrão'} → ${patch.bgColor}`)
     // Estilo novo de trilha: o próximo render busca outra música.
     await prisma.project.update({ where: { id: p.id }, data: { options: JSON.stringify({ ...JSON.parse(p.options), ...patch, ...(patch.musicStyle && { musicPicked: null }) }) } })
     await noteChanges(p.id, notes)
     return { ok: true }
+  })
+
+  app.post<{ Params: { id: string } }>('/api/projects/:id/revoice', guard, async (req, reply) => {
+    const p = await project(req)
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (!EDITABLE.includes(p.status)) return reply.code(409).send({ error: 'O vídeo ainda está sendo criado' })
+    if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
+    await prisma.$transaction([
+      prisma.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } }),
+      prisma.project.update({ where: { id: p.id }, data: { status: 'media' } }),
+      prisma.job.create({ data: { projectId: p.id, type: 'voice', stage: 'Na fila' } }),
+    ])
+    return reply.code(202).send({ ok: true })
+  })
+
+  // Duração padrão das cartelas nos próximos vídeos desta pessoa (opcional, ao aplicar a todas).
+  app.put('/api/me/card-duration', guard, async (req) => {
+    const { durationS } = z.object({ durationS: z.number().min(0.5).max(15).nullable() }).parse(req.body)
+    const key = `card_duration:${req.user!.id}`
+    if (durationS === null) await prisma.setting.deleteMany({ where: { key } })
+    else await prisma.setting.upsert({ where: { key }, create: { key, value: String(durationS) }, update: { value: String(durationS) } })
+    return { durationS }
+  })
+  app.get('/api/me/card-duration', guard, async (req) => {
+    const row = await prisma.setting.findUnique({ where: { key: `card_duration:${req.user!.id}` } })
+    return { durationS: row ? Number(row.value) : null }
   })
 
   // ---------- Pedidos de alteração e regerar uma parte ----------
@@ -287,16 +332,23 @@ export async function editRoutes(app: FastifyInstance) {
 }
 
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+const ALIGN = /^(top|middle|bottom)-(left|center|right)$/
 const ScenePatch = z.object({
   onScreenText: z.string().trim().max(120).nullable().optional().transform((v) => (v === '' ? null : v)),
   motion: z.enum(['ken_burns', 'parallax', 'cutout', 'snap_zoom', 'static']).optional(),
   easing: z.enum(['ease_in_out', 'ease_in', 'ease_out', 'linear']).optional(),
   transition: z.enum(['cut', 'punch_in', 'punch_out', 'fade', 'zoom_through', 'slide_left', 'slide_right', 'slide_up', 'slide_down', 'whip']).optional(),
+  durationS: z.number().min(0.5).max(15).optional(),
 }).strict()
 const OptionsPatch = z.object({
   musicVolume: z.number().int().min(0).max(100).optional(),
   musicStyle: z.enum(MUSIC_STYLES.map((m) => m.id) as [string, ...string[]]).optional(),
+  voicePreset: z.string().trim().min(1).max(60).optional(),
+  voiceTone: z.enum(['calma', 'natural', 'animada']).optional(),
   sfxVolume: z.number().int().min(0).max(100).optional(),
   bgColor: hexColor.optional(),
-  titleStyle: z.object({ fontFamily: z.string().trim().min(1).max(60), size: z.number().int().min(60).max(260), color: hexColor, bandColor: hexColor }).optional(),
+  titleStyle: z.object({
+    fontFamily: z.string().trim().min(1).max(60), size: z.number().int().min(60).max(260), color: hexColor, bandColor: hexColor,
+    bandSize: z.number().int().min(24).max(140).optional(), cardAlign: z.string().regex(ALIGN).optional(), bandAlign: z.string().regex(ALIGN).optional(), upper: z.boolean().optional(),
+  }).optional(),
 }).strict()

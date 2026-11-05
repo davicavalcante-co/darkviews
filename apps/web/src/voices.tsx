@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, csrf } from './api'
 import { Modal, PageHead } from './ui'
+import { Icon } from './icons'
 
 type Voice = { id: string; name: string; kind: 'design' | 'clone'; status: 'draft' | 'published'; attrs: Record<string, string>; speed: number }
 type Status = { online: boolean; licensed: boolean; attrs: Record<string, Record<string, string>>; sampleText: string }
@@ -34,7 +35,7 @@ function PlayButton({ path, body, label, disabled }: { path: string; body?: unkn
   return (
     <>
       <button type="button" className="ghost-btn play-btn" disabled={disabled || state === 'loading'} onClick={toggle} aria-pressed={state === 'playing'}>
-        {state === 'playing' ? '❚❚ Pausar' : state === 'loading' ? 'Carregando…' : `▶ ${label}`}
+        {state === 'playing' ? <><Icon name="pausar" size={16} /> Pausar</> : state === 'loading' ? 'Carregando…' : <><Icon name="tocar" size={16} /> {label}</>}
       </button>
       {error && <p className="notice alert" role="alert">✕ {error}</p>}
     </>
@@ -88,7 +89,7 @@ export function VoicesPage() {
       </ol>
       {!voices.length && (
         <button type="button" className="voice-empty" onClick={() => setEditing('new')}>
-          <span className="kind-icon">🎙️</span><b>Crie a sua primeira voz</b><small>Clone a sua voz em 30 segundos ou invente uma nova.</small>
+          <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Crie a sua primeira voz</b><small>Clone a sua voz em 30 segundos ou invente uma nova.</small>
         </button>
       )}
       {published.length > 0 && <><h2 className="voice-h">Publicadas <span className="muted">{published.length}</span></h2><VoiceList list={published} onEdit={setEditing} reload={load} /></>}
@@ -119,7 +120,7 @@ function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload
         <span className="voice-avatar" aria-hidden="true">{v.name.slice(0, 1).toUpperCase()}</span>
         <div><strong>{v.name}</strong><small className="muted">{v.kind === 'clone' ? 'Voz clonada' : 'Voz criada'} · {v.status === 'published' ? 'publicada' : 'rascunho'}</small></div>
         <div className="menu-wrap">
-          <button type="button" className="icon-btn" aria-label="Mais opções" aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu(!menu) }}>⋯</button>
+          <button type="button" className="icon-btn" aria-label="Mais opções" aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu(!menu) }}><Icon name="mais" size={18} /></button>
           {menu && (
             <div className="menu" role="menu">
               <button type="button" role="menuitem" onClick={() => setTesting(true)}>Testar áudio</button>
@@ -291,10 +292,10 @@ function VoiceForm({ voice, status, onClose }: { voice: Voice | null; status: St
         <label className="field"><span className="field-label">Nome da voz</span><input value={name} maxLength={60} placeholder="Ex.: Minha voz, Narradora calma" onChange={(e) => setName(e.target.value)} autoFocus /></label>
         <div className="kind-cards" role="radiogroup" aria-label="Como criar a voz">
           <button type="button" role="radio" aria-checked={kind === 'clone'} className="kind-card" onClick={() => setKind('clone')}>
-            <span className="kind-icon">🎙️</span><b>Clonar minha voz</b><small>Grave 10 a 30 s lendo a frase. A voz fica igual à sua.</small>
+            <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Clonar minha voz</b><small>Grave 10 a 30 s lendo a frase. A voz fica igual à sua.</small>
           </button>
           <button type="button" role="radio" aria-checked={kind === 'design'} className="kind-card" onClick={() => setKind('design')}>
-            <span className="kind-icon">✨</span><b>Criar uma voz</b><small>Escolha gênero, idade e tom. O sistema inventa a voz.</small>
+            <span className="kind-icon"><Icon name="brilho" size={24} /></span><b>Criar uma voz</b><small>Escolha gênero, idade e tom. O sistema inventa a voz.</small>
           </button>
         </div>
 

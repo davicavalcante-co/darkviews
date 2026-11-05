@@ -337,8 +337,14 @@ export function Progress({ id }: { id: string }) {
           </div>
           {detail?.video && (
             <div className="panel wide">
-              <video className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />
-              <p className="muted">Versão {detail.video.version} · {fmtDuration(detail.video.durationS)}</p>
+              {/* Criando outra versão: deixa claro que este é o vídeo anterior, não o novo. */}
+              {['queued', 'running', 'paused'].includes(ev.job?.status ?? '') ? (
+                <div className="old-video">
+                  <video className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />
+                  <div className="making" role="status"><span className="making-dot" />Nova versão em andamento · este é o vídeo anterior</div>
+                </div>
+              ) : <video className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />}
+              <p className="muted">Versão {detail.video.version}{['queued', 'running', 'paused'].includes(ev.job?.status ?? '') ? ' (anterior)' : ''} · {fmtDuration(detail.video.durationS)}</p>
             </div>
           )}
         </div>

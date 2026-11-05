@@ -4,14 +4,15 @@ import { api, uploadFont, useFonts } from './api'
 import { ApprovePage } from './approve'
 import { FontSelect, Modal, PageHead } from './ui'
 import { ThumbnailTab } from './thumbnail'
+import { Icon } from './icons'
 
 type Segment = { startS: number; endS: number; text: string; highlights: number[] }
 type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean; segments: Segment[] }
 type ChangeReq = { id: string; part: Part; frameTimeS: number | null; type: string; text: string; status: string; author: string; appliedInVersion: number | null; createdAt?: string }
 type Meta = { field: string; version: number; value: string; isCurrent: boolean; createdBy: string; createdAt: string }
 type Scene = { index: number; startS: number; endS: number; narration: string | null; onScreenText: string | null; motion: string | null; easing: string | null; transition: string | null; kind: 'card' | 'image' | 'video'; voiceId: string | null }
-type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string }
-type Options = { musicVolume: number; sfxVolume: number; titleStyle: TitleStyle | null; bgColor: string; musicStyle: string }
+type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string; bandSize?: number; cardAlign?: string; bandAlign?: string; upper?: boolean }
+type Options = { musicVolume: number; sfxVolume: number; titleStyle: TitleStyle | null; bgColor: string; musicStyle: string; voicePreset: string; voiceTone: string }
 type EditData = {
   name: string
   status: string
@@ -108,14 +109,14 @@ export function EditPage({ id }: { id: string }) {
 
 // ---------- Editor: cena e áudio | prévia | legenda e enunciado; timeline embaixo ----------
 // Tudo o que muda fica em rascunho até "Salvar"; "Renderizar vídeo" salva e monta o vídeo com todas as mudanças juntas.
-type Draft = { scenes: Record<number, Partial<Scene>>; options: Partial<Options>; caption: boolean }
+type Draft = { scenes: Record<number, Partial<Scene> & { durationS?: number }>; options: Partial<Options>; caption: boolean }
 const EMPTY: Draft = { scenes: {}, options: {}, caption: false }
 type Left = 'scene' | 'audio'
 type Right = 'caption' | 'title'
 type Ctx = Props & {
   time: number; seek: (t: number, fast?: boolean) => void; scenes: Scene[]; scene: Scene | undefined; options: Options
   track: Track; setTrack: (t: Track) => void; title: TitleStyle; segIdx: number
-  stageScene: (index: number, patch: Partial<Scene>) => void; stageOptions: (patch: Partial<Options>) => void
+  stageScene: (index: number, patch: Partial<Scene> & { durationS?: number }) => void; stageOptions: (patch: Partial<Options>) => void
 }
 
 function VideoEditor(props: Props) {
@@ -130,7 +131,14 @@ function VideoEditor(props: Props) {
   useEffect(() => { if (!draft.caption) setTrackState(data.caption) }, [data.caption?.version])
   const options: Options = { ...data.options, ...draft.options }
   const title = options.titleStyle ?? DEFAULT_TITLE
-  const scenes = data.scenes.map((s) => ({ ...s, ...draft.scenes[s.index] }))
+  let shift = 0
+  const scenes = data.scenes.map((s) => {
+    const d = draft.scenes[s.index] ?? {}
+    const startS = s.startS + shift
+    const endS = d.durationS !== undefined ? startS + d.durationS : s.endS + shift
+    shift = endS - s.endS
+    return { ...s, ...d, startS, endS }
+  })
   useGoogleFont(track?.fontFamily ?? 'Inter', track?.fontWeight ?? 700)
   useGoogleFont(title.fontFamily, 700)
   // Enquanto toca, o cursor anda a cada quadro (o timeupdate do navegador só avisa 4 vezes por segundo).
@@ -152,15 +160,15 @@ function VideoEditor(props: Props) {
   const segIdx = track.segments.findIndex((s) => time >= s.startS && time < s.endS)
   const cur = segIdx >= 0 ? track.segments[segIdx] : null
   const hl = (w: number, s: Segment) => (s.highlights.includes(w) || track.highlightMode === 'karaokê' ? track.highlightColor : track.color)
-  const stageScene = (index: number, patch: Partial<Scene>) => setDraft((d) => ({ ...d, scenes: { ...d.scenes, [index]: { ...d.scenes[index], ...patch } } }))
+  const stageScene = (index: number, patch: Partial<Scene> & { durationS?: number }) => setDraft((d) => ({ ...d, scenes: { ...d.scenes, [index]: { ...d.scenes[index], ...patch } } }))
   const stageOptions = (patch: Partial<Options>) => setDraft((d) => ({ ...d, options: { ...d.options, ...patch } }))
   const setTrack = (t: Track) => { setTrackState(t); setDraft((d) => ({ ...d, caption: true })) }
   const pending = Object.keys(draft.scenes).length + Object.keys(draft.options).length + (draft.caption ? 1 : 0)
 
   async function save() {
     for (const [index, patch] of Object.entries(draft.scenes)) {
-      const { onScreenText, motion, easing, transition } = patch
-      await api(`/projects/${id}/scenes/${index}`, { method: 'PATCH', body: { onScreenText, motion, easing, transition } })
+      const { onScreenText, motion, easing, transition, durationS } = patch
+      await api(`/projects/${id}/scenes/${index}`, { method: 'PATCH', body: { onScreenText, motion, easing, transition, durationS } })
     }
     if (Object.keys(draft.options).length) await api(`/projects/${id}/options`, { method: 'PATCH', body: draft.options })
     if (draft.caption) { const { version: _v, ...body } = track!; await api(`/projects/${id}/captions`, { method: 'PUT', body }) }
@@ -168,10 +176,14 @@ function VideoEditor(props: Props) {
   const run = (fn: () => Promise<unknown>) => { setSaving(true); act(async () => { await fn(); setDraft(EMPTY) }, reload).finally(() => setSaving(false)) }
   // Só a legenda mudou e ela já está no vídeo: troca só a legenda (rápido). O resto monta o vídeo de novo.
   const onlyCaption = draft.caption && !Object.keys(draft.scenes).length && !Object.keys(draft.options).length
+  // Só texto/estilo dos enunciados (e talvez a legenda): os títulos são escritos sobre o vídeo atual, sem montar tudo de novo.
+  const onlyTitles = Object.values(draft.scenes).every((p) => Object.keys(p).every((k) => k === 'onScreenText')) && Object.keys(draft.options).every((k) => k === 'titleStyle') && (Object.keys(draft.scenes).length > 0 || 'titleStyle' in draft.options)
   const render = () => run(async () => {
     await save()
-    if (onlyCaption && data.captionsOn) await api(`/projects/${id}/captions/apply`, { method: 'POST', body: { on: true } })
-    else await api(`/projects/${id}/render`, { method: 'POST' })
+    // Voz ou ritmo mudou: narra de novo (o vídeo é montado logo depois, com o resto das mudanças).
+    if (draft.options.voicePreset !== undefined || draft.options.voiceTone !== undefined) await api(`/projects/${id}/revoice`, { method: 'POST' })
+    else if (onlyCaption && data.captionsOn) await api(`/projects/${id}/captions/apply`, { method: 'POST', body: { on: true } })
+    else await api(`/projects/${id}/render`, { method: 'POST', body: { titlesOnly: onlyTitles } })
   })
   const ctx: Ctx = { ...props, time, seek, scenes, scene, options, track, setTrack, title, segIdx, stageScene, stageOptions }
 
@@ -201,8 +213,8 @@ function VideoEditor(props: Props) {
             <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}&clean=1`}
               onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
             {scene?.onScreenText && (scene.kind === 'card'
-              ? <div className="title-card" style={{ background: options.bgColor, fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>
-              : time < scene.startS + 2.95 && <div className="title-band" style={{ fontFamily: title.fontFamily, background: title.bandColor, fontSize: `${((title.size * 0.4) / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>)}
+              ? <div className={`title-card ${(title.cardAlign ?? 'middle-center').replace('-', ' ')}`} style={{ fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{title.upper === false ? scene.onScreenText : scene.onScreenText.toUpperCase()}</div>
+              : time < scene.startS + 2.95 && <div className={`title-band ${(title.bandAlign ?? 'top-left').replace('-', ' ')}`} style={{ fontFamily: title.fontFamily, background: title.bandColor, fontSize: `${((title.bandSize ?? title.size * 0.4) / 1920) * 100}cqw` }}>{title.upper === false ? scene.onScreenText : scene.onScreenText.toUpperCase()}</div>)}
             {cur && !(scene?.kind === 'card' && scene.onScreenText) && (
               <div className={`caption-preview ${track.position.replace('-', ' ')}${track.outline === false ? ' no-outline' : ''}`}
                 style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight, fontSize: `${(track.size / 1920) * 100}cqw` }}>
@@ -329,13 +341,48 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
 }
 
 // ---------- Card da esquerda: cena e áudio ----------
-function ScenePanel({ scene, stageScene }: Ctx) {
+function ScenePanel({ scene, scenes, stageScene }: Ctx) {
+  const [asDefault, setAsDefault] = useState(false)
+  const [applied, setApplied] = useState('')
+  useEffect(() => { api<{ durationS: number | null }>('/me/card-duration').then((r) => setAsDefault(r.durationS !== null)).catch(() => {}) }, [])
+  useEffect(() => setApplied(''), [scene?.index])
   if (!scene) return null
-  const patch = (p: Partial<Scene>) => stageScene(scene.index, p)
+  const patch = (p: Partial<Scene> & { durationS?: number }) => stageScene(scene.index, p)
+  const silent = !scene.narration?.trim()
   return (
     <div className="stack-sm">
       <div className="row"><strong>Cena {scene.index + 1}</strong><span className="muted">{fmt(scene.startS)}–{fmt(scene.endS)} · {scene.kind === 'card' ? 'cartela' : scene.kind === 'video' ? 'vídeo' : 'foto'}</span></div>
       {scene.narration && <p className="muted small">“{scene.narration}”</p>}
+      {scene.kind === 'card' && (
+        <label>Texto da cartela
+          <input value={scene.onScreenText ?? ''} maxLength={120} placeholder="Título deste bloco" onChange={(e) => patch({ onScreenText: e.target.value })} />
+        </label>
+      )}
+      {silent && (
+        <label>Duração do bloco
+          <span className="dur-row">
+            <input type="range" min={0.5} max={10} step={0.1} value={Math.round((scene.endS - scene.startS) * 10) / 10} onChange={(e) => patch({ durationS: Number(e.target.value) })} />
+            <b>{(scene.endS - scene.startS).toFixed(1)} s</b>
+          </span>
+          <small className="muted">O próximo bloco começa logo depois.</small>
+        </label>
+      )}
+      {scene.kind === 'card' && (
+        <div className="apply-all">
+          <button type="button" className="ghost-btn" onClick={async () => {
+            const d = Math.round((scene.endS - scene.startS) * 10) / 10
+            const cards = scenes.filter((x) => x.kind === 'card' && !x.narration?.trim())
+            for (const c of cards) stageScene(c.index, { durationS: d })
+            if (asDefault) await api('/me/card-duration', { method: 'PUT', body: { durationS: d } }).catch(() => {})
+            setApplied(`${d.toFixed(1)} s em ${cards.length} ${cards.length === 1 ? 'cartela' : 'cartelas'}${asDefault ? ' · padrão salvo' : ''}`)
+          }}>Aplicar a todas as cartelas</button>
+          <label className="check"><input type="checkbox" checked={asDefault} onChange={(e) => {
+            setAsDefault(e.target.checked)
+            if (!e.target.checked) api('/me/card-duration', { method: 'PUT', body: { durationS: null } }).catch(() => {})
+          }} /> Tornar padrão nos próximos vídeos</label>
+          {applied && <small className="ok">✓ {applied}</small>}
+        </div>
+      )}
       {scene.kind === 'image' && (
         <>
           <label>Motion<select value={scene.motion ?? 'ken_burns'} onChange={(e) => patch({ motion: e.target.value })}>{MOTIONS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -347,21 +394,45 @@ function ScenePanel({ scene, stageScene }: Ctx) {
   )
 }
 
+// Player compacto no estilo do sistema: tocar/pausar, barra e tempo.
+function MiniPlayer({ src, label }: { src: string; label: string }) {
+  const ref = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [t, setT] = useState(0)
+  const [d0, setD] = useState(0)
+  const d = Number.isFinite(d0) ? d0 : 0 // alguns WAV só informam a duração depois de tocar
+  return (
+    <div className="mini-player">
+      <audio ref={ref} src={src} preload="metadata" onLoadedMetadata={(e) => setD(e.currentTarget.duration)} onDurationChange={(e) => setD(e.currentTarget.duration)} onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+      <button type="button" className="icon-btn" aria-label={playing ? `Pausar ${label}` : `Tocar ${label}`} onClick={() => (playing ? ref.current?.pause() : ref.current?.play())}><Icon name={playing ? 'pausar' : 'tocar'} size={14} filled={!playing} /></button>
+      <input type="range" min={0} max={d || 1} step={0.1} value={t} aria-label={`Posição: ${label}`} onChange={(e) => { if (ref.current) ref.current.currentTime = Number(e.target.value) }} />
+      <span className="tc">{fmt(t)}/{fmt(d)}</span>
+    </div>
+  )
+}
+
 function AudioPanel({ id, data, scene, options, stageOptions }: Ctx) {
+  const [voices, setVoices] = useState<{ voices: { id: string; label: string }[]; current: string | null; tones: readonly { id: string; label: string }[] } | null>(null)
+  useEffect(() => { api<NonNullable<typeof voices>>('/voices').then(setVoices).catch(() => {}) }, [])
+  const voice = options.voicePreset || voices?.current || ''
+  const changedVoice = options.voicePreset !== data.options.voicePreset || options.voiceTone !== data.options.voiceTone
   return (
     <div className="stack-sm">
-      <span className="panel-title">Narração{scene ? ` · cena ${scene.index + 1}` : ''}</span>
-      {scene?.voiceId ? <audio controls src={`/api/projects/${id}/assets/${scene.voiceId}`} /> : <p className="muted small">Sem narração nesta cena.</p>}
+      <span className="panel-title">Narração</span>
+      <label>Voz<select value={voice} onChange={(e) => stageOptions({ voicePreset: e.target.value })}>
+        {voices?.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+      </select></label>
+      <label>Ritmo<select value={options.voiceTone} onChange={(e) => stageOptions({ voiceTone: e.target.value })}>
+        {(voices?.tones ?? []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+      </select></label>
+      {changedVoice && <p className="muted small">Ao renderizar, a narração é feita de novo com esta voz.</p>}
+      {scene?.voiceId ? <MiniPlayer src={`/api/projects/${id}/assets/${scene.voiceId}`} label={`narração da cena ${scene.index + 1}`} /> : <p className="muted small">Sem narração nesta cena.</p>}
       <span className="panel-title">Trilha</span>
       <label>Estilo<select value={options.musicStyle} onChange={(e) => stageOptions({ musicStyle: e.target.value })}>
         {MUSIC_STYLES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select></label>
-      {data.music && options.musicStyle === data.options.musicStyle && (
-        <>
-          {data.music.attribution && <p className="muted small">{data.music.attribution}</p>}
-          <audio controls src={`/api/projects/${id}/assets/${data.music.id}`} />
-        </>
-      )}
+      {data.music && options.musicStyle === data.options.musicStyle && <MiniPlayer src={`/api/projects/${id}/assets/${data.music.id}`} label="trilha" />}
       {options.musicStyle !== 'none' && (!data.music || options.musicStyle !== data.options.musicStyle) && <p className="muted small">A música é buscada ao renderizar.</p>}
       <label className="range-row">Volume<input type="range" min={0} max={80} step={5} value={options.musicVolume} onChange={(e) => stageOptions({ musicVolume: Number(e.target.value) })} /><b>{options.musicVolume ? `${options.musicVolume}%` : 'mudo'}</b></label>
       <span className="panel-title">Efeitos sonoros</span>
@@ -513,11 +584,17 @@ function TitlePanel({ scene, title, stageScene, stageOptions }: Ctx) {
       )}
       <span className="panel-title">Estilo de todos os enunciados</span>
       <div className="field"><span className="field-label">Fonte</span><FontSelect value={title.fontFamily} fonts={fonts} onChange={(fontFamily) => setTitle({ fontFamily })} /></div>
-      <label className="range-row">Tamanho<input type="range" min={60} max={260} value={title.size} onChange={(e) => setTitle({ size: Number(e.target.value) })} /></label>
-      <div className="grid2">
-        <label>Cor do texto<input type="color" value={title.color} onChange={(e) => setTitle({ color: e.target.value.toUpperCase() })} /></label>
-        <label>Cor da faixa<input type="color" value={title.bandColor} onChange={(e) => setTitle({ bandColor: e.target.value.toUpperCase() })} /></label>
-      </div>
+      <label className="check"><input type="checkbox" checked={title.upper !== false} onChange={(e) => setTitle({ upper: e.target.checked })} /> Tudo em maiúsculas</label>
+
+      <span className="field-label">Cartela (título do bloco)</span>
+      <AlignIcons value={title.cardAlign ?? 'middle-center'} onChange={(cardAlign) => setTitle({ cardAlign })} />
+      <label className="range-row">Tamanho<input type="range" min={60} max={260} value={title.size} onChange={(e) => setTitle({ size: Number(e.target.value) })} /><b>{title.size}</b></label>
+      <label>Cor do texto<input type="color" value={title.color} onChange={(e) => setTitle({ color: e.target.value.toUpperCase() })} /></label>
+
+      <span className="field-label">Faixa sobre a imagem</span>
+      <AlignIcons value={title.bandAlign ?? 'top-left'} onChange={(bandAlign) => setTitle({ bandAlign })} />
+      <label className="range-row">Tamanho<input type="range" min={24} max={140} value={title.bandSize ?? Math.round(title.size * 0.4)} onChange={(e) => setTitle({ bandSize: Number(e.target.value) })} /><b>{title.bandSize ?? Math.round(title.size * 0.4)}</b></label>
+      <label>Cor da faixa<input type="color" value={title.bandColor} onChange={(e) => setTitle({ bandColor: e.target.value.toUpperCase() })} /></label>
     </div>
   )
 }

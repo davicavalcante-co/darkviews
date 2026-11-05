@@ -127,3 +127,34 @@ describe('criação: tempo, parar e descartar', () => {
     expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).status).toBe('editing')
   })
 })
+
+describe('cartela: duração por bloco', () => {
+  it('muda a duração e empurra as cenas seguintes; cena com fala não muda', async () => {
+    const sc = await prisma.script.create({ data: { projectId, version: 20, body: '{}', scenePlan: '[]', createdBy: 'claude', scenes: { create: [
+      { index: 0, startS: 0, endS: 2, narration: null, onScreenText: 'Capítulo' },
+      { index: 1, startS: 2, endS: 5, narration: 'fala' },
+    ] } } })
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: dono, payload: { durationS: 3.5 } })).statusCode).toBe(200)
+    const rows = await prisma.scene.findMany({ where: { scriptId: sc.id }, orderBy: { index: 'asc' }, select: { startS: true, endS: true } })
+    expect(rows).toEqual([{ startS: 0, endS: 3.5 }, { startS: 3.5, endS: 6.5 }])
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/1`, headers: dono, payload: { durationS: 1 } })).statusCode).toBe(400)
+  })
+})
+
+describe('versões: favoritar e excluir sem apagar o projeto', () => {
+  it('favorita, exclui uma versão (a anterior vira atual) e não deixa excluir a última', async () => {
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.videoVersion.deleteMany({ where: { projectId } })
+    await prisma.videoVersion.createMany({ data: [
+      { projectId, version: 1, filePath: '/nao/existe-1.mp4', durationS: 10, renderSettings: '{}', isCurrent: false },
+      { projectId, version: 2, filePath: '/nao/existe-2.mp4', durationS: 10, renderSettings: '{}', isCurrent: true },
+    ] })
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/versions/1`, headers: dono, payload: { favorite: true } })).json().favorite).toBe(true)
+    expect((await app.inject({ method: 'DELETE', url: `/api/projects/${projectId}/versions/2`, headers: outro })).statusCode).toBe(404)
+    const del = await app.inject({ method: 'DELETE', url: `/api/projects/${projectId}/versions/2`, headers: dono })
+    expect(del.json()).toMatchObject({ ok: true, current: 1 })
+    expect((await prisma.videoVersion.findFirstOrThrow({ where: { projectId } })).isCurrent).toBe(true)
+    expect((await app.inject({ method: 'DELETE', url: `/api/projects/${projectId}/versions/1`, headers: dono })).statusCode).toBe(409)
+    expect(await prisma.project.count({ where: { id: projectId } })).toBe(1)
+  })
+})

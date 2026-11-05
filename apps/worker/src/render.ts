@@ -212,7 +212,8 @@ export function timedScenes(scenes: SceneRow[], voices: Map<number, { durationS:
     const q = s.searchQuery ? JSON.parse(s.searchQuery) : null
     return {
       startS: s.startS, endS: s.endS, speechS: voices.get(s.index)?.durationS ?? 0, narration: s.narration ?? '',
-      onScreenText: card ? (q?.text || s.onScreenText || '') : s.onScreenText, isCard: card,
+      // O texto editado no editor vale mais que o do roteiro original.
+      onScreenText: card ? (s.onScreenText ?? q?.text ?? '') : s.onScreenText, isCard: card,
     }
   })
 }
@@ -249,7 +250,7 @@ export async function render(job: Job) {
   if (!scenes?.length) throw new Error('Projeto sem cenas')
   // captionsOn: a pessoa aplicou a legenda na aba Legendas. Até lá o vídeo sai sem a legenda da fala.
   const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
-  const { captionsOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean }
+  const { captionsOnly, titlesOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean; titlesOnly?: boolean }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   let music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
@@ -259,11 +260,14 @@ export async function render(job: Job) {
   // Usa a trilha de legenda atual (editada na aba Legendas) ou cria a primeira a partir da narração, no estilo padrão.
   let track = project.captionTracks[0]
   if (!track) {
-    const segs = buildSegments(timed, DEFAULT_STYLE.highlightMode, keywords)
+    // Nova versão do vídeo: a fala mudou, então o texto é refeito, mas no mesmo estilo da legenda anterior.
+    const last = await prisma.captionTrack.findFirst({ where: { projectId: project.id }, orderBy: { version: 'desc' } })
+    const style0 = last ? { fontFamily: last.fontFamily, fontWeight: last.fontWeight, size: last.size, color: last.color, highlightColor: last.highlightColor, position: last.position, highlightMode: last.highlightMode, outline: last.outline } : DEFAULT_STYLE
+    const segs = buildSegments(timed, style0.highlightMode, keywords)
     track = await prisma.captionTrack.create({
       data: {
-        // Numeração continua as versões antigas (uma nova versão do vídeo desliga a legenda anterior, mas ela fica no histórico).
-        projectId: project.id, version: ((await prisma.captionTrack.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1, ...DEFAULT_STYLE,
+        // Numeração continua as versões antigas (a anterior fica no histórico).
+        projectId: project.id, version: (last?.version ?? 0) + 1, ...style0,
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },
@@ -284,19 +288,26 @@ export async function render(job: Job) {
   // Só mudou a legenda: aproveita o vídeo base da versão atual em vez de montar tudo de novo.
   const reuse = captionsOnly && prevSettings.base && prevSettings.clean && existsSync(prevSettings.base)
   if (reuse) { base = prevSettings.base!; cleanOut = prevSettings.clean! }
+  // Só mudaram enunciados (texto ou estilo): escreve os títulos de novo sobre o vídeo limpo atual. Sem áudio, sem montar as cenas.
+  const retitle = !reuse && titlesOnly && prevSettings.clean && existsSync(prevSettings.clean)
+  if (retitle) {
+    cleanOut = prevSettings.clean!
+    await prisma.job.update({ where: { id: job.id }, data: { stage: 'Escrevendo os enunciados', progress: 40 } })
+    await burnCaptions(cleanOut, toAss([], timed, style, undefined, true, opts.titleStyle), base)
+  }
   // Cartela sem imagem própria usa a foto da cena mais próxima como fundo tingido.
   const photos = scenes.filter((x) => x.asset && !x.asset.kind.endsWith('video'))
   const nearPhoto = (idx: number) => photos.reduce<typeof photos[number] | null>((b, x) => (!b || Math.abs(x.index - idx) < Math.abs(b.index - idx) ? x : b), null)?.asset?.filePath
 
   // Recorte do objeto só para as fotos com parallax.
   const masks = new Map<number, string>()
-  for (const s of scenes) if (s.motion === 'parallax' && s.asset && !s.asset.kind.endsWith('video')) { const m = await subjectMask(s.asset.filePath); if (m) masks.set(s.index, m) }
+  if (!reuse && !retitle) for (const s of scenes) if (s.motion === 'parallax' && s.asset && !s.asset.kind.endsWith('video')) { const m = await subjectMask(s.asset.filePath); if (m) masks.set(s.index, m) }
 
-  if (!reuse) {
+  if (!reuse && !retitle) {
     await prisma.job.update({ where: { id: job.id }, data: { stage: 'Trilha sonora', progress: 4 } })
     music = await syncMusic(project.id, project.ownerId, opts, music, timed.at(-1)?.endS ?? 0)
   }
-  if (!reuse) await renderVideo({
+  if (!reuse && !retitle) await renderVideo({
     scenes: scenes.map((s) => ({
       durationS: s.endS - s.startS,
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
@@ -316,7 +327,8 @@ export async function render(job: Job) {
   await prisma.$transaction([
     prisma.videoVersion.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } }),
     prisma.videoVersion.create({
-      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut, changes: opts.pendingChanges ?? [] }) },
+      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut, changes: opts.pendingChanges ?? [],
+        source: { name: project.name, prompt: project.prompt, targetDurationS: project.targetDurationS, options: (({ pendingChanges: _p, musicPicked: _m, ...o }) => o)(opts) } }) },
     }),
   ])
   // As mudanças anotadas no editor ficaram gravadas nesta versão; a lista recomeça vazia.
