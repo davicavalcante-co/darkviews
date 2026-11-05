@@ -175,12 +175,14 @@ function VideoEditor(props: Props) {
   const run = (fn: () => Promise<unknown>) => { setSaving(true); act(async () => { await fn(); setDraft(EMPTY) }, reload).finally(() => setSaving(false)) }
   // Só a legenda mudou e ela já está no vídeo: troca só a legenda (rápido). O resto monta o vídeo de novo.
   const onlyCaption = draft.caption && !Object.keys(draft.scenes).length && !Object.keys(draft.options).length
+  // Só texto/estilo dos enunciados (e talvez a legenda): os títulos são escritos sobre o vídeo atual, sem montar tudo de novo.
+  const onlyTitles = Object.values(draft.scenes).every((p) => Object.keys(p).every((k) => k === 'onScreenText')) && Object.keys(draft.options).every((k) => k === 'titleStyle') && (Object.keys(draft.scenes).length > 0 || 'titleStyle' in draft.options)
   const render = () => run(async () => {
     await save()
     // Voz ou ritmo mudou: narra de novo (o vídeo é montado logo depois, com o resto das mudanças).
     if (draft.options.voicePreset !== undefined || draft.options.voiceTone !== undefined) await api(`/projects/${id}/revoice`, { method: 'POST' })
     else if (onlyCaption && data.captionsOn) await api(`/projects/${id}/captions/apply`, { method: 'POST', body: { on: true } })
-    else await api(`/projects/${id}/render`, { method: 'POST' })
+    else await api(`/projects/${id}/render`, { method: 'POST', body: { titlesOnly: onlyTitles } })
   })
   const ctx: Ctx = { ...props, time, seek, scenes, scene, options, track, setTrack, title, segIdx, stageScene, stageOptions }
 
@@ -210,7 +212,7 @@ function VideoEditor(props: Props) {
             <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}&clean=1`}
               onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
             {scene?.onScreenText && (scene.kind === 'card'
-              ? <div className="title-card" style={{ background: options.bgColor, fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>
+              ? <div className="title-card" style={{ fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>
               : time < scene.startS + 2.95 && <div className="title-band" style={{ fontFamily: title.fontFamily, background: title.bandColor, fontSize: `${((title.size * 0.4) / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>)}
             {cur && !(scene?.kind === 'card' && scene.onScreenText) && (
               <div className={`caption-preview ${track.position.replace('-', ' ')}${track.outline === false ? ' no-outline' : ''}`}

@@ -65,14 +65,14 @@ export async function editRoutes(app: FastifyInstance) {
       prisma.metadataField.findMany({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { field: true, version: true, value: true, isCurrent: true, createdBy: true, createdAt: true } }),
       prisma.changeRequest.findMany({ where: { projectId: p.id }, orderBy: { createdAt: 'desc' }, include: { author: { select: { name: true } } } }),
       prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } }, select: { type: true, status: true, stage: true, progress: true } }),
-      prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { scenes: { orderBy: { index: 'asc' }, select: { index: true, startS: true, endS: true, narration: true, onScreenText: true, motion: true, easing: true, transition: true, assetId: true, asset: { select: { kind: true } } } } } }),
+      prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { scenes: { orderBy: { index: 'asc' }, select: { index: true, startS: true, endS: true, narration: true, onScreenText: true, motion: true, easing: true, transition: true, assetId: true, searchQuery: true, asset: { select: { kind: true } } } } } }),
       prisma.asset.findMany({ where: { projectId: p.id, kind: { in: ['voice', 'music'] } }, select: { id: true, kind: true, sortOrder: true, attribution: true } }),
     ])
     const current = tracks.find((t) => t.isCurrent) ?? null
     return {
       name: p.name, status: p.status, job, captionsOn: JSON.parse(p.options).captionsOn === true,
       // Camadas do editor: cada cena com enunciado, movimento, transição e a narração dela; trilha e opções gerais.
-      scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, ...s }) => ({ ...s, kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
+      scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, searchQuery, ...s }) => ({ ...s, onScreenText: s.onScreenText ?? (!asset && searchQuery ? (JSON.parse(searchQuery) as { text?: string }).text ?? null : null), kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
       music: audio.find((a) => a.kind === 'music') ?? null,
       options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = null, bgColor = '#111418', musicStyle = 'none', voicePreset = '', voiceTone = 'natural' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle, voicePreset, voiceTone }))(JSON.parse(p.options)),
       videos: videos.map(({ renderSettings, ...v }) => ({ ...v, changes: (JSON.parse(renderSettings).changes ?? null) as string[] | null })),
@@ -198,7 +198,9 @@ export async function editRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     if (!EDITABLE.includes(p.status)) return reply.code(409).send({ error: 'O vídeo ainda está sendo criado' })
     if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
-    await prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila' } })
+    // titlesOnly: só enunciados mudaram; o worker escreve os títulos sobre o vídeo atual, sem montar tudo de novo.
+    const titlesOnly = (req.body as { titlesOnly?: boolean } | null)?.titlesOnly === true
+    await prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila', ...(titlesOnly && { payload: JSON.stringify({ titlesOnly }) }) } })
     await prisma.project.update({ where: { id: p.id }, data: { status: 'rendering' } })
     return reply.code(202).send({ ok: true })
   })
