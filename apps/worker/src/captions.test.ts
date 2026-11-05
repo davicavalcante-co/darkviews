@@ -26,6 +26,13 @@ describe('legendas', () => {
     expect(ass).toMatch(/Dialogue: 1,0:00:00\.15,0:00:02\.95,Top,.*TÍTULO/) // destaque some depois de ~2,8 s
   })
 
+  it('legenda aplicada depois: só a fala, sem repetir títulos que já estão no vídeo base', () => {
+    const ass = toAss(buildSegments([scene], 'palavra-chave', []), [{ ...scene, onScreenText: 'Título', isCard: false }], style, undefined, false)
+    expect(ass).toMatch(/Default,/)
+    expect(ass).not.toContain('TÍTULO')
+    expect(toAss([], [{ ...scene, onScreenText: 'Título', isCard: false }], style)).not.toMatch(/Dialogue: 0,/) // vídeo base: títulos sem fala
+  })
+
   it('cartela de capítulo: título grande em caixa alta e sem a legenda da fala por cima', () => {
     const ass = toAss(buildSegments([scene], 'palavra-chave', []), [{ ...scene, onScreenText: 'Fora de campo', isCard: true }], style)
     expect(ass).toContain('Card,,0,0,0,,{\\fad(250,200)}FORA DE CAMPO')

@@ -67,19 +67,11 @@ export const NewProjectInput = z.object({
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
   targetDurationS: z.coerce.number().int().min(15).max(MAX_DURATION_S, 'Máximo de 18 minutos'),
-  fontFamily: z.string().trim().min(1).max(60), // conferida contra as fontes liberadas no servidor
-  highlightMode: HighlightMode,
   voiceBrief: z.string().trim().max(200).optional().transform((v) => v || undefined), // ex.: "mulher jovem, animada"
   voicePreset: z.string().trim().max(60).optional().transform((v) => v || undefined), // voz escolhida entre as opções do fornecedor em uso
   voiceTone: z.enum(['calma', 'natural', 'animada']).optional().or(z.literal('').transform(() => undefined)),
-  highlightColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().or(z.literal('').transform(() => undefined)),
-  captionPosition: z.string().regex(CAPTION_POSITION).optional().or(z.literal('').transform(() => undefined)),
-  captionSize: z.coerce.number().int().min(24).max(140).optional(),
-  captionOutline: z.enum(['0', '1']).optional().transform((v) => (v === undefined ? undefined : v === '1')),
   bgColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional().or(z.literal('').transform(() => undefined)),
   editStyle: z.enum(['auto', 'documentario', 'dinamico', 'revista', 'profundidade']).optional().or(z.literal('').transform(() => undefined)),
-  musicStyle: z.string().max(20).optional().or(z.literal('').transform(() => undefined)),
-  musicVolume: z.coerce.number().int().min(0).max(100).optional(),
   useStock: z.enum(['0', '1']).optional().transform((v) => v !== '0'), // false: só as imagens do cliente, sem banco
   captions: z.string().default('[]').transform((s, ctx) => {
     try { return z.array(z.string().max(200)).parse(JSON.parse(s)) } catch {
@@ -152,7 +144,7 @@ export const PROVIDERS: CatalogItem[] = [
     tutorial: ['Use a mesma conta da ElevenLabs (plano pago para uso comercial).', 'Abra Settings → API Keys, crie uma chave e copie.', 'Cole a chave aqui, ligue o card e clique em Testar.', 'Em Novo vídeo, escolha o estilo: a trilha é composta sob medida.'] },
   { provider: 'jamendo', label: 'Jamendo', category: 'música', tier: 'gratis_chave', secrets: ['api_key'], priority: 20, config: {},
     help: 'Mais de 500 mil músicas de artistas independentes. Só usamos as liberadas para uso comercial.', signup: 'https://devportal.jamendo.com/',
-    tutorial: ['Crie uma conta grátis em devportal.jamendo.com.', 'Clique em "Create an app" e dê um nome (ex.: Corte Final).', 'Copie o "Client ID" da app criada.', 'Cole aqui no campo da chave, ligue o card e clique em Testar.'] },
+    tutorial: ['Crie uma conta grátis em devportal.jamendo.com.', 'Clique em "Create an app" e dê um nome (ex.: Darkviews).', 'Copie o "Client ID" da app criada.', 'Cole aqui no campo da chave, ligue o card e clique em Testar.'] },
   { provider: 'openverse_audio', label: 'Openverse Áudio', category: 'música', tier: 'gratis', secrets: [], builtIn: true, priority: 30, config: {},
     help: 'Músicas Creative Commons liberadas para uso comercial (Jamendo, Freesound, ccMixter e outros). Já vem conectado.',
     tutorial: ['Já vem pronto, sem cadastro.', 'Só usa músicas liberadas para uso comercial.', 'O crédito da música entra na descrição do vídeo.'] },

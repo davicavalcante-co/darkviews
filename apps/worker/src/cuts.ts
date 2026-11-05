@@ -48,7 +48,9 @@ export async function cuts(job: Job) {
   const track = project.captionTracks[0]
   const style: CaptionStyle | null = track ? trackStyle(track) : null
   if (track) await ensureFont(track.fontFamily, track.fontWeight)
-  const segments: Segment[] = (track?.segments ?? []).map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) }))
+  // Legenda da fala só entra nos cortes depois de aplicada na aba Legendas.
+  const captionsOn = (JSON.parse(project.options) as { captionsOn?: boolean }).captionsOn === true
+  const segments: Segment[] = (captionsOn ? track?.segments ?? [] : []).map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) }))
   const scenes = timedScenes(project.scripts[0]?.scenes ?? [], new Map(project.assets.map((a) => [a.sortOrder, a])))
 
   for (const [i, cut] of project.cuts.entries()) {

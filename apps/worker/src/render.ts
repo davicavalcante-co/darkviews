@@ -1,9 +1,12 @@
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, STORAGE_DIR, type Job } from '@corte/db'
-import { MAX_DURATION_S } from '@corte/shared'
-import { buildSegments, toAss, type CaptionStyle, type Segment, type TimedScene } from './captions.js'
+import { MAX_DURATION_S, MUSIC_STYLES } from '@corte/shared'
+import { pickMusic } from '@corte/providers'
+import { randomUUID } from 'node:crypto'
+import { buildSegments, toAss, type CaptionStyle, type Segment, type TimedScene, type TitleStyle } from './captions.js'
 import { assertLibass, durationOf, FFMPEG, run } from './ffmpeg.js'
 import { ensureFont, FONTS_DIR } from './fonts.js'
 import { subjectMask } from './subject.js'
@@ -13,7 +16,7 @@ const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
 export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
-export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
+export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
 
 // Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
 // Os cortes secos usam 1 quadro de transição (na prática, corte direto).
@@ -171,7 +174,7 @@ export async function renderVideo(input: RenderInput) {
     if (built < total - 0.5) throw new Error(`A montagem das cenas saiu com ${built.toFixed(1)} s de ${total.toFixed(1)} s`)
     await ff(['-f', 'concat', '-safe', '0', '-i', 'audios.txt', '-c', 'copy', 'narracao.wav'])
     // Efeitos sonoros nas transições e nos zooms rápidos (gerados aqui mesmo, sem licença de terceiros).
-    const sfx = await buildSfx(input.scenes, into, work, ff, total)
+    const sfx = input.sfxVolume === 0 ? null : await buildSfx(input.scenes, into, work, ff, total)
     await writeFile(join(work, 'legendas.ass'), input.ass)
     await symlink(input.fontsDir, join(work, 'fonts'))
     await input.onProgress?.(80)
@@ -186,9 +189,9 @@ export async function renderVideo(input: RenderInput) {
     if (input.music) {
       args.push('-stream_loop', '-1', '-i', input.music)
       // Música abaixa sozinha enquanto há fala e volta nas pausas (ducking).
-      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=0.55[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
+      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
     } else {
-      audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=0.55[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
+      audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
     }
     await mkdir(join(input.out, '..'), { recursive: true })
     await ff([...args, '-filter_complex', `[0:v]subtitles=legendas.ass:fontsdir=fonts[v];${audio}`, '-map', '[v]', '-map', '[a]',
@@ -218,7 +221,19 @@ export function trackStyle(t: { fontFamily: string; fontWeight: number; size: nu
   return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position, outline: t.outline }
 }
 
-const DEFAULT_STYLE = { size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom-center' }
+const DEFAULT_STYLE = { fontFamily: 'Montserrat', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom-center', highlightMode: 'palavra-chave' }
+
+// Queima só a legenda da fala sobre o vídeo base (que já tem cartelas e destaques). O áudio é copiado.
+export async function burnCaptions(src: string, ass: string, out: string) {
+  await assertLibass()
+  const work = await mkdtemp(join(tmpdir(), 'corte-legenda-'))
+  try {
+    await writeFile(join(work, 'legendas.ass'), ass)
+    await symlink(FONTS_DIR, join(work, 'fonts'))
+    await mkdir(join(out, '..'), { recursive: true })
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', src, '-vf', 'subtitles=legendas.ass:fontsdir=fonts', ...X264, '-preset', 'medium', '-crf', '20', '-c:a', 'copy', '-movflags', '+faststart', out], { cwd: work, maxBuffer: 16 * 1024 * 1024 })
+  } finally { await rm(work, { recursive: true, force: true }) }
+}
 
 export async function render(job: Job) {
   const project = await prisma.project.update({
@@ -232,21 +247,22 @@ export async function render(job: Job) {
   })
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
-  const opts = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; highlightColor?: string; captionPosition?: string; captionSize?: number; captionOutline?: boolean; bgColor?: string; musicVolume?: number }
+  // captionsOn: a pessoa aplicou a legenda na aba Legendas. Até lá o vídeo sai sem a legenda da fala.
+  const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null }
+  const { captionsOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
-  const music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
+  let music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
 
   const timed = timedScenes(scenes, voices)
 
-  // Usa a trilha de legenda atual (editada na Fase 5) ou cria a primeira a partir da narração.
+  // Usa a trilha de legenda atual (editada na aba Legendas) ou cria a primeira a partir da narração, no estilo padrão.
   let track = project.captionTracks[0]
   if (!track) {
-    const fontFamily = opts.fontFamily ?? 'Montserrat'
-    const segs = buildSegments(timed, opts.highlightMode ?? 'palavra-chave', keywords)
+    const segs = buildSegments(timed, DEFAULT_STYLE.highlightMode, keywords)
     track = await prisma.captionTrack.create({
       data: {
-        projectId: project.id, version: 1, fontFamily, fontWeight: 700, ...DEFAULT_STYLE, ...(opts.highlightColor && { highlightColor: opts.highlightColor }), ...(opts.captionPosition && { position: opts.captionPosition }), ...(opts.captionSize && { size: opts.captionSize }), ...(opts.captionOutline === false && { outline: false }), highlightMode: opts.highlightMode ?? 'palavra-chave',
+        projectId: project.id, version: 1, ...DEFAULT_STYLE,
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },
@@ -255,11 +271,18 @@ export async function render(job: Job) {
   await prisma.job.update({ where: { id: job.id }, data: { stage: 'Baixando a fonte das legendas', progress: 2 } })
   await ensureFont(track.fontFamily, track.fontWeight)
   const style = trackStyle(track)
+  if (opts.titleStyle) await ensureFont(opts.titleStyle.fontFamily, 700)
   const segments: Segment[] = track.segments.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) }))
 
   const version = ((await prisma.videoVersion.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1
-  const out = join(STORAGE_DIR, 'renders', project.id, `v${version}.mp4`)
-  const cleanOut = join(STORAGE_DIR, 'renders', project.id, `v${version}-sem-legenda.mp4`)
+  const dir = join(STORAGE_DIR, 'renders', project.id)
+  // base: vídeo com cartelas e destaques, sem a legenda da fala. clean: sem nada escrito (cortes verticais).
+  let base = join(dir, `v${version}-base.mp4`), cleanOut = join(dir, `v${version}-sem-legenda.mp4`)
+  const prev = await prisma.videoVersion.findFirst({ where: { projectId: project.id, isCurrent: true } })
+  const prevSettings = JSON.parse(prev?.renderSettings ?? '{}') as { base?: string; clean?: string }
+  // Só mudou a legenda: aproveita o vídeo base da versão atual em vez de montar tudo de novo.
+  const reuse = captionsOnly && prevSettings.base && prevSettings.clean && existsSync(prevSettings.base)
+  if (reuse) { base = prevSettings.base!; cleanOut = prevSettings.clean! }
   // Cartela sem imagem própria usa a foto da cena mais próxima como fundo tingido.
   const photos = scenes.filter((x) => x.asset && !x.asset.kind.endsWith('video'))
   const nearPhoto = (idx: number) => photos.reduce<typeof photos[number] | null>((b, x) => (!b || Math.abs(x.index - idx) < Math.abs(b.index - idx) ? x : b), null)?.asset?.filePath
@@ -268,21 +291,31 @@ export async function render(job: Job) {
   const masks = new Map<number, string>()
   for (const s of scenes) if (s.motion === 'parallax' && s.asset && !s.asset.kind.endsWith('video')) { const m = await subjectMask(s.asset.filePath); if (m) masks.set(s.index, m) }
 
-  await renderVideo({
+  if (!reuse) {
+    await prisma.job.update({ where: { id: job.id }, data: { stage: 'Trilha sonora', progress: 4 } })
+    music = await syncMusic(project.id, project.ownerId, opts, music, timed.at(-1)?.endS ?? 0)
+  }
+  if (!reuse) await renderVideo({
     scenes: scenes.map((s) => ({
       durationS: s.endS - s.startS,
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
       path: s.asset?.filePath ?? nearPhoto(s.index), transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor,
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
     })),
-    music, musicVolume: opts.musicVolume, ass: toAss(segments, timed, style), fontsDir: FONTS_DIR, out, cleanOut,
-    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Criando vídeo: cenas' : 'Criando vídeo: legendas e áudio', progress: p } }),
+    music, musicVolume: opts.musicVolume, sfxVolume: opts.sfxVolume, ass: toAss([], timed, style, undefined, true, opts.titleStyle), fontsDir: FONTS_DIR, out: base, cleanOut,
+    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Criando vídeo: cenas' : 'Criando vídeo: textos e áudio', progress: p } }),
   })
+  let out = base
+  if (opts.captionsOn) {
+    await prisma.job.update({ where: { id: job.id }, data: { stage: 'Aplicando a legenda', progress: 90 } })
+    out = join(dir, `v${version}.mp4`)
+    await burnCaptions(base, toAss(segments, timed, style, undefined, false), out)
+  }
 
   await prisma.$transaction([
     prisma.videoVersion.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } }),
     prisma.videoVersion.create({
-      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: track.id, clean: cleanOut }) },
+      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut }) },
     }),
   ])
   await addCredits(project.id)
@@ -337,4 +370,22 @@ async function buildSfx(scenes: RenderScene[], into: ([string, number] | null)[]
   const graph = hits.map((h, k) => `[${k}]adelay=${Math.round(h.at * 1000)}:all=1[s${k}]`).join(';') + `;${hits.map((_, k) => `[s${k}]`).join('')}amix=inputs=${hits.length}:normalize=0,apad,atrim=0:${total.toFixed(3)}`
   await ff([...inputs, '-filter_complex', graph, '-ar', '48000', '-ac', '2', 'efeitos.wav'])
   return 'efeitos.wav'
+}
+
+// Trilha escolhida no editor: busca uma nova quando o estilo muda; "sem trilha" (ou nada escolhido) tira a música.
+// musicPicked indefinido = projeto antigo, cuja trilha já veio da criação e fica como está.
+async function syncMusic(projectId: string, ownerId: string, opts: { musicStyle?: string; musicPicked?: string | null }, current: string | null, durationS: number) {
+  const want = opts.musicStyle && opts.musicStyle !== 'none' ? MUSIC_STYLES.find((m) => m.id === opts.musicStyle) ?? MUSIC_STYLES[0] : null
+  if (current && (!want || (opts.musicPicked !== undefined && opts.musicPicked !== want.id))) {
+    await prisma.asset.deleteMany({ where: { projectId, kind: 'music' } })
+    current = null
+  }
+  if (!want || current) return current
+  const dir = join(STORAGE_DIR, 'media', projectId)
+  await mkdir(dir, { recursive: true })
+  const m = await pickMusic(ownerId, want.tags, durationS, join(dir, `trilha-${randomUUID().slice(0, 8)}`))
+  if (m) await prisma.asset.create({ data: { projectId, kind: 'music', filePath: m.path, mime: 'audio/mpeg', sourceProvider: m.provider, license: m.license, attribution: m.attribution || null } })
+  const p = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { options: true } })
+  await prisma.project.update({ where: { id: projectId }, data: { options: JSON.stringify({ ...JSON.parse(p.options), musicPicked: want.id }) } })
+  return m?.path ?? null
 }

@@ -22,7 +22,7 @@ function Framing({ src, cropX }: { src: string; cropX: number }) {
   )
 }
 
-export function ApprovePage({ id }: { id: string }) {
+export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }) {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [data, setData] = useState<CutsData | null>(null)
   const [platforms, setPlatforms] = useState<CutPlatform[]>(['shorts', 'reels'])
@@ -56,8 +56,8 @@ export function ApprovePage({ id }: { id: string }) {
 
   return (
     <div className="page">
-      <PageHead back={{ href: `#/editar/${id}`, label: 'Edição' }} title={detail.name}
-        kicker={data.approvedAt ? `Aprovado em ${new Date(data.approvedAt).toLocaleString('pt-BR')}` : 'Aprovação'} />
+      {!embedded && <PageHead back={{ href: `#/editar/${id}`, label: 'Edição' }} title={detail.name}
+        kicker={data.approvedAt ? `Aprovado em ${new Date(data.approvedAt).toLocaleString('pt-BR')}` : 'Aprovação'} />}
       {data.job && <p className="warn" role="status">{data.job.stage} · {data.job.progress}%</p>}
 
       <Section idx={1} title={data.approvedAt ? 'Gerar mais cortes' : 'Trecho e enquadramento'}>

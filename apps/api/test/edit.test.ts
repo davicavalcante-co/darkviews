@@ -73,3 +73,31 @@ describe('acesso e fila', () => {
     expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/render`, headers: dono })).statusCode).toBe(409)
   })
 })
+
+describe('aba Legendas', () => {
+  it('aplicar liga a legenda e pede só a troca da legenda; tirar desliga', async () => {
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.project.update({ where: { id: projectId }, data: { status: 'editing' } })
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/captions/apply`, headers: dono, payload: { on: true } })).statusCode).toBe(202)
+    const job = await prisma.job.findFirstOrThrow({ where: { projectId, status: 'queued' } })
+    expect([job.type, JSON.parse(job.payload!)]).toEqual(['render', { captionsOnly: true }])
+    expect(JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).options).captionsOn).toBe(true)
+    // Com a tarefa na fila, não aceita outra.
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/captions/apply`, headers: dono, payload: { on: false } })).statusCode).toBe(409)
+  })
+})
+
+describe('editor em camadas', () => {
+  it('muda enunciado e motion da cena, e o estilo dos enunciados vale para o projeto', async () => {
+    const script = await prisma.script.create({ data: { projectId, version: 9, body: '{}', scenePlan: '[]', createdBy: 'claude', scenes: { create: [{ index: 0, startS: 0, endS: 3, narration: 'Oi', onScreenText: 'Capítulo 1' }] } } })
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: dono, payload: { onScreenText: 'Novo título', motion: 'parallax' } })).statusCode).toBe(200)
+    expect(await prisma.scene.findFirst({ where: { scriptId: script.id }, select: { onScreenText: true, motion: true } })).toEqual({ onScreenText: 'Novo título', motion: 'parallax' })
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: dono, payload: { motion: 'voar' } })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: outro, payload: { onScreenText: 'x' } })).statusCode).toBe(404)
+    const titleStyle = { fontFamily: 'Inter', size: 150, color: '#FFFFFF', bandColor: '#FF0000' }
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/options`, headers: dono, payload: { titleStyle, sfxVolume: 0 } })).statusCode).toBe(200)
+    const edit = (await app.inject({ url: `/api/projects/${projectId}/edit`, headers: dono })).json()
+    expect(edit.options).toMatchObject({ titleStyle, sfxVolume: 0 })
+    expect(edit.scenes[0]).toMatchObject({ onScreenText: 'Novo título', kind: 'card' })
+  })
+})

@@ -185,11 +185,19 @@ function Setup({ item, scope, base, inUse, onClose, reload, makePrimary }: {
 }
 
 // Página "Integrações" de cada usuário (suas contas; o resto segue o padrão do admin).
-export function MyIntegrations() {
+export function MyIntegrations({ isAdmin }: { isAdmin?: boolean }) {
+  // O admin também define aqui o padrão que vale para todos (antes era uma aba repetida dentro do Admin).
+  const [scope, setScope] = useState<'me' | 'system'>('me')
   return (
     <div className="page">
       <PageHead kicker="Voz, fotos e música" title="Integrações" />
-      <Integrations scope="me" />
+      {isAdmin && (
+        <div className="tabs" role="tablist">
+          <button type="button" role="tab" aria-selected={scope === 'me'} onClick={() => setScope('me')}>Minhas contas</button>
+          <button type="button" role="tab" aria-selected={scope === 'system'} onClick={() => setScope('system')}>Padrão para todos</button>
+        </div>
+      )}
+      <Integrations key={scope} scope={scope} />
     </div>
   )
 }

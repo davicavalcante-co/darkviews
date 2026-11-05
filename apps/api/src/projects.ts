@@ -10,7 +10,7 @@ import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInpu
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
 import { requireAuth } from './auth.js'
-import { enabledFonts, getSettings } from './settings.js'
+import { getSettings } from './settings.js'
 
 const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode })
 
@@ -72,7 +72,6 @@ export async function projectRoutes(app: FastifyInstance) {
       const input = NewProjectInput.parse(fields)
       const settings = await getSettings()
       if (input.targetDurationS > settings.max_duration_s) throw httpError(400, `Duração máxima definida pelo admin: ${Math.floor(settings.max_duration_s / 60)} min`)
-      if (!(await enabledFonts()).includes(input.fontFamily)) throw httpError(400, 'Fonte não liberada pelo admin')
       if (settings.daily_video_limit > 0) {
         const today = await prisma.project.count({ where: { ownerId: req.user!.id, createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } })
         if (today >= settings.daily_video_limit) throw httpError(429, `Limite de ${settings.daily_video_limit} vídeos por dia atingido`)
@@ -124,7 +123,6 @@ export async function projectRoutes(app: FastifyInstance) {
       const input = NewProjectInput.parse({ ...fields, link: undefined })
       const settings = await getSettings()
       if (input.targetDurationS > settings.max_duration_s) throw httpError(400, `Duração máxima definida pelo admin: ${Math.floor(settings.max_duration_s / 60)} min`)
-      if (!(await enabledFonts()).includes(input.fontFamily)) throw httpError(400, 'Fonte não liberada pelo admin')
       const order = RegenOrder.parse(JSON.parse(fields.order ?? '[]'))
       if (order.filter((o) => 'new' in o).length !== files.length) throw httpError(400, 'Imagens fora de ordem; tente de novo')
       const owned = new Set(p.assets.map((a) => a.id))
@@ -228,7 +226,11 @@ export async function projectRoutes(app: FastifyInstance) {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { videoVersions: { where: wanted ? { version: wanted } : { isCurrent: true } } } })
     const v = p?.videoVersions[0]
     if (!v) return reply.code(404).send({ error: 'Vídeo não encontrado' })
-    const size = (await stat(v.filePath)).size
+    // ?base=1: vídeo sem a legenda da fala (a prévia da aba Legendas desenha a legenda por cima).
+    // ?clean=1: sem nada escrito (o editor desenha legenda e enunciados por cima). ?base=1: sem a legenda da fala.
+    const q = req.query as { base?: string; clean?: string }, rs = JSON.parse(v.renderSettings) as { base?: string; clean?: string }
+    const file = (q.clean ? rs.clean : q.base ? rs.base : undefined) ?? v.filePath
+    const size = (await stat(file)).size
     const m = /bytes=(\d*)-(\d*)/.exec(req.headers.range ?? '')
     const start = m?.[1] ? Number(m[1]) : 0
     const end = m?.[2] ? Math.min(Number(m[2]), size - 1) : size - 1
@@ -236,7 +238,7 @@ export async function projectRoutes(app: FastifyInstance) {
     reply.header('accept-ranges', 'bytes').header('content-type', 'video/mp4').header('content-length', end - start + 1)
     if (m) reply.code(206).header('content-range', `bytes ${start}-${end}/${size}`)
     if ((req.query as { download?: string }).download) reply.header('content-disposition', `attachment; filename="video-v${v.version}.mp4"`)
-    return reply.send(createReadStream(v.filePath, { start, end }))
+    return reply.send(createReadStream(file, { start, end }))
   })
 
   // Voz que vai narrar os vídeos deste usuário (a primeira pronta) e as opções prontas para escolher em Novo vídeo.
@@ -392,9 +394,8 @@ async function tokensByProject(ids: string[]) {
 // Opções do vídeo guardadas no projeto. Na nova versão, mantém o que veio antes (ex.: a escolha de pessoa falando).
 function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
   return JSON.stringify({
-    ...prev, fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
-    highlightColor: input.highlightColor, captionPosition: input.captionPosition, captionSize: input.captionSize, captionOutline: input.captionOutline,
-    bgColor: input.bgColor, useStock: input.useStock, musicStyle: input.musicStyle, musicVolume: input.musicVolume, editStyle: input.editStyle,
+    ...prev, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
+    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle,
   })
 }
 

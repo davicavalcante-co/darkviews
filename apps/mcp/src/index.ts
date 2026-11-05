@@ -31,7 +31,6 @@ tool('criar_video', 'Cria um vídeo a partir de um prompt. Opcional: link de ref
   duracao_minutos: z.number().min(0.25).max(18).describe('Duração em minutos (até 18)'),
   link_referencia: z.string().optional(),
   voz_desejada: z.string().max(200).optional(),
-  fonte: z.string().optional().describe('Fonte Google das legendas (padrão Montserrat)'),
 }, (u, a) => createVideo(u, a))
 tool('status_projeto', 'Mostra em que etapa um vídeo está, o progresso e o tempo restante.', { id: z.string() }, (u, a) => projectStatus(u, a.id))
 tool('ver_roteiro', 'Mostra título, descrição, palavras-chave, roteiro e cenas de um vídeo.', { id: z.string() }, (u, a) => viewScript(u, a.id))
