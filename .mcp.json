@@ -5,7 +5,7 @@
       "command": "uv",
       "args": [
         "--directory",
-        "${HOME}/OmniVoice-Studio",
+        "vendor/voicestudio",
         "run",
         "python",
         "-m",
@@ -14,7 +14,7 @@
       "env": {
         "OMNIVOICE_API_URL": "http://127.0.0.1:3900",
         "OMNIVOICE_MCP_OUTPUT_MODE": "files",
-        "OMNIVOICE_MCP_BASE_PATH": "${HOME}/OmniVoice-Studio/saidas"
+        "OMNIVOICE_MCP_BASE_PATH": "storage/voicestudio-saidas"
       }
     }
   }

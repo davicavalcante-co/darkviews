@@ -369,7 +369,19 @@ async function studioFetch(path: string, init: RequestInit & { timeoutMs?: numbe
 
 export async function studioStatus() {
   const online = await fetch(`${STUDIO()}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false)
-  return { online }
+  if (!online) return { online, licensed: false }
+  const states = await Promise.all(STUDIO_MODELS.map((m) => fetch(`${STUDIO()}/models/licenses/acceptance/${m}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.json()).catch(() => null)))
+  return { online, licensed: states.every((s) => s?.accepted === true) }
+}
+
+// Modelos que o VoiceStudio exige com licença aceita antes de gerar voz.
+const STUDIO_MODELS = ['k2-fsa/OmniVoice', 'eustlb/higgs-audio-v2-tokenizer']
+// Aceita as licenças dos modelos (só quando a pessoa clica no botão da aba Vozes).
+export async function studioAcceptLicenses() {
+  for (const m of STUDIO_MODELS) {
+    const { fingerprint } = await (await studioFetch(`/models/licenses/acceptance/${m}`, { timeoutMs: 10_000 })).json() as { fingerprint: string }
+    await studioFetch('/models/licenses/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ repo_id: m, fingerprint, accepted: true }), timeoutMs: 10_000 })
+  }
 }
 
 // Fala gerada (WAV). Com profileId usa a voz salva; com instruct, uma voz criada pelos atributos (seed fixa = mesma voz).

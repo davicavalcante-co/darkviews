@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { existsSync, realpathSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { z } from 'zod'
@@ -10,7 +9,7 @@ import { askClaude } from './claude.js'
 const run = promisify(execFile)
 export const PROJECT_DIR = resolve(import.meta.dirname, '../../..')
 const SKILL_DIR = join(PROJECT_DIR, '.claude/skills/omnivoice')
-const OMNIVOICE_HOME = process.env.OMNIVOICE_HOME ?? join(homedir(), 'OmniVoice-Studio')
+const OMNIVOICE_HOME = process.env.OMNIVOICE_HOME ?? join(PROJECT_DIR, 'vendor/voicestudio')
 const API = process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
 
 const healthy = () => fetch(`${API}/health`, { signal: AbortSignal.timeout(3000) }).then((r) => r.ok).catch(() => false)
