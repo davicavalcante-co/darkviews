@@ -6,12 +6,39 @@ type Voice = { id: string; name: string; kind: 'design' | 'clone'; status: 'draf
 type Status = { online: boolean; licensed: boolean; attrs: Record<string, Record<string, string>>; sampleText: string }
 const ATTR_LABEL: Record<string, string> = { gender: 'Gênero', age: 'Idade', pitch: 'Tom', style: 'Estilo', accent: 'Sotaque' }
 
-// Áudio que exige login: busca com a sessão e toca.
+// Áudio que exige login: busca com a sessão e toca. Um por vez; devolve o player para dar pausa.
+let current: HTMLAudioElement | null = null
 async function play(path: string, body?: unknown) {
   const res = await fetch('/api' + path, body ? { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': csrf() }, body: JSON.stringify(body) } : {})
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? 'Não foi possível tocar a voz')
-  const a = new Audio(URL.createObjectURL(await res.blob()))
-  await a.play()
+  current?.pause()
+  current = new Audio(URL.createObjectURL(await res.blob()))
+  await current.play()
+  return current
+}
+
+// Botão tocar/pausar: mostra o estado e para no fim do áudio.
+function PlayButton({ path, body, label, disabled }: { path: string; body?: unknown; label: string; disabled?: boolean }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'playing'>('idle')
+  const [error, setError] = useState('')
+  const audio = useRef<HTMLAudioElement | null>(null)
+  useEffect(() => () => audio.current?.pause(), [])
+  async function toggle() {
+    if (state === 'playing') { audio.current?.pause(); setState('idle'); return }
+    setState('loading'); setError('')
+    try {
+      const a = await play(path, body); audio.current = a; setState('playing')
+      a.onended = a.onpause = () => setState('idle')
+    } catch (e) { setError((e as Error).message); setState('idle') }
+  }
+  return (
+    <>
+      <button type="button" className="ghost-btn play-btn" disabled={disabled || state === 'loading'} onClick={toggle} aria-pressed={state === 'playing'}>
+        {state === 'playing' ? '❚❚ Pausar' : state === 'loading' ? 'Carregando…' : `▶ ${label}`}
+      </button>
+      {error && <p className="notice alert" role="alert">✕ {error}</p>}
+    </>
+  )
 }
 
 // Aba Vozes: criar uma voz por características, clonar a própria voz, testar, ajustar e publicar para usar nos vídeos.
@@ -76,47 +103,67 @@ function VoiceList({ list, onEdit, reload }: { list: Voice[]; onEdit: (v: Voice)
 }
 
 function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload: () => void }) {
-  const [text, setText] = useState('')
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
+  const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
-  async function act(label: string, fn: () => Promise<unknown>) {
-    setBusy(label); setError('')
-    try { await fn() } catch (e) { setError((e as Error).message) } finally { setBusy('') }
-  }
-  const patch = (body: object) => act('Salvando…', async () => { await api(`/studio/voices/${v.id}`, { method: 'PATCH', body }); reload() })
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(false)
+    addEventListener('click', close)
+    return () => removeEventListener('click', close)
+  }, [menu])
   return (
     <article className={`voice-card ${v.status}`}>
       <header className="voice-head">
         <span className="voice-avatar" aria-hidden="true">{v.name.slice(0, 1).toUpperCase()}</span>
-        <div><strong>{v.name}</strong><small className="muted">{v.kind === 'clone' ? 'Voz clonada' : 'Voz criada'}</small></div>
-        <span className={`pill ${v.status}`}>{v.status === 'published' ? 'Publicada' : 'Rascunho'}</span>
+        <div><strong>{v.name}</strong><small className="muted">{v.kind === 'clone' ? 'Voz clonada' : 'Voz criada'} · {v.status === 'published' ? 'publicada' : 'rascunho'}</small></div>
+        <div className="menu-wrap">
+          <button type="button" className="icon-btn" aria-label="Mais opções" aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu(!menu) }}>⋯</button>
+          {menu && (
+            <div className="menu" role="menu">
+              <button type="button" role="menuitem" onClick={onEdit}>Editar</button>
+              <button type="button" role="menuitem" className="danger-item" onClick={() => setConfirm(true)}>Excluir</button>
+            </div>
+          )}
+        </div>
       </header>
-      <button type="button" className="ghost-btn play-btn" disabled={!!busy} onClick={() => act('Tocando…', () => play(`/studio/voices/${v.id}/sample`))}>▶ {busy === 'Tocando…' ? 'Tocando…' : 'Ouvir amostra'}</button>
-      <div className="try-row">
-        <input maxLength={300} value={text} placeholder="Digite uma frase para testar…" onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && text.trim()) act('Gerando…', () => play(`/studio/voices/${v.id}/preview`, { text })) }} />
-        <button type="button" className="ghost-btn" disabled={!!busy || !text.trim()} onClick={() => act('Gerando…', () => play(`/studio/voices/${v.id}/preview`, { text }))}>{busy === 'Gerando…' ? '…' : '▶'}</button>
-      </div>
-      <label className="range-row">Velocidade
-        <input type="range" min={0.7} max={1.3} step={0.05} defaultValue={v.speed} disabled={!!busy} onPointerUp={(e) => patch({ speed: Number(e.currentTarget.value) })} />
-        <b>{v.speed.toFixed(2)}×</b>
-      </label>
+      <PlayButton path={`/studio/voices/${v.id}/sample`} label="Ouvir a voz" />
       {error && <p className="notice alert" role="alert">✕ {error}</p>}
-      <footer className="voice-foot">
-        <button type="button" disabled={!!busy} className={v.status === 'published' ? 'ghost-btn' : ''} onClick={() => patch({ published: v.status !== 'published' })}>{v.status === 'published' ? 'Voltar para rascunho' : 'Publicar'}</button>
-        <span className="spacer" />
-        <button type="button" className="link" disabled={!!busy} onClick={onEdit}>Editar</button>
-        <button type="button" className="link danger" disabled={!!busy} onClick={() => setConfirm(true)}>Excluir</button>
-      </footer>
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Excluir esta voz?">
         <p>A voz "{v.name}" some da lista. Vídeos já prontos não mudam.</p>
         <footer className="modal-actions"><span className="spacer" />
           <button type="button" className="ghost-btn" onClick={() => setConfirm(false)}>Cancelar</button>
-          <button type="button" onClick={() => act('Excluindo…', async () => { await api(`/studio/voices/${v.id}`, { method: 'DELETE' }); setConfirm(false); reload() })}>Excluir</button>
+          <button type="button" onClick={async () => { try { await api(`/studio/voices/${v.id}`, { method: 'DELETE' }); setConfirm(false); reload() } catch (e) { setError((e as Error).message) } }}>Excluir</button>
         </footer>
       </Modal>
     </article>
+  )
+}
+
+// Dentro do pop-up de edição: testar com um texto, velocidade e publicar ou voltar para rascunho (salvam na hora).
+function VoiceTune({ voice }: { voice: Voice }) {
+  const [text, setText] = useState('')
+  const [speed, setSpeed] = useState(voice.speed)
+  const [status, setStatus] = useState(voice.status)
+  const [error, setError] = useState('')
+  const patch = (body: object) => api(`/studio/voices/${voice.id}`, { method: 'PATCH', body }).catch((e) => setError((e as Error).message))
+  return (
+    <section className="tune">
+      <span className="field-label">Testar e ajustar</span>
+      <div className="try-row">
+        <input maxLength={300} value={text} placeholder="Digite uma frase para ouvir esta voz…" onChange={(e) => setText(e.target.value)} />
+        <PlayButton path={`/studio/voices/${voice.id}/preview`} body={{ text }} label="Ouvir" disabled={!text.trim()} />
+      </div>
+      <label className="range-row">Velocidade
+        <input type="range" min={0.7} max={1.3} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} onPointerUp={() => patch({ speed })} />
+        <b>{speed.toFixed(2)}×</b>
+      </label>
+      <label className="switch-row">
+        <input type="checkbox" checked={status === 'published'} onChange={(e) => { const on = e.target.checked; setStatus(on ? 'published' : 'draft'); patch({ published: on }) }} />
+        <span>{status === 'published' ? 'Publicada: aparece no Novo vídeo' : 'Rascunho: ainda não aparece no Novo vídeo'}</span>
+      </label>
+      {error && <p className="notice alert" role="alert">✕ {error}</p>}
+    </section>
   )
 }
 
@@ -267,6 +314,7 @@ function VoiceForm({ voice, status, onClose }: { voice: Voice | null; status: St
             )}
           </>
         )}
+        {voice && <VoiceTune voice={voice} />}
         {error && <p className="notice alert" role="alert">✕ {error}</p>}
       </div>
       <footer className="modal-actions"><span className="spacer" />

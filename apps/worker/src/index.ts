@@ -40,6 +40,13 @@ async function runOne() {
     const target = await inputDuration(job.projectId)
     await prisma.job.update({ where: { id: job.id }, data: { etaS: await estimateSeconds(job.type, target) } })
     await HANDLERS[job.type](job)
+    // A pessoa pediu para parar: esta etapa termina, as seguintes que ela criou são canceladas e o vídeo fica como "Falhou".
+    if ((await prisma.job.findUnique({ where: { id: job.id }, select: { error: true } }))?.error === 'Parado por você') {
+      await prisma.job.updateMany({ where: { projectId: job.projectId, status: 'queued' }, data: { status: 'failed', error: 'Parado por você', finishedAt: new Date() } })
+      await prisma.job.update({ where: { id: job.id }, data: { status: 'failed', finishedAt: new Date() } })
+      await prisma.project.update({ where: { id: job.projectId }, data: { status: 'failed' } })
+      return true
+    }
     await prisma.job.update({ where: { id: job.id }, data: { status: 'done', progress: 100, etaS: 0, finishedAt: new Date() } })
     logEvent({ source: 'worker', kind: 'job', message: `${job.type} concluído em ${((Date.now() - started) / 1000).toFixed(1)} s`, details: { jobId: job.id, projectId: job.projectId } })
     await prisma.jobMetric.create({

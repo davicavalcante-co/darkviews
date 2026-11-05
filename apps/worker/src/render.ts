@@ -248,7 +248,7 @@ export async function render(job: Job) {
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
   // captionsOn: a pessoa aplicou a legenda na aba Legendas. Até lá o vídeo sai sem a legenda da fala.
-  const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null }
+  const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
   const { captionsOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   let music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
@@ -262,7 +262,8 @@ export async function render(job: Job) {
     const segs = buildSegments(timed, DEFAULT_STYLE.highlightMode, keywords)
     track = await prisma.captionTrack.create({
       data: {
-        projectId: project.id, version: 1, ...DEFAULT_STYLE,
+        // Numeração continua as versões antigas (uma nova versão do vídeo desliga a legenda anterior, mas ela fica no histórico).
+        projectId: project.id, version: ((await prisma.captionTrack.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1, ...DEFAULT_STYLE,
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },
@@ -315,9 +316,12 @@ export async function render(job: Job) {
   await prisma.$transaction([
     prisma.videoVersion.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } }),
     prisma.videoVersion.create({
-      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut }) },
+      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut, changes: opts.pendingChanges ?? [] }) },
     }),
   ])
+  // As mudanças anotadas no editor ficaram gravadas nesta versão; a lista recomeça vazia.
+  const fresh = await prisma.project.findUniqueOrThrow({ where: { id: project.id }, select: { options: true } })
+  await prisma.project.update({ where: { id: project.id }, data: { options: JSON.stringify({ ...JSON.parse(fresh.options), pendingChanges: [] }) } })
   await addCredits(project.id)
   await prisma.project.update({ where: { id: project.id }, data: { status: 'editing' } })
 }
