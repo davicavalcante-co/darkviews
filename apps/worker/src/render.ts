@@ -259,11 +259,14 @@ export async function render(job: Job) {
   // Usa a trilha de legenda atual (editada na aba Legendas) ou cria a primeira a partir da narração, no estilo padrão.
   let track = project.captionTracks[0]
   if (!track) {
-    const segs = buildSegments(timed, DEFAULT_STYLE.highlightMode, keywords)
+    // Nova versão do vídeo: a fala mudou, então o texto é refeito, mas no mesmo estilo da legenda anterior.
+    const last = await prisma.captionTrack.findFirst({ where: { projectId: project.id }, orderBy: { version: 'desc' } })
+    const style0 = last ? { fontFamily: last.fontFamily, fontWeight: last.fontWeight, size: last.size, color: last.color, highlightColor: last.highlightColor, position: last.position, highlightMode: last.highlightMode, outline: last.outline } : DEFAULT_STYLE
+    const segs = buildSegments(timed, style0.highlightMode, keywords)
     track = await prisma.captionTrack.create({
       data: {
-        // Numeração continua as versões antigas (uma nova versão do vídeo desliga a legenda anterior, mas ela fica no histórico).
-        projectId: project.id, version: ((await prisma.captionTrack.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1, ...DEFAULT_STYLE,
+        // Numeração continua as versões antigas (a anterior fica no histórico).
+        projectId: project.id, version: (last?.version ?? 0) + 1, ...style0,
         segments: { create: segs.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.stringify(s.highlights) })) },
       },
       include: { segments: { orderBy: { startS: 'asc' } } },

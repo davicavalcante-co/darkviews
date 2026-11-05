@@ -127,3 +127,16 @@ describe('criação: tempo, parar e descartar', () => {
     expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).status).toBe('editing')
   })
 })
+
+describe('cartela: duração por bloco', () => {
+  it('muda a duração e empurra as cenas seguintes; cena com fala não muda', async () => {
+    const sc = await prisma.script.create({ data: { projectId, version: 20, body: '{}', scenePlan: '[]', createdBy: 'claude', scenes: { create: [
+      { index: 0, startS: 0, endS: 2, narration: null, onScreenText: 'Capítulo' },
+      { index: 1, startS: 2, endS: 5, narration: 'fala' },
+    ] } } })
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: dono, payload: { durationS: 3.5 } })).statusCode).toBe(200)
+    const rows = await prisma.scene.findMany({ where: { scriptId: sc.id }, orderBy: { index: 'asc' }, select: { startS: true, endS: true } })
+    expect(rows).toEqual([{ startS: 0, endS: 3.5 }, { startS: 3.5, endS: 6.5 }])
+    expect((await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/1`, headers: dono, payload: { durationS: 1 } })).statusCode).toBe(400)
+  })
+})

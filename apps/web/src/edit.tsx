@@ -11,7 +11,7 @@ type ChangeReq = { id: string; part: Part; frameTimeS: number | null; type: stri
 type Meta = { field: string; version: number; value: string; isCurrent: boolean; createdBy: string; createdAt: string }
 type Scene = { index: number; startS: number; endS: number; narration: string | null; onScreenText: string | null; motion: string | null; easing: string | null; transition: string | null; kind: 'card' | 'image' | 'video'; voiceId: string | null }
 type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string }
-type Options = { musicVolume: number; sfxVolume: number; titleStyle: TitleStyle | null; bgColor: string; musicStyle: string }
+type Options = { musicVolume: number; sfxVolume: number; titleStyle: TitleStyle | null; bgColor: string; musicStyle: string; voicePreset: string; voiceTone: string }
 type EditData = {
   name: string
   status: string
@@ -108,7 +108,7 @@ export function EditPage({ id }: { id: string }) {
 
 // ---------- Editor: cena e áudio | prévia | legenda e enunciado; timeline embaixo ----------
 // Tudo o que muda fica em rascunho até "Salvar"; "Renderizar vídeo" salva e monta o vídeo com todas as mudanças juntas.
-type Draft = { scenes: Record<number, Partial<Scene>>; options: Partial<Options>; caption: boolean }
+type Draft = { scenes: Record<number, Partial<Scene> & { durationS?: number }>; options: Partial<Options>; caption: boolean }
 const EMPTY: Draft = { scenes: {}, options: {}, caption: false }
 type Left = 'scene' | 'audio'
 type Right = 'caption' | 'title'
@@ -130,7 +130,14 @@ function VideoEditor(props: Props) {
   useEffect(() => { if (!draft.caption) setTrackState(data.caption) }, [data.caption?.version])
   const options: Options = { ...data.options, ...draft.options }
   const title = options.titleStyle ?? DEFAULT_TITLE
-  const scenes = data.scenes.map((s) => ({ ...s, ...draft.scenes[s.index] }))
+  let shift = 0
+  const scenes = data.scenes.map((s) => {
+    const d = draft.scenes[s.index] ?? {}
+    const startS = s.startS + shift
+    const endS = d.durationS !== undefined ? startS + d.durationS : s.endS + shift
+    shift = endS - s.endS
+    return { ...s, ...d, startS, endS }
+  })
   useGoogleFont(track?.fontFamily ?? 'Inter', track?.fontWeight ?? 700)
   useGoogleFont(title.fontFamily, 700)
   // Enquanto toca, o cursor anda a cada quadro (o timeupdate do navegador só avisa 4 vezes por segundo).
@@ -159,8 +166,8 @@ function VideoEditor(props: Props) {
 
   async function save() {
     for (const [index, patch] of Object.entries(draft.scenes)) {
-      const { onScreenText, motion, easing, transition } = patch
-      await api(`/projects/${id}/scenes/${index}`, { method: 'PATCH', body: { onScreenText, motion, easing, transition } })
+      const { onScreenText, motion, easing, transition, durationS } = patch
+      await api(`/projects/${id}/scenes/${index}`, { method: 'PATCH', body: { onScreenText, motion, easing, transition, durationS } })
     }
     if (Object.keys(draft.options).length) await api(`/projects/${id}/options`, { method: 'PATCH', body: draft.options })
     if (draft.caption) { const { version: _v, ...body } = track!; await api(`/projects/${id}/captions`, { method: 'PUT', body }) }
@@ -170,7 +177,9 @@ function VideoEditor(props: Props) {
   const onlyCaption = draft.caption && !Object.keys(draft.scenes).length && !Object.keys(draft.options).length
   const render = () => run(async () => {
     await save()
-    if (onlyCaption && data.captionsOn) await api(`/projects/${id}/captions/apply`, { method: 'POST', body: { on: true } })
+    // Voz ou ritmo mudou: narra de novo (o vídeo é montado logo depois, com o resto das mudanças).
+    if (draft.options.voicePreset !== undefined || draft.options.voiceTone !== undefined) await api(`/projects/${id}/revoice`, { method: 'POST' })
+    else if (onlyCaption && data.captionsOn) await api(`/projects/${id}/captions/apply`, { method: 'POST', body: { on: true } })
     else await api(`/projects/${id}/render`, { method: 'POST' })
   })
   const ctx: Ctx = { ...props, time, seek, scenes, scene, options, track, setTrack, title, segIdx, stageScene, stageOptions }
@@ -331,11 +340,26 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
 // ---------- Card da esquerda: cena e áudio ----------
 function ScenePanel({ scene, stageScene }: Ctx) {
   if (!scene) return null
-  const patch = (p: Partial<Scene>) => stageScene(scene.index, p)
+  const patch = (p: Partial<Scene> & { durationS?: number }) => stageScene(scene.index, p)
+  const silent = !scene.narration?.trim()
   return (
     <div className="stack-sm">
       <div className="row"><strong>Cena {scene.index + 1}</strong><span className="muted">{fmt(scene.startS)}–{fmt(scene.endS)} · {scene.kind === 'card' ? 'cartela' : scene.kind === 'video' ? 'vídeo' : 'foto'}</span></div>
       {scene.narration && <p className="muted small">“{scene.narration}”</p>}
+      {scene.kind === 'card' && (
+        <label>Texto da cartela
+          <input value={scene.onScreenText ?? ''} maxLength={120} placeholder="Título deste bloco" onChange={(e) => patch({ onScreenText: e.target.value })} />
+        </label>
+      )}
+      {silent && (
+        <label>Duração do bloco
+          <span className="dur-row">
+            <input type="range" min={0.5} max={10} step={0.1} value={Math.round((scene.endS - scene.startS) * 10) / 10} onChange={(e) => patch({ durationS: Number(e.target.value) })} />
+            <b>{(scene.endS - scene.startS).toFixed(1)} s</b>
+          </span>
+          <small className="muted">O próximo bloco começa logo depois.</small>
+        </label>
+      )}
       {scene.kind === 'image' && (
         <>
           <label>Motion<select value={scene.motion ?? 'ken_burns'} onChange={(e) => patch({ motion: e.target.value })}>{MOTIONS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -347,21 +371,45 @@ function ScenePanel({ scene, stageScene }: Ctx) {
   )
 }
 
+// Player compacto no estilo do sistema: tocar/pausar, barra e tempo.
+function MiniPlayer({ src, label }: { src: string; label: string }) {
+  const ref = useRef<HTMLAudioElement>(null)
+  const [playing, setPlaying] = useState(false)
+  const [t, setT] = useState(0)
+  const [d0, setD] = useState(0)
+  const d = Number.isFinite(d0) ? d0 : 0 // alguns WAV só informam a duração depois de tocar
+  return (
+    <div className="mini-player">
+      <audio ref={ref} src={src} preload="metadata" onLoadedMetadata={(e) => setD(e.currentTarget.duration)} onDurationChange={(e) => setD(e.currentTarget.duration)} onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
+        onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+      <button type="button" className="icon-btn" aria-label={playing ? `Pausar ${label}` : `Tocar ${label}`} onClick={() => (playing ? ref.current?.pause() : ref.current?.play())}>{playing ? '❚❚' : '▶'}</button>
+      <input type="range" min={0} max={d || 1} step={0.1} value={t} aria-label={`Posição: ${label}`} onChange={(e) => { if (ref.current) ref.current.currentTime = Number(e.target.value) }} />
+      <span className="tc">{fmt(t)}/{fmt(d)}</span>
+    </div>
+  )
+}
+
 function AudioPanel({ id, data, scene, options, stageOptions }: Ctx) {
+  const [voices, setVoices] = useState<{ voices: { id: string; label: string }[]; current: string | null; tones: readonly { id: string; label: string }[] } | null>(null)
+  useEffect(() => { api<NonNullable<typeof voices>>('/voices').then(setVoices).catch(() => {}) }, [])
+  const voice = options.voicePreset || voices?.current || ''
+  const changedVoice = options.voicePreset !== data.options.voicePreset || options.voiceTone !== data.options.voiceTone
   return (
     <div className="stack-sm">
-      <span className="panel-title">Narração{scene ? ` · cena ${scene.index + 1}` : ''}</span>
-      {scene?.voiceId ? <audio controls src={`/api/projects/${id}/assets/${scene.voiceId}`} /> : <p className="muted small">Sem narração nesta cena.</p>}
+      <span className="panel-title">Narração</span>
+      <label>Voz<select value={voice} onChange={(e) => stageOptions({ voicePreset: e.target.value })}>
+        {voices?.voices.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}
+      </select></label>
+      <label>Ritmo<select value={options.voiceTone} onChange={(e) => stageOptions({ voiceTone: e.target.value })}>
+        {(voices?.tones ?? []).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+      </select></label>
+      {changedVoice && <p className="muted small">Ao renderizar, a narração é feita de novo com esta voz.</p>}
+      {scene?.voiceId ? <MiniPlayer src={`/api/projects/${id}/assets/${scene.voiceId}`} label={`narração da cena ${scene.index + 1}`} /> : <p className="muted small">Sem narração nesta cena.</p>}
       <span className="panel-title">Trilha</span>
       <label>Estilo<select value={options.musicStyle} onChange={(e) => stageOptions({ musicStyle: e.target.value })}>
         {MUSIC_STYLES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select></label>
-      {data.music && options.musicStyle === data.options.musicStyle && (
-        <>
-          {data.music.attribution && <p className="muted small">{data.music.attribution}</p>}
-          <audio controls src={`/api/projects/${id}/assets/${data.music.id}`} />
-        </>
-      )}
+      {data.music && options.musicStyle === data.options.musicStyle && <MiniPlayer src={`/api/projects/${id}/assets/${data.music.id}`} label="trilha" />}
       {options.musicStyle !== 'none' && (!data.music || options.musicStyle !== data.options.musicStyle) && <p className="muted small">A música é buscada ao renderizar.</p>}
       <label className="range-row">Volume<input type="range" min={0} max={80} step={5} value={options.musicVolume} onChange={(e) => stageOptions({ musicVolume: Number(e.target.value) })} /><b>{options.musicVolume ? `${options.musicVolume}%` : 'mudo'}</b></label>
       <span className="panel-title">Efeitos sonoros</span>

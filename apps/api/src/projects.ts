@@ -130,6 +130,17 @@ export async function projectRoutes(app: FastifyInstance) {
 
       const kept = new Set(order.flatMap((o) => ('id' in o ? [o.id] : [])))
       const dropped = p.assets.filter((a) => !kept.has(a.id))
+      // Refaz só o que mudou: roteiro (texto, duração, imagens, estilo de edição) → imagens → voz → vídeo.
+      // Só a voz mudou: narra de novo e monta. Só a cor de fundo: só monta. Nada de analisar a referência de novo.
+      const prev = JSON.parse(p.options) as Record<string, unknown>
+      const next = JSON.parse(optionsJson(input, prev)) as Record<string, unknown>
+      const sameImages = !files.length && !dropped.length && order.every((o, i) => 'id' in o && p.assets.find((a) => a.id === o.id)?.sortOrder === i && (p.assets.find((a) => a.id === o.id)?.userCaption ?? '') === (o.caption ?? ''))
+      const changed = (k: string) => (prev[k] ?? null) !== (next[k] ?? null)
+      const step = input.prompt !== p.prompt || input.targetDurationS !== p.targetDurationS || !sameImages || changed('editStyle') ? 'script'
+        : changed('useStock') ? 'media'
+        : changed('voicePreset') || changed('voiceTone') || changed('voiceBrief') ? 'voice'
+        : 'render'
+      const STATUS = { script: 'scripting', media: 'media', voice: 'media', render: 'rendering' } as const
       let n = 0
       await prisma.$transaction([
         prisma.scene.updateMany({ where: { assetId: { in: dropped.map((a) => a.id) } }, data: { assetId: null } }),
@@ -137,12 +148,13 @@ export async function projectRoutes(app: FastifyInstance) {
         ...order.map((o, i) => ('id' in o
           ? prisma.asset.update({ where: { id: o.id }, data: { sortOrder: i, userCaption: o.caption || null } })
           : prisma.asset.create({ data: { projectId: p.id, kind: 'user_image', filePath: files[n++].path, mime: files[n - 1].mime, sortOrder: i, userCaption: o.caption || null } }))),
-        prisma.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } }), // a legenda nova segue o estilo escolhido
-        prisma.project.update({ where: { id: p.id }, data: { name: input.name, prompt: input.prompt, targetDurationS: input.targetDurationS, status: 'scripting', options: optionsJson(input, JSON.parse(p.options)) } }),
-        prisma.job.create({ data: { projectId: p.id, type: 'script', stage: 'Na fila' } }),
+        // Fala nova = tempos novos: a legenda é refeita (com o mesmo estilo). Só remontar: a legenda fica como está.
+        ...(step === 'render' ? [] : [prisma.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } })]),
+        prisma.project.update({ where: { id: p.id }, data: { name: input.name, prompt: input.prompt, targetDurationS: input.targetDurationS, status: STATUS[step], options: JSON.stringify(next) } }),
+        prisma.job.create({ data: { projectId: p.id, type: step, stage: 'Na fila' } }),
       ])
       await Promise.all(dropped.map((a) => rm(a.filePath, { force: true })))
-      return reply.code(202).send({ id: p.id })
+      return reply.code(202).send({ id: p.id, redo: step })
     } catch (e) {
       await Promise.all(files.map((f) => rm(f.path, { force: true })))
       throw e
@@ -354,11 +366,13 @@ export async function projectRoutes(app: FastifyInstance) {
     // A criação atual começa na última ingestão ou no último roteiro novo (nova versão).
     const jobs = p.jobs.filter((j) => j.type !== 'cuts' && j.type !== 'regen_part')
     let start = 0
-    jobs.forEach((j, i) => { if (j.type === 'ingest' || (j.type === 'script' && i > 0 && !['analyze', 'script'].includes(jobs[i - 1].type))) start = i })
+    // Nova versão começa em qualquer etapa (roteiro, imagens, voz ou vídeo) logo depois de um vídeo pronto.
+    jobs.forEach((j, i) => { if (j.type === 'ingest' || (i > 0 && jobs[i - 1].type === 'render' && jobs[i - 1].status === 'done')) start = i })
     const run = jobs.slice(start)
     const ownVoice = String(JSON.parse(p.options).voicePreset ?? '').startsWith('studio:')
     const now = Date.now()
-    const stages = await Promise.all(PIPELINE.filter((t) => t !== 'ingest' || run[0]?.type === 'ingest').map(async (type) => {
+    const from = Math.max(0, PIPELINE.indexOf((run[0]?.type ?? 'ingest') as (typeof PIPELINE)[number]))
+    const stages = await Promise.all(PIPELINE.slice(from).map(async (type) => {
       const done = run.filter((j) => j.type === type)
       const elapsedS = done.reduce((n, j) => n + (j.startedAt ? ((j.finishedAt?.getTime() ?? now) - j.startedAt.getTime()) / 1000 : 0), 0)
       const last = done.at(-1)

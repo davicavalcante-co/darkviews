@@ -919,3 +919,20 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .change-list { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; }
 .change-list li { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1fr) auto; gap: 12px; padding: 6px 0; border-bottom: 1px solid #262626; font-size: .85rem; }
 .change-list li:last-child { border-bottom: 0; } .change-list b { font-weight: 600; color: var(--nle-text, var(--fg)); }
+/* Player compacto do editor */
+.mini-player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 6px 8px; background: #161616; border: 1px solid var(--nle-line, var(--border)); border-radius: 3px; }
+.mini-player .icon-btn { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; background: var(--nle-blue, var(--accent)); color: #fff; border-radius: 50%; font-size: .7rem; }
+.mini-player input[type="range"] { width: 100%; margin: 0; accent-color: var(--nle-blue, var(--accent)); }
+.mini-player .tc { font: .72rem ui-monospace, Menlo, monospace; color: var(--nle-dim, var(--muted)); white-space: nowrap; }
+.dur-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; } .dur-row input { margin: 0; accent-color: var(--nle-blue, var(--accent)); }
+.nle-grid .inspector-body { overflow-x: hidden; }
+.nle-grid .inspector-body select, .nle-grid .inspector-body input:not([type="checkbox"]):not([type="range"]) { width: 100%; min-width: 0; }
+/* Vídeo anterior enquanto a nova versão é criada */
+.old-video { position: relative; }
+.old-video .player { filter: grayscale(.6) brightness(.6); }
+.making { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: rgb(0 0 0 / .7); color: #fff; font-weight: 600; font-size: .9rem; border-radius: var(--radius); overflow: hidden; pointer-events: none; }
+.making::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / .12), transparent); transform: translateX(-100%); animation: making-sweep 1.8s ease-in-out infinite; }
+.making-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: making-pulse 1s ease-in-out infinite; }
+@keyframes making-sweep { to { transform: translateX(100%); } }
+@keyframes making-pulse { 50% { opacity: .3; transform: scale(.8); } }
+@media (prefers-reduced-motion: reduce) { .making::after, .making-dot { animation: none; } }

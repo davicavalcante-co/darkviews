@@ -227,6 +227,14 @@ describe('nova versão', () => {
     const p = await prisma.project.findUniqueOrThrow({ where: { id } })
     expect(p.name).toBe('V2'); expect(p.status).toBe('scripting')
     expect(JSON.parse(p.options)).toMatchObject({ bgColor: '#FF0000', useStock: false })
+    // Só a voz muda: não refaz roteiro nem imagens, só narra e monta.
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    const keep = JSON.stringify((await prisma.asset.findMany({ where: { projectId: id, kind: 'user_image' }, orderBy: { sortOrder: 'asc' } })).map((x) => ({ id: x.id, caption: x.userCaption ?? '' })))
+    const voiceOnly = await create(ana, { name: 'V2', order: keep, bgColor: '#FF0000', useStock: '0', voiceTone: 'animada' }, [], `/api/projects/${id}/regenerate`)
+    expect(voiceOnly.json().redo).toBe('voice')
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    const renderOnly = await create(ana, { name: 'V2', order: keep, bgColor: '#00FF00', useStock: '0', voiceTone: 'animada' }, [], `/api/projects/${id}/regenerate`)
+    expect(renderOnly.json().redo).toBe('render')
     // Enquanto cria, não aceita outra versão.
     expect((await create(ana, { order: '[]' }, [], `/api/projects/${id}/regenerate`)).statusCode).toBe(409)
   })
