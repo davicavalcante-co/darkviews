@@ -1,158 +1,82 @@
 # Darkviews
 
-Aplicação local que cria vídeos a partir de prompt, link de referência e imagens, e gera cortes 9:16. A especificação completa está em [SPEC.md](SPEC.md).
+Darkviews cria vídeos para YouTube no seu próprio computador. Você descreve o vídeo, pode mandar um vídeo de referência e as suas fotos, e o sistema entrega o vídeo pronto: roteiro, imagens, narração, títulos de capítulo e efeitos. Depois você ajusta tudo num editor e gera os cortes verticais para Shorts, Reels, TikTok e Stories.
 
-**Estado atual: Fase 7 (todas as fases do SPEC).**
-- Fase 1: monorepo, banco, autenticação, papéis e tela de login.
-- Fase 2: Novo vídeo (prompt, link com detecção de plataforma, vídeo e imagens com legenda e ordem), uploads com checagem do tipo real, fila de jobs com lock otimista, ingestão (yt-dlp + ffprobe) e tela de Andamento em tempo real (SSE). 
-- Fase 3: análise da referência (cortes de cena e quadros-chave com FFmpeg, transcrição opcional com whisper.cpp, perfil de estilo pelo Claude) e roteiro com título, descrição, palavras-chave e plano de cenas validado.
-- Fase 4: integrações (Pexels, Pixabay, ElevenLabs, voz do macOS, músicas locais) com chaves criptografadas, escolha de imagens pelo Claude, locução, trilha e render 1920x1080 30 fps com Ken Burns e legendas ASS com Google Fonts.
-- Fase 5: tela de Edição em cinco partes (Vídeo com linha do tempo e pedidos por quadro, Legenda com texto/tempo/fonte/destaques, Título, Descrição, Palavras-chave). Cada parte tem histórico de versões (voltar atrás cria versão nova) e pode ser regerada sozinha pelo Claude.
-- Fase 6: aprovação e cortes verticais 9:16 (Shorts até 60 s, Reels até 90 s, TikTok até 180 s, Stories em partes de 15 s), com escolha do trecho e do enquadramento e legenda remontada para a tela vertical. Cada corte pode ser refeito com outro enquadramento.
-- Fase 7: Painel (indicadores de produção e uso do Claude com tokens, percentuais, contagem regressiva, renovação do plano e avisos), checagem do Claude a cada 2 minutos, Admin completo (usuários, integrações, fontes, plano e limites, auditoria) e testes de permissão cobrindo todas as rotas de admin.
+Tudo roda na sua máquina, em `http://localhost:5173`. O roteiro e as escolhas de imagem são feitos pelo Claude, com a sua conta.
 
-Contas de teste para desenvolvimento: `pnpm run db:demo` (senhas em `packages/shared/src/demo.ts`; apague essas contas antes de uso real).
+## O que ele faz
 
-## Instalar em outro Mac (passo a passo)
+- **Novo vídeo:** prompt, duração, link ou vídeo de referência, suas fotos (com uma legenda curta para cada uma), voz e estilo de edição.
+- **Criação automática:** analisa a referência, escreve o roteiro, busca imagens nos bancos gratuitos (ou usa só as suas), narra e monta o vídeo em 1920×1080.
+- **Aprovação das imagens** antes da narração: você recusa as que não gostar e o sistema busca outras.
+- **Editor em camadas** (parecido com um programa de edição):
+  - prévia do vídeo e linha do tempo com quadros, cenas, enunciados, legenda, narração, trilha e efeitos;
+  - **Cena:** movimento da foto (Ken Burns, parallax, recorte, zoom rápido), curva do movimento e transição;
+  - **Áudio:** ouvir a narração de cada cena, escolher a trilha sonora e o volume, e o volume dos efeitos;
+  - **Legenda:** estilos prontos, edição linha por linha como uma transcrição, destaque de palavras e alinhamento;
+  - **Enunciados:** os títulos de cada etapa, com estilo próprio que vale para todos;
+  - tudo fica em rascunho até você clicar em **Salvar** e **Renderizar vídeo**.
+- **Edição por contexto:** assiste, pausa e escreve o que mudar naquele momento. No fim, o Claude refaz o vídeo com todos os pedidos.
+- **Versões:** o que foi pedido de uma versão para a outra.
+- **Publicação:** título, descrição, palavras-chave e thumbnail numa tela só.
+- **Aprovar:** escolhe o trecho e o enquadramento e gera os cortes 9:16.
+- **Vozes:** crie uma voz por características ou **clone a sua própria voz** (gravando ou enviando um áudio). Depois de publicada, ela aparece como opção no Novo vídeo.
+- **Integrações:** bancos de imagem, vozes e músicas, gratuitos ou com a sua chave.
+- **Admin:** usuários, fontes, auditoria e logs.
 
-Precisa de: um Mac com chip Apple (M1 ou mais novo), internet e uns **15 GB livres**. Leva de 20 a 40 minutos na primeira vez.
+## Instalar num Mac (passo a passo)
 
-1. Copie a pasta inteira do Darkviews para o Mac (ou baixe do GitHub).
+Precisa de: Mac com chip Apple (M1 ou mais novo), internet, uns **15 GB livres** e uma conta do Claude (Pro ou Max). A primeira instalação leva de 20 a 40 minutos.
+
+1. Baixe o projeto: no GitHub, botão verde **Code → Download ZIP**, e descompacte. Ou, no terminal:
+   ```bash
+   git clone https://github.com/davicavalcante-co/darkviews.git
+   ```
 2. Dê **dois cliques** em `Instalar Darkviews`.
-   - Se o Mac avisar que o arquivo é de fonte desconhecida: clique com o botão direito → **Abrir** → **Abrir**.
-   - Se pedir a senha do Mac, digite (é o Homebrew instalando programas).
+   - Se o Mac avisar que é de fonte desconhecida: botão direito → **Abrir** → **Abrir**.
+   - Se pedir a senha do Mac, digite (é o Homebrew instalando os programas).
    - Se abrir uma janela da Apple pedindo para instalar ferramentas, aceite e, quando terminar, dê dois cliques no instalador de novo.
-3. No fim, ele abre o **login do Claude**: entre com a sua conta.
+3. No fim, abre o **login do Claude**: entre com a sua conta.
 4. Anote o **token de primeiro acesso** que aparece no final.
-5. Dê **dois cliques** em `Ligar Darkviews`. O navegador abre sozinho.
-6. Na tela de login, aba **Primeiro acesso**: cole o token e crie a senha do admin.
-7. Na aba **Vozes**, clique em **Ligar VoiceStudio** e depois em **Aceitar licença do modelo** (uso pessoal). A primeira voz demora uns 5 minutos (o modelo baixa uma vez só).
 
-Pronto. Nos próximos dias, só o passo 5.
+O instalador pode ser rodado de novo quando quiser: o que já está instalado é pulado.
 
-### O que o instalador faz sozinho
+## Usar no dia a dia
 
-| O quê | Onde fica |
+1. Dê **dois cliques** em `Ligar Darkviews`. O navegador abre sozinho em `http://localhost:5173`.
+2. **Só na primeira vez:** na tela de login, aba **Primeiro acesso**, cole o token e crie a senha do admin.
+3. Para desligar, feche a janela do terminal que abriu.
+
+Para usar vozes próprias (aba **Vozes**): clique em **Ligar VoiceStudio** e, na primeira vez, em **Aceitar licença do modelo**. A primeira voz do dia demora uns 5 minutos para carregar.
+
+## Se algo der errado
+
+| O que aparece | O que fazer |
 | --- | --- |
-| Homebrew, Node, pnpm, FFmpeg com legendas, yt-dlp, Python 3.11, uv, Claude Code | programas do Mac (Homebrew) |
-| Bibliotecas do Darkviews | `node_modules/` |
-| Arquivo `.env` com chave de criptografia nova | `.env` |
-| Banco de dados | `data/app.db` |
-| Vozes Kokoro e Piper | `.venv-kokoro/`, `.venv-tts/` |
-| VoiceStudio (aba Vozes), na versão testada com o Darkviews | `vendor/voicestudio/` |
-| Skill do OmniVoice | já vem no projeto, em `.claude/skills/` |
+| "Faça login no Claude Code" | Abra o terminal, rode `claude` e use `/login`. Os vídeos pausados continuam sozinhos. |
+| Limite do Claude atingido | O vídeo pausa e continua sozinho no horário em que o limite renova. |
+| "O VoiceStudio está desligado" | Aba **Vozes → Ligar VoiceStudio**. |
+| Narração com voz própria lenta | É normal: cada cena leva de 10 a 25 s. O andamento mostra "cena X de Y" e o tempo que falta. Feche outros programas se o Mac estiver com pouca memória. |
+| Vídeo parou com erro | Abra o projeto e clique em **Tentar de novo**: só a etapa que falhou é refeita. |
+| A porta 3333 ou 5173 está em uso | Já tem um Darkviews ligado. Feche a outra janela do terminal e ligue de novo. |
 
-Pode rodar o instalador de novo quando quiser: o que já está instalado é pulado.
-
-**Baixa sozinho no primeiro uso** (grande demais para ir no projeto): modelos de voz (Kokoro, Piper, VoiceStudio ~2,4 GB) e as fontes das legendas. Depois ficam salvos e não baixam de novo.
-
-**Precisa de internet para criar vídeos:** o Claude (roteiro), os bancos de imagens e de música e os links de referência.
-
-### Instalação manual (se preferir o terminal)
-
-```bash
-./scripts/instalar.sh
-```
-
-Peças separadas: `pnpm install`, `pnpm run db:setup`, `pnpm run omnivoice:setup`, `pnpm dev`.
-
-## Render
-
-As legendas queimadas precisam de FFmpeg com libass. O `ffmpeg` comum do Homebrew não tem; o `ffmpeg-full` tem e é usado automaticamente se estiver instalado:
-
-```bash
-brew install ffmpeg-full
-```
-
-Cada render guarda também uma cópia sem legenda (`vN-sem-legenda.mp4`), usada nos cortes verticais. Vídeos renderizados antes da Fase 6 precisam ser renderizados de novo antes de aprovar.
-
-Para outro caminho, defina `FFMPEG_PATH` no `.env`. Músicas de fundo: coloque arquivos MP3/M4A com licença de uso em `storage/music`.
-
-## Voz gratuita (Piper)
-
-A voz padrão é o **Piper**, uma voz neural em português do Brasil que roda no próprio computador, sem chave e sem custo. Instale uma vez:
-
-```bash
-pnpm run tts:setup
-```
-
-As vozes (Faber e Cadu, ~60 MB cada) são baixadas sozinhas na primeira fala, para `storage/voices`. Se o Piper não estiver instalado, o sistema usa a voz do macOS como reserva.
-
-## OmniVoice via Claude Code (skill + MCP)
-
-A skill [`omnivoice`](.claude/skills/omnivoice/ORIGEM.md) está em `.claude/skills/`. Quando a integração **OmniVoice** está ligada e em primeiro lugar na lista de vozes, a etapa "Gerando áudio" passa pelo Claude Code: ele carrega a skill, conecta no MCP do OmniVoice, cria a voz que o cliente descreveu em **Voz desejada** (Novo vídeo) e narra cada cena. Os áudios são gravados em arquivo, sem passar pelo contexto do Claude. Se o OmniVoice falhar, o vídeo usa a próxima voz (Piper).
-
-O instalador já instala em `vendor/voicestudio`. Para instalar só ele (~1,6 GB agora e ~2,4 GB do modelo no primeiro uso):
-
-```bash
-pnpm run omnivoice:setup
-```
-
-Ligar e desligar o servidor local (porta 3900):
-
-```bash
-pnpm run omnivoice:start
-```
-```bash
-pnpm run omnivoice:stop
-```
-
-Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda separado. **Atenção: o modelo de voz padrão `k2-fsa/OmniVoice` é NÃO COMERCIAL (CC-BY-NC; Higgs Audio 2; Meta Llama 3)** e só gera voz depois que a licença dele e a do `eustlb/higgs-audio-v2-tokenizer` são aceitas no Model Catalogue do VoiceStudio. Uso pessoal; não use em vídeos de clientes pagantes.
-
-## Claude via MCP
-
-`apps/mcp` é um servidor MCP do Darkviews: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `DARKVIEWS_EMAIL` (no `.env`), com as mesmas permissões do site.
-
-- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `darkviews` e `omnivoice`; aprove os dois na primeira vez.
-- **App Claude (Desktop):** Integrações → Claude · MCP → "Como conectar no app Claude" mostra o trecho de configuração.
-
-## Integrações
-
-Já vêm conectadas, sem chave: **Piper** (voz), **Openverse** (fotos Creative Commons) e **músicas locais**.
-
-- **Admin → Integrações (padrão):** o que vale para todos os usuários.
-- **Integrações** (menu lateral, para todos): cada usuário pode usar as próprias contas, grátis ou pagas (Pexels, Pixabay, ElevenLabs, OpenAI Voz, Google Cloud Voz). O que ele não configurar segue o padrão do admin. As chaves de um usuário só servem para os vídeos dele.
-
-## Logs
-
-Admin → Logs mostra tudo que entra, sai e falha: requisições da API (método, rota, status e tempo, sem corpo nem cookies), jobs do worker, chamadas ao Claude e falhas de integração, com a pilha de erro. Os registros com mais de 30 dias são apagados sozinhos.
-
-## Claude
-
-O worker usa o login do Claude Code desta máquina (Agent SDK). Antes do `pnpm dev`, confirme que está logado:
-
-```bash
-claude auth status
-```
-
-Se não estiver, rode `claude` e use `/login`. Sem login, os jobs ficam **pausados** com o aviso "Faça login no Claude Code" e voltam sozinhos depois. Limite de uso atingido também pausa e retoma no horário de reinício.
-
-Transcrição (opcional): baixe um modelo do whisper.cpp e aponte `WHISPER_MODEL` no `.env`:
-
-```bash
-curl -L -o ~/ggml-base.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-```
-
-## Estrutura
+## O que fica onde
 
 | Pasta | O que é |
 | --- | --- |
-| `apps/web` | React + Vite. Só fala com a API local via proxy `/api`. |
-| `apps/api` | Fastify. Sessão por cookie httpOnly, Argon2id, CSRF, limite de login, checagem de papel. |
-| `apps/worker` | Processo dos jobs pesados (consome a tabela `jobs` a partir da Fase 2). |
-| `packages/db` | Schema Prisma (todas as tabelas do SPEC) e o client. |
-| `packages/shared` | Validações Zod e tipos usados pelo front e pela API. |
+| `data/app.db` | Banco de dados (projetos, usuários, versões). |
+| `storage/` | Arquivos: envios, imagens, narrações, vídeos e cortes. |
+| `.env` | Configuração e a chave que protege as senhas das integrações. **Não compartilhe.** |
+| `vendor/voicestudio/` | VoiceStudio, usado na aba Vozes. |
 
-Para trocar para PostgreSQL: mude `provider` em `packages/db/prisma/schema.prisma` e a `DATABASE_URL`.
+**Backup:** copie `data/app.db` e a pasta `storage/` com o sistema desligado. Guarde o `.env` **separado**: sem ele as chaves das integrações não podem ser lidas.
 
-## Testes
+## Licenças
 
-```bash
-pnpm test
-```
+O Darkviews conversa com o VoiceStudio (AGPL-3.0) pela rede local, sem incluir o código dele. O modelo de voz `k2-fsa/OmniVoice` é **não comercial** (CC-BY-NC): uso pessoal.
 
-Cobrem: 403 para usuário comum nas rotas de admin, 401 sem sessão, último admin protegido, CSRF/origem, cookie httpOnly + SameSite=Strict, primeiro acesso de uso único e limite de tentativas de login.
+## Para quem desenvolve
 
-## Backup
-
-Copie `./data/app.db` e a pasta `./storage` com a aplicação parada. **Guarde o `.env` (MASTER_KEY) separado do backup**: sem ela as chaves de integração não podem ser lidas, e com ela junto o backup deixa de ser seguro.
+- Peças: `apps/web` (site, React), `apps/api` (servidor, Fastify), `apps/worker` (cria os vídeos com FFmpeg), `apps/mcp` (conversa com o Claude), `packages/*` (banco, tipos e integrações).
+- Ligar pelo terminal: `pnpm dev`. Testes: `pnpm test`.
+- Contas de teste: `pnpm run db:demo` (apague antes de uso real).

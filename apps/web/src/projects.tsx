@@ -14,7 +14,7 @@ function stageIndex(e: ProgressEvent) {
     case 'queued': return 0
     case 'analyzing': return 1
     case 'scripting': return 2
-    case 'media': return e.job?.stage?.includes('áudio') ? 4 : 3
+    case 'media': return e.job?.type === 'voice' ? 4 : 3
     case 'image_review': return 3
     case 'talking_head': return 1
     case 'rendering': return 5
