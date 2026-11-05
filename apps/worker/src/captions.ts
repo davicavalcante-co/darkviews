@@ -51,11 +51,21 @@ const esc = (t: string) => t.replace(/\\/g, '\\\\').replace(/[{}]/g, '').replace
 
 // canvas: 1920x1080 no vídeo principal, 1080x1920 nos cortes verticais.
 // Estilo dos enunciados (cartelas de capítulo e faixas de destaque), separado da legenda. Vale para todos os enunciados.
-export type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string }
+// cardAlign/bandAlign: "vertical-horizontal" (ex.: "middle-center", "top-left"). upper: caixa alta (padrão sim).
+export type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string; bandSize?: number; cardAlign?: string; bandAlign?: string; upper?: boolean }
+// Alinhamento do ASS no teclado numérico: embaixo 1-3, meio 4-6, em cima 7-9; esquerda, centro, direita.
+const numpad = (pos: string, fallback: number) => {
+  const [v, h = 'center'] = pos.split('-')
+  const row = ({ bottom: 1, middle: 4, top: 7 } as Record<string, number>)[v], col = ({ left: 0, center: 1, right: 2 } as Record<string, number>)[h]
+  return row === undefined || col === undefined ? fallback : row + col
+}
 
 // overlays=false: só a legenda da fala (as cartelas e destaques já estão no vídeo base).
 export function toAss(segments: Segment[], scenes: TimedScene[], st: CaptionStyle, canvas = { w: 1920, h: 1080 }, overlays = true, title?: TitleStyle) {
   const ts = title ?? { fontFamily: st.fontFamily, size: Math.round(st.size * 2.4), color: '#FFFFFF', bandColor: st.highlightColor }
+  const cardAlign = numpad(ts.cardAlign ?? 'middle-center', 5), bandAlign = numpad(ts.bandAlign ?? 'top-left', 7)
+  const bandSize = ts.bandSize ?? Math.round(ts.size * 0.4)
+  const shout = (t: string) => (ts.upper === false ? t : t.toUpperCase())
   const vertical = canvas.h > canvas.w
   const side = vertical ? 70 : 120
   const bold = st.fontWeight >= 600 ? -1 : 0
@@ -68,18 +78,18 @@ export function toAss(segments: Segment[], scenes: TimedScene[], st: CaptionStyl
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     `Style: Default,${st.fontFamily},${st.size},${assColor(st.color)},${assColor(st.color)},&H00000000,&H80000000,${bold},0,0,0,100,100,0,0,1,${st.outline === false ? '0,1' : '4,2'},${align},${side},${side},${vertical ? 380 : 90},1`,
     // Cartela de capítulo (estilo das referências de YouTube): título enorme, caixa alta, condensado, com sombra.
-    `Style: Card,${ts.fontFamily},${ts.size},${assColor(ts.color)},${assColor(ts.color)},&H00000000,&H64000000,-1,0,0,0,96,100,1,0,1,0,6,5,${side + 60},${side + 60},0,1`,
+    `Style: Card,${ts.fontFamily},${ts.size},${assColor(ts.color)},${assColor(ts.color)},&H00000000,&H64000000,-1,0,0,0,96,100,1,0,1,0,6,${cardAlign},${side + 60},${side + 60},${vertical ? 300 : 120},1`,
     // Texto de destaque sobre a imagem: faixa na cor de destaque (caixa opaca), texto escuro, no alto à esquerda.
-    `Style: Top,${ts.fontFamily},${Math.round(ts.size * 0.4)},&H00111111,&H00111111,${hlBox(ts.bandColor)},${hlBox(ts.bandColor)},-1,0,0,0,100,100,1,0,3,14,0,7,${side},${side},${vertical ? 260 : 80},1`,
+    `Style: Top,${ts.fontFamily},${bandSize},&H00111111,&H00111111,${hlBox(ts.bandColor)},${hlBox(ts.bandColor)},-1,0,0,0,100,100,1,0,3,14,0,${bandAlign},${side},${side},${vertical ? 260 : 80},1`,
     '', '[Events]', 'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ]
   const hl = assColor(st.highlightColor), base = assColor(st.color)
   for (const s of overlays ? scenes : []) {
     if (!s.onScreenText) continue
-    const text = esc(s.onScreenText.toUpperCase())
+    const text = esc(shout(s.onScreenText))
     if (s.isCard) lines.push(`Dialogue: 1,${assTime(s.startS)},${assTime(s.endS)},Card,,0,0,0,,{\\fad(250,200)}${text}`)
-    // Sobre a imagem, o destaque entra deslizando e fica só 2,8 s (não vira uma legenda parada a cena toda).
-    else lines.push(`Dialogue: 1,${assTime(s.startS + 0.15)},${assTime(Math.min(s.endS, s.startS + 2.95))},Top,,0,0,0,,{\\fad(180,220)\\move(${side - 60},${vertical ? 260 : 80},${side},${vertical ? 260 : 80},0,220)}${text}`)
+    // Sobre a imagem, o destaque entra (deslizando, quando fica no alto à esquerda) e fica só 2,8 s.
+    else lines.push(`Dialogue: 1,${assTime(s.startS + 0.15)},${assTime(Math.min(s.endS, s.startS + 2.95))},Top,,0,0,0,,{\\fad(180,220)${bandAlign === 7 ? `\\move(${side - 60},${vertical ? 260 : 80},${side},${vertical ? 260 : 80},0,220)` : ''}}${text}`)
   }
   // Na cartela de capítulo não entra a legenda da fala: o título já ocupa a tela.
   segments = segments.filter((g) => !scenes.some((s) => s.isCard && s.onScreenText && g.startS >= s.startS && g.endS <= s.endS + 0.05))

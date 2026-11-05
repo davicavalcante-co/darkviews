@@ -288,6 +288,19 @@ export async function editRoutes(app: FastifyInstance) {
     return reply.code(202).send({ ok: true })
   })
 
+  // Duração padrão das cartelas nos próximos vídeos desta pessoa (opcional, ao aplicar a todas).
+  app.put('/api/me/card-duration', guard, async (req) => {
+    const { durationS } = z.object({ durationS: z.number().min(0.5).max(15).nullable() }).parse(req.body)
+    const key = `card_duration:${req.user!.id}`
+    if (durationS === null) await prisma.setting.deleteMany({ where: { key } })
+    else await prisma.setting.upsert({ where: { key }, create: { key, value: String(durationS) }, update: { value: String(durationS) } })
+    return { durationS }
+  })
+  app.get('/api/me/card-duration', guard, async (req) => {
+    const row = await prisma.setting.findUnique({ where: { key: `card_duration:${req.user!.id}` } })
+    return { durationS: row ? Number(row.value) : null }
+  })
+
   // ---------- Pedidos de alteração e regerar uma parte ----------
   app.post<{ Params: { id: string } }>('/api/projects/:id/change-requests', guard, async (req, reply) => {
     const p = await project(req)
@@ -319,6 +332,7 @@ export async function editRoutes(app: FastifyInstance) {
 }
 
 const hexColor = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+const ALIGN = /^(top|middle|bottom)-(left|center|right)$/
 const ScenePatch = z.object({
   onScreenText: z.string().trim().max(120).nullable().optional().transform((v) => (v === '' ? null : v)),
   motion: z.enum(['ken_burns', 'parallax', 'cutout', 'snap_zoom', 'static']).optional(),
@@ -333,5 +347,8 @@ const OptionsPatch = z.object({
   voiceTone: z.enum(['calma', 'natural', 'animada']).optional(),
   sfxVolume: z.number().int().min(0).max(100).optional(),
   bgColor: hexColor.optional(),
-  titleStyle: z.object({ fontFamily: z.string().trim().min(1).max(60), size: z.number().int().min(60).max(260), color: hexColor, bandColor: hexColor }).optional(),
+  titleStyle: z.object({
+    fontFamily: z.string().trim().min(1).max(60), size: z.number().int().min(60).max(260), color: hexColor, bandColor: hexColor,
+    bandSize: z.number().int().min(24).max(140).optional(), cardAlign: z.string().regex(ALIGN).optional(), bandAlign: z.string().regex(ALIGN).optional(), upper: z.boolean().optional(),
+  }).optional(),
 }).strict()

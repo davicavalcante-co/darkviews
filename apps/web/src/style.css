@@ -936,3 +936,14 @@ button.big { padding: 8px 12px; font-size: 14px; }
 @keyframes making-sweep { to { transform: translateX(100%); } }
 @keyframes making-pulse { 50% { opacity: .3; transform: scale(.8); } }
 @media (prefers-reduced-motion: reduce) { .making::after, .making-dot { animation: none; } }
+/* Enunciados: alinhamento da cartela e da faixa na prévia */
+.title-card { display: flex; padding: 6% 8%; }
+.title-card.top { align-items: flex-start; } .title-card.middle { align-items: center; } .title-card.bottom { align-items: flex-end; }
+.title-card.left { justify-content: flex-start; text-align: left; } .title-card.center { justify-content: center; text-align: center; } .title-card.right { justify-content: flex-end; text-align: right; }
+.title-band { top: auto; left: auto; }
+.title-band.top { top: 7.4%; } .title-band.middle { top: 50%; transform: translateY(-50%); } .title-band.bottom { bottom: 16%; }
+.title-band.left { left: 6.2%; } .title-band.center { left: 50%; transform: translateX(-50%); } .title-band.right { right: 6.2%; }
+.title-band.middle.center { transform: translate(-50%, -50%); }
+.apply-all { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--nle-line, var(--border)); border-radius: 3px; }
+.apply-all .check { flex-direction: row; align-items: center; gap: 6px; font-size: .8rem; }
+.stack-sm label.check { flex-direction: row; align-items: center; gap: 6px; } .stack-sm label.check input { width: auto; margin: 0; }

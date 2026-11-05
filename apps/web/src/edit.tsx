@@ -10,7 +10,7 @@ type Track = { version: number; fontFamily: string; fontWeight: number; size: nu
 type ChangeReq = { id: string; part: Part; frameTimeS: number | null; type: string; text: string; status: string; author: string; appliedInVersion: number | null; createdAt?: string }
 type Meta = { field: string; version: number; value: string; isCurrent: boolean; createdBy: string; createdAt: string }
 type Scene = { index: number; startS: number; endS: number; narration: string | null; onScreenText: string | null; motion: string | null; easing: string | null; transition: string | null; kind: 'card' | 'image' | 'video'; voiceId: string | null }
-type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string }
+type TitleStyle = { fontFamily: string; size: number; color: string; bandColor: string; bandSize?: number; cardAlign?: string; bandAlign?: string; upper?: boolean }
 type Options = { musicVolume: number; sfxVolume: number; titleStyle: TitleStyle | null; bgColor: string; musicStyle: string; voicePreset: string; voiceTone: string }
 type EditData = {
   name: string
@@ -115,7 +115,7 @@ type Right = 'caption' | 'title'
 type Ctx = Props & {
   time: number; seek: (t: number, fast?: boolean) => void; scenes: Scene[]; scene: Scene | undefined; options: Options
   track: Track; setTrack: (t: Track) => void; title: TitleStyle; segIdx: number
-  stageScene: (index: number, patch: Partial<Scene>) => void; stageOptions: (patch: Partial<Options>) => void
+  stageScene: (index: number, patch: Partial<Scene> & { durationS?: number }) => void; stageOptions: (patch: Partial<Options>) => void
 }
 
 function VideoEditor(props: Props) {
@@ -159,7 +159,7 @@ function VideoEditor(props: Props) {
   const segIdx = track.segments.findIndex((s) => time >= s.startS && time < s.endS)
   const cur = segIdx >= 0 ? track.segments[segIdx] : null
   const hl = (w: number, s: Segment) => (s.highlights.includes(w) || track.highlightMode === 'karaokê' ? track.highlightColor : track.color)
-  const stageScene = (index: number, patch: Partial<Scene>) => setDraft((d) => ({ ...d, scenes: { ...d.scenes, [index]: { ...d.scenes[index], ...patch } } }))
+  const stageScene = (index: number, patch: Partial<Scene> & { durationS?: number }) => setDraft((d) => ({ ...d, scenes: { ...d.scenes, [index]: { ...d.scenes[index], ...patch } } }))
   const stageOptions = (patch: Partial<Options>) => setDraft((d) => ({ ...d, options: { ...d.options, ...patch } }))
   const setTrack = (t: Track) => { setTrackState(t); setDraft((d) => ({ ...d, caption: true })) }
   const pending = Object.keys(draft.scenes).length + Object.keys(draft.options).length + (draft.caption ? 1 : 0)
@@ -212,8 +212,8 @@ function VideoEditor(props: Props) {
             <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}&clean=1`}
               onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
             {scene?.onScreenText && (scene.kind === 'card'
-              ? <div className="title-card" style={{ fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>
-              : time < scene.startS + 2.95 && <div className="title-band" style={{ fontFamily: title.fontFamily, background: title.bandColor, fontSize: `${((title.size * 0.4) / 1920) * 100}cqw` }}>{scene.onScreenText.toUpperCase()}</div>)}
+              ? <div className={`title-card ${(title.cardAlign ?? 'middle-center').replace('-', ' ')}`} style={{ fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{title.upper === false ? scene.onScreenText : scene.onScreenText.toUpperCase()}</div>
+              : time < scene.startS + 2.95 && <div className={`title-band ${(title.bandAlign ?? 'top-left').replace('-', ' ')}`} style={{ fontFamily: title.fontFamily, background: title.bandColor, fontSize: `${((title.bandSize ?? title.size * 0.4) / 1920) * 100}cqw` }}>{title.upper === false ? scene.onScreenText : scene.onScreenText.toUpperCase()}</div>)}
             {cur && !(scene?.kind === 'card' && scene.onScreenText) && (
               <div className={`caption-preview ${track.position.replace('-', ' ')}${track.outline === false ? ' no-outline' : ''}`}
                 style={{ fontFamily: track.fontFamily, fontWeight: track.fontWeight, fontSize: `${(track.size / 1920) * 100}cqw` }}>
@@ -340,7 +340,11 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
 }
 
 // ---------- Card da esquerda: cena e áudio ----------
-function ScenePanel({ scene, stageScene }: Ctx) {
+function ScenePanel({ scene, scenes, stageScene }: Ctx) {
+  const [asDefault, setAsDefault] = useState(false)
+  const [applied, setApplied] = useState('')
+  useEffect(() => { api<{ durationS: number | null }>('/me/card-duration').then((r) => setAsDefault(r.durationS !== null)).catch(() => {}) }, [])
+  useEffect(() => setApplied(''), [scene?.index])
   if (!scene) return null
   const patch = (p: Partial<Scene> & { durationS?: number }) => stageScene(scene.index, p)
   const silent = !scene.narration?.trim()
@@ -361,6 +365,22 @@ function ScenePanel({ scene, stageScene }: Ctx) {
           </span>
           <small className="muted">O próximo bloco começa logo depois.</small>
         </label>
+      )}
+      {scene.kind === 'card' && (
+        <div className="apply-all">
+          <button type="button" className="ghost-btn" onClick={async () => {
+            const d = Math.round((scene.endS - scene.startS) * 10) / 10
+            const cards = scenes.filter((x) => x.kind === 'card' && !x.narration?.trim())
+            for (const c of cards) stageScene(c.index, { durationS: d })
+            if (asDefault) await api('/me/card-duration', { method: 'PUT', body: { durationS: d } }).catch(() => {})
+            setApplied(`${d.toFixed(1)} s em ${cards.length} ${cards.length === 1 ? 'cartela' : 'cartelas'}${asDefault ? ' · padrão salvo' : ''}`)
+          }}>Aplicar a todas as cartelas</button>
+          <label className="check"><input type="checkbox" checked={asDefault} onChange={(e) => {
+            setAsDefault(e.target.checked)
+            if (!e.target.checked) api('/me/card-duration', { method: 'PUT', body: { durationS: null } }).catch(() => {})
+          }} /> Tornar padrão nos próximos vídeos</label>
+          {applied && <small className="ok">✓ {applied}</small>}
+        </div>
       )}
       {scene.kind === 'image' && (
         <>
@@ -563,11 +583,17 @@ function TitlePanel({ scene, title, stageScene, stageOptions }: Ctx) {
       )}
       <span className="panel-title">Estilo de todos os enunciados</span>
       <div className="field"><span className="field-label">Fonte</span><FontSelect value={title.fontFamily} fonts={fonts} onChange={(fontFamily) => setTitle({ fontFamily })} /></div>
-      <label className="range-row">Tamanho<input type="range" min={60} max={260} value={title.size} onChange={(e) => setTitle({ size: Number(e.target.value) })} /></label>
-      <div className="grid2">
-        <label>Cor do texto<input type="color" value={title.color} onChange={(e) => setTitle({ color: e.target.value.toUpperCase() })} /></label>
-        <label>Cor da faixa<input type="color" value={title.bandColor} onChange={(e) => setTitle({ bandColor: e.target.value.toUpperCase() })} /></label>
-      </div>
+      <label className="check"><input type="checkbox" checked={title.upper !== false} onChange={(e) => setTitle({ upper: e.target.checked })} /> Tudo em maiúsculas</label>
+
+      <span className="field-label">Cartela (título do bloco)</span>
+      <AlignIcons value={title.cardAlign ?? 'middle-center'} onChange={(cardAlign) => setTitle({ cardAlign })} />
+      <label className="range-row">Tamanho<input type="range" min={60} max={260} value={title.size} onChange={(e) => setTitle({ size: Number(e.target.value) })} /><b>{title.size}</b></label>
+      <label>Cor do texto<input type="color" value={title.color} onChange={(e) => setTitle({ color: e.target.value.toUpperCase() })} /></label>
+
+      <span className="field-label">Faixa sobre a imagem</span>
+      <AlignIcons value={title.bandAlign ?? 'top-left'} onChange={(bandAlign) => setTitle({ bandAlign })} />
+      <label className="range-row">Tamanho<input type="range" min={24} max={140} value={title.bandSize ?? Math.round(title.size * 0.4)} onChange={(e) => setTitle({ bandSize: Number(e.target.value) })} /><b>{title.bandSize ?? Math.round(title.size * 0.4)}</b></label>
+      <label>Cor da faixa<input type="color" value={title.bandColor} onChange={(e) => setTitle({ bandColor: e.target.value.toUpperCase() })} /></label>
     </div>
   )
 }

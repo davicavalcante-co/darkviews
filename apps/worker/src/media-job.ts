@@ -199,6 +199,8 @@ export async function voice(job: Job) {
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
   const isNewContext = (s: (typeof scenes)[number]) => !!s.onScreenText || (s.searchQuery ? JSON.parse(s.searchQuery).type === 'text_card' : false)
   let t = 0
+  const cardRow = await prisma.setting.findUnique({ where: { key: `card_duration:${project.ownerId}` } })
+  const cardDefault = cardRow ? Number(cardRow.value) : null
   for (const [i, s] of scenes.entries()) {
     await step('Gerando áudio da locução', 60 + Math.round((i / scenes.length) * 35))
     const next = scenes[i + 1]
@@ -206,7 +208,8 @@ export async function voice(job: Job) {
     const lead = i > 0 && isNewContext(s) ? 0.25 : 0.05
     const tail = next && isNewContext(next) ? 0.4 : 0.18
     // Cena sem fala (cartela) é só uma virada rápida, nunca um silêncio longo.
-    let dur = s.narration?.trim() ? s.endS - s.startS : Math.min(s.endS - s.startS, 1.6)
+    // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão até 1,6 s.
+    let dur = s.narration?.trim() ? s.endS - s.startS : cardDefault ?? Math.min(s.endS - s.startS, 1.6)
     const v = made.get(s.index)
     if (v) {
       // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
