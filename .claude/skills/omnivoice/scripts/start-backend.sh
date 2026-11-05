@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-HOME_DIR="${OMNIVOICE_HOME:-$HOME/OmniVoice-Studio}"
+HOME_DIR="${OMNIVOICE_HOME:-$(cd "$(dirname "$0")/../../../.." && pwd)/vendor/voicestudio}"
 URL="${OMNIVOICE_API_URL:-http://127.0.0.1:3900}"
 LOG="$HOME_DIR/backend.log"
 

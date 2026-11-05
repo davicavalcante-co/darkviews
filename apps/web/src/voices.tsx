@@ -3,7 +3,7 @@ import { api, csrf } from './api'
 import { Modal, PageHead } from './ui'
 
 type Voice = { id: string; name: string; kind: 'design' | 'clone'; status: 'draft' | 'published'; attrs: Record<string, string>; speed: number }
-type Status = { online: boolean; attrs: Record<string, Record<string, string>>; sampleText: string }
+type Status = { online: boolean; licensed: boolean; attrs: Record<string, Record<string, string>>; sampleText: string }
 const ATTR_LABEL: Record<string, string> = { gender: 'Gênero', age: 'Idade', pitch: 'Tom', style: 'Estilo', accent: 'Sotaque' }
 
 // Áudio que exige login: busca com a sessão e toca.
@@ -28,6 +28,11 @@ export function VoicesPage() {
     try { await api('/studio/start', { method: 'POST' }); setStatus(await api<Status>('/studio/status')) }
     catch (e) { setStartError((e as Error).message) } finally { setStarting(false) }
   }
+  async function accept() {
+    setStarting(true); setStartError('')
+    try { setStatus({ ...status!, ...(await api<Pick<Status, 'online' | 'licensed'>>('/studio/accept-license', { method: 'POST' })) }) }
+    catch (e) { setStartError((e as Error).message) } finally { setStarting(false) }
+  }
   const drafts = voices.filter((v) => v.status === 'draft'), published = voices.filter((v) => v.status === 'published')
 
   return (
@@ -39,6 +44,13 @@ export function VoicesPage() {
         <div className="notice alert" role="status">
           <p>O VoiceStudio está desligado. Ele é quem cria e fala as vozes.</p>
           <button type="button" disabled={starting} onClick={start}>{starting ? 'Ligando… (até 2 minutos)' : 'Ligar VoiceStudio'}</button>
+          {startError && <p>✕ {startError}</p>}
+        </div>
+      )}
+      {status?.online && !status.licensed && (
+        <div className="notice alert" role="status">
+          <p>Falta um passo único: aceitar a licença do modelo de voz (uso pessoal, não comercial).</p>
+          <button type="button" disabled={starting} onClick={accept}>{starting ? 'Aceitando…' : 'Aceitar licença do modelo'}</button>
           {startError && <p>✕ {startError}</p>}
         </div>
       )}

@@ -2,7 +2,7 @@ import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { homedir, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { pipeline } from 'node:stream/promises'
@@ -11,7 +11,7 @@ import multipart from '@fastify/multipart'
 import { z } from 'zod'
 import { prisma, STORAGE_DIR } from '@corte/db'
 import {
-  STUDIO_ATTRS, STUDIO_SAMPLE_TEXT, StudioError, studioCreateProfile, studioDeleteProfile, studioGenerate, studioInstruct, studioStatus, toStudioWav,
+  STUDIO_ATTRS, STUDIO_SAMPLE_TEXT, StudioError, studioAcceptLicenses, studioCreateProfile, studioDeleteProfile, studioGenerate, studioInstruct, studioStatus, toStudioWav,
 } from '@corte/providers'
 import { requireAuth } from './auth.js'
 
@@ -73,11 +73,13 @@ export async function voiceStudioRoutes(app: FastifyInstance) {
   // Botão "Ligar VoiceStudio": usa o mesmo script de partida que a narração já usa.
   app.post('/api/studio/start', { preHandler: requireAuth }, async (_req, reply) => {
     if ((await studioStatus()).online) return { online: true }
-    const home = process.env.OMNIVOICE_HOME ?? join(homedir(), 'OmniVoice-Studio')
+    const home = process.env.OMNIVOICE_HOME ?? join(PROJECT_DIR, 'vendor/voicestudio')
     await promisify(execFile)(join(PROJECT_DIR, '.claude/skills/omnivoice/scripts/start-backend.sh'), [], { env: { ...process.env, OMNIVOICE_HOME: home }, timeout: 180_000 }).catch(() => {})
     const { online } = await studioStatus()
     return online ? { online } : reply.code(503).send({ error: 'Não consegui ligar o VoiceStudio. Confira se ele está instalado nesta máquina.' })
   })
+
+  app.post('/api/studio/accept-license', { preHandler: requireAuth }, async () => { await studioAcceptLicenses(); return studioStatus() })
 
   app.get('/api/studio/voices', { preHandler: requireAuth }, async (req) =>
     (await prisma.studioVoice.findMany({ where: { ownerId: req.user!.id }, orderBy: { createdAt: 'desc' } })).map(pub))

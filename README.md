@@ -13,27 +13,48 @@ Aplicação local que cria vídeos a partir de prompt, link de referência e ima
 
 Contas de teste para desenvolvimento: `pnpm run db:demo` (senhas em `packages/shared/src/demo.ts`; apague essas contas antes de uso real).
 
-## Requisitos
+## Instalar em outro Mac (passo a passo)
 
-- Node 20+ e pnpm (`npm i -g pnpm`)
-- FFmpeg e yt-dlp (usados a partir da Fase 2):
+Precisa de: um Mac com chip Apple (M1 ou mais novo), internet e uns **15 GB livres**. Leva de 20 a 40 minutos na primeira vez.
+
+1. Copie a pasta inteira do Corte Final para o Mac (ou baixe do GitHub).
+2. Dê **dois cliques** em `Instalar Corte Final`.
+   - Se o Mac avisar que o arquivo é de fonte desconhecida: clique com o botão direito → **Abrir** → **Abrir**.
+   - Se pedir a senha do Mac, digite (é o Homebrew instalando programas).
+   - Se abrir uma janela da Apple pedindo para instalar ferramentas, aceite e, quando terminar, dê dois cliques no instalador de novo.
+3. No fim, ele abre o **login do Claude**: entre com a sua conta.
+4. Anote o **token de primeiro acesso** que aparece no final.
+5. Dê **dois cliques** em `Ligar Corte Final`. O navegador abre sozinho.
+6. Na tela de login, aba **Primeiro acesso**: cole o token e crie a senha do admin.
+7. Na aba **Vozes**, clique em **Ligar VoiceStudio** e depois em **Aceitar licença do modelo** (uso pessoal). A primeira voz demora uns 5 minutos (o modelo baixa uma vez só).
+
+Pronto. Nos próximos dias, só o passo 5.
+
+### O que o instalador faz sozinho
+
+| O quê | Onde fica |
+| --- | --- |
+| Homebrew, Node, pnpm, FFmpeg com legendas, yt-dlp, Python 3.11, uv, Claude Code | programas do Mac (Homebrew) |
+| Bibliotecas do Corte Final | `node_modules/` |
+| Arquivo `.env` com chave de criptografia nova | `.env` |
+| Banco de dados | `data/app.db` |
+| Vozes Kokoro e Piper | `.venv-kokoro/`, `.venv-tts/` |
+| VoiceStudio (aba Vozes), na versão testada com o Corte Final | `vendor/voicestudio/` |
+| Skill do OmniVoice | já vem no projeto, em `.claude/skills/` |
+
+Pode rodar o instalador de novo quando quiser: o que já está instalado é pulado.
+
+**Baixa sozinho no primeiro uso** (grande demais para ir no projeto): modelos de voz (Kokoro, Piper, VoiceStudio ~2,4 GB) e as fontes das legendas. Depois ficam salvos e não baixam de novo.
+
+**Precisa de internet para criar vídeos:** o Claude (roteiro), os bancos de imagens e de música e os links de referência.
+
+### Instalação manual (se preferir o terminal)
 
 ```bash
-brew install ffmpeg yt-dlp
+./scripts/instalar.sh
 ```
 
-No Windows: `winget install Gyan.FFmpeg yt-dlp.yt-dlp`. No Linux: `sudo apt install ffmpeg` e `pipx install yt-dlp`.
-
-## Instalação
-
-```bash
-pnpm install
-cp .env.example .env          # depois gere a MASTER_KEY: openssl rand -hex 32
-pnpm run db:setup             # cria ./data/app.db e o admin do seed
-pnpm dev                      # web em http://localhost:5173, API em 127.0.0.1:3333
-```
-
-O `db:setup` imprime um **token de primeiro acesso**. Abra o site, vá na aba "Primeiro acesso", cole o token e defina a senha do admin (e-mail em `ADMIN_EMAIL`). O token vale uma vez só; para gerar outro, rode `pnpm run db:seed` de novo enquanto o admin não tiver senha.
+Peças separadas: `pnpm install`, `pnpm run db:setup`, `pnpm run omnivoice:setup`, `pnpm dev`.
 
 ## Render
 
@@ -61,7 +82,7 @@ As vozes (Faber e Cadu, ~60 MB cada) são baixadas sozinhas na primeira fala, pa
 
 A skill [`omnivoice`](.claude/skills/omnivoice/ORIGEM.md) está em `.claude/skills/`. Quando a integração **OmniVoice** está ligada e em primeiro lugar na lista de vozes, a etapa "Gerando áudio" passa pelo Claude Code: ele carrega a skill, conecta no MCP do OmniVoice, cria a voz que o cliente descreveu em **Voz desejada** (Novo vídeo) e narra cada cena. Os áudios são gravados em arquivo, sem passar pelo contexto do Claude. Se o OmniVoice falhar, o vídeo usa a próxima voz (Piper).
 
-Instalar (uma vez; ~1,6 GB agora e ~2,4 GB do modelo na primeira narração):
+O instalador já instala em `vendor/voicestudio`. Para instalar só ele (~1,6 GB agora e ~2,4 GB do modelo no primeiro uso):
 
 ```bash
 pnpm run omnivoice:setup
@@ -76,7 +97,7 @@ pnpm run omnivoice:start
 pnpm run omnivoice:stop
 ```
 
-Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda separado. **Atenção: o modelo de voz padrão `k2-fsa/OmniVoice` é NÃO COMERCIAL (CC-BY-NC; Higgs Audio 2; Meta Llama 3)** e o OmniVoice só gera voz depois que alguém aceita essa licença no Model Catalogue do app. Não use esse modelo em vídeos de clientes pagantes.
+Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda separado. **Atenção: o modelo de voz padrão `k2-fsa/OmniVoice` é NÃO COMERCIAL (CC-BY-NC; Higgs Audio 2; Meta Llama 3)** e só gera voz depois que a licença dele e a do `eustlb/higgs-audio-v2-tokenizer` são aceitas no Model Catalogue do VoiceStudio. Uso pessoal; não use em vídeos de clientes pagantes.
 
 ## Claude via MCP
 
