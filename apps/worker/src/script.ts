@@ -64,6 +64,7 @@ export async function script(job: Job) {
         'nível 3: relação indireta, mas dentro do assunto (ex.: "Vinicius Junior Real Madrid");',
         'nível 4: pouca relação direta (ex.: "jogador de futebol triste").',
         'Pessoa famosa citada (de qualquer área): sempre o nome real dela nos níveis 1 a 3, em português e em inglês. Fatos, jogos, lugares e marcas: o nome real também. Seja específico e realista.',
+        'Produto citado: a foto do próprio produto, nunca uma imagem que só lembre ele. Use marca + nome + modelo/versão exatos nos níveis 1 a 3 (ex.: "iPhone 15 Pro Max titânio natural", "Nike Air Jordan 1 Chicago", "Açaí Só a Papa Sabor do Norte embalagem"); nível 4 só a categoria do produto.',
         'Use quadro de texto só quando nada servir. Não use pessoas de banco para representar clientes reais.',
       ].join(' '),
       options.talkingHead === 'upload' && talkingVideo

@@ -67,7 +67,7 @@ export async function media(job: Job) {
     const out = await askClaude({
       jobId: job.id, cwd: dir, effort: 'low', schema: Choices, model: LIGHT_MODEL, maxTurns: 3,
       prompt: [
-        'Escolha a melhor imagem para cada cena de um vídeo. Prefira a mais fiel ao que é dito: nível 1 (exato) antes do 2, do 3 e do 4. Só desça de nível se a descrição mostrar que a opção não serve. Pessoa famosa citada: a foto dela. Considere também as cores.',
+        'Escolha a melhor imagem para cada cena de um vídeo. Prefira a mais fiel ao que é dito: nível 1 (exato) antes do 2, do 3 e do 4. Só desça de nível se a descrição mostrar que a opção não serve. Pessoa famosa citada: a foto dela. Produto citado: a foto do próprio produto (mesma marca e modelo), nunca um parecido ou genérico. Considere também as cores.',
         style ? `Paleta e estilo desejados: ${JSON.stringify({ palette: style.palette, tone: style.tone })}` : '',
         ...toChoose.map(([idx, cands]) => {
           const s = script.scenes.find((x) => x.index === idx)!
