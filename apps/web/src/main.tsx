@@ -71,6 +71,20 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   )
 }
 
+// Tema: escuro é o padrão; a escolha fica salva neste navegador.
+const readTheme = () => { try { return localStorage.getItem('theme') === 'light' ? 'light' : 'dark' } catch { return 'dark' } }
+document.documentElement.dataset.theme = readTheme()
+function ThemeToggle() {
+  const [theme, setTheme] = useState(readTheme)
+  useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('theme', theme) } catch { /* sem armazenamento: vale só nesta visita */ } }, [theme])
+  const next = theme === 'dark' ? 'light' : 'dark'
+  return (
+    <button type="button" className="theme-btn" onClick={() => setTheme(next)} aria-label={next === 'light' ? 'Mudar para o tema claro' : 'Mudar para o tema escuro'} title={next === 'light' ? 'Tema claro' : 'Tema escuro'}>
+      <Icon name={theme === 'dark' ? 'sol' : 'lua'} size={18} />
+    </button>
+  )
+}
+
 function useHash() {
   const [hash, setHash] = useState(location.hash)
   useEffect(() => { const f = () => setHash(location.hash); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f) }, [])
@@ -136,7 +150,7 @@ function App() {
       <Sidebar hash={hash} user={session.user} expanded={expanded} onToggle={() => setExpanded(!expanded)}
         onLogout={() => api('/auth/logout', { method: 'POST' }).finally(() => accept(null))} />
       <main>
-        <ClaudePill isAdmin={isAdmin} />
+        <div className="top-bar"><ThemeToggle /><ClaudePill isAdmin={isAdmin} /></div>
         {hash === '#/novo' ? <NewVideo />
           : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />
           : hash === '#/vozes' ? <VoicesPage />
