@@ -40,7 +40,7 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   return (
     <main className="login">
       <form onSubmit={submit} className="card">
-        <h1>Corte Final</h1>
+        <h1>Darkviews</h1>
         <div className="tabs" role="tablist">
           <button type="button" role="tab" aria-selected={mode === 'login'} onClick={() => setMode('login')}>Entrar</button>
           <button type="button" role="tab" aria-selected={mode === 'setup'} onClick={() => setMode('setup')}>Primeiro acesso</button>
@@ -88,9 +88,8 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
   const items = [
     { href: '#/', label: 'Painel', icon: 'painel', match: (h: string) => h === '' || h === '#/' },
     { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h === '#/novo' },
-    { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') },
-    { href: '#/edicao', label: 'Edição', icon: 'edicao', match: (h: string) => h === '#/edicao' || h.startsWith('#/editar/') },
-    { href: '#/aprovacao', label: 'Aprovação', icon: 'aprovacao', match: (h: string) => h === '#/aprovacao' || h.startsWith('#/aprovar/') },
+    { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') || h.startsWith('#/editar/') },
+    { href: '#/aprovados', label: 'Aprovados', icon: 'aprovacao', match: (h: string) => h === '#/aprovados' || h.startsWith('#/aprovar/') },
     { href: '#/vozes', label: 'Vozes', icon: 'vozes', match: (h: string) => h === '#/vozes' },
     { href: '#/integracoes', label: 'Integrações', icon: 'integracoes', match: (h: string) => h === '#/integracoes' },
     ...(user.role === 'admin' ? [{ href: '#/admin', label: 'Admin', icon: 'admin', match: (h: string) => h === '#/admin' }] : []),
@@ -100,7 +99,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
     <aside className="sidebar" data-expanded={expanded}>
       <div className="sidebar-top">
         <div className="brand">
-          <a href="#/" className="logo" aria-label="Corte Final, ir para o Painel"><span className="logo-mark">CF</span><span className="nav-text">Corte Final</span></a>
+          <a href="#/" className="logo" aria-label="Darkviews, ir para o Painel"><span className="logo-mark">DV</span><span className="nav-text">Darkviews</span></a>
           <button type="button" className="toggle" onClick={onToggle} aria-expanded={expanded} aria-label={expanded ? 'Recolher menu' : 'Expandir menu'} title={expanded ? 'Recolher menu' : 'Expandir menu'}>
             <Icon name={expanded ? 'recolher' : 'expandir'} />
           </button>
@@ -139,11 +138,10 @@ function App() {
       <main>
         <ClaudePill isAdmin={isAdmin} />
         {hash === '#/novo' ? <NewVideo />
-          : hash === '#/integracoes' ? <MyIntegrations />
+          : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />
           : hash === '#/vozes' ? <VoicesPage />
           : hash === '#/projetos' ? <ProjectList isAdmin={isAdmin} />
-          : hash === '#/edicao' ? <ProjectList isAdmin={isAdmin} title="Edição" statuses={['editing', 'in_approval', 'failed']} href={(id) => `#/editar/${id}`} empty="Nenhum vídeo pronto para editar. Os vídeos aparecem aqui quando terminam de ser criados." />
-          : hash === '#/aprovacao' ? <ProjectList isAdmin={isAdmin} title="Aprovação" statuses={['in_approval', 'editing', 'approved']} href={(id) => `#/aprovar/${id}`} empty="Nenhum vídeo para aprovar ainda." />
+          : hash === '#/aprovados' ? <ProjectList isAdmin={isAdmin} title="Aprovados" statuses={['approved']} href={(id) => `#/aprovar/${id}`} empty="Nenhum vídeo aprovado ainda. A aprovação é feita dentro do projeto, no botão Aprovar." />
           : hash.startsWith('#/aprovar/') ? <ApprovePage id={hash.slice('#/aprovar/'.length)} />
           : hash.startsWith('#/editar/') ? <EditPage id={hash.slice('#/editar/'.length)} />
           : hash.startsWith('#/projeto/') ? <Progress id={hash.slice('#/projeto/'.length)} />

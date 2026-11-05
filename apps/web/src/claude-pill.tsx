@@ -78,11 +78,11 @@ export function ClaudePill({ isAdmin }: { isAdmin: boolean }) {
               <dt>Hoje</dt><dd>{num(c.tokens?.today ?? 0)}</dd>
               <dt>Na sessão atual</dt><dd>{num(c.tokens?.session ?? 0)}</dd>
               <dt>No mês</dt><dd>{num(c.tokens?.month ?? 0)}</dd>
-              <dt>Do Corte Final no mês</dt><dd>{num(c.tokensApp?.month ?? 0)}</dd>
+              <dt>Do Darkviews no mês</dt><dd>{num(c.tokensApp?.month ?? 0)}</dd>
             </dl>
           ) : c.connected && <p className="muted">{c.available === false ? 'Os vídeos voltam a ser criados sozinhos quando o Claude estiver disponível.' : 'Tudo certo para criar vídeos.'}</p>}
           {isAdmin && !c.plan?.renewsAt && <a href="#/admin" onClick={() => setOpen(false)}>Informar a data de renovação do plano</a>}
-          <small className="muted">Percentuais: limite do plano, lido do Claude a cada 2 minutos. Tokens: histórico local do Claude Code (só os números de uso) mais as chamadas do Corte Final.</small>
+          <small className="muted">Percentuais: limite do plano, lido do Claude a cada 2 minutos. Tokens: histórico local do Claude Code (só os números de uso) mais as chamadas do Darkviews.</small>
         </div>
       )}
     </div>

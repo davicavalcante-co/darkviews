@@ -12,7 +12,7 @@ beforeAll(async () => {
   ;[ana, beto, adm] = await Promise.all(['ana@m.com', 'beto@m.com', 'adm@m.com'].map((e) => actingUser(e)))
 })
 
-describe('MCP do Corte Final', () => {
+describe('MCP do Darkviews', () => {
   it('exige usuário configurado e ativo', async () => {
     await expect(actingUser('')).rejects.toBeInstanceOf(ToolError)
     await expect(actingUser('off@m.com')).rejects.toThrow(/desativado/)

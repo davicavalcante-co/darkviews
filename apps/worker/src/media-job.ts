@@ -6,8 +6,8 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { activeProviders, pickMusic, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, MUSIC_STYLES, VOICE_TONES } from '@corte/shared'
+import { activeProviders, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
@@ -15,7 +15,7 @@ import { durationOf, FFMPEG, run } from './ffmpeg.js'
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 
 // Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
-const UA = 'CorteFinal/1.0 (local video tool; https://github.com/davicavalcante-co/corte-final)' // só ASCII: acento no User-Agent dá 403
+const UA = 'Darkviews/1.0 (local video tool; https://github.com/davicavalcante-co/darkviews)' // só ASCII: acento no User-Agent dá 403
 async function download(url: string, dir: string) {
   let res: Response | null = null
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -137,7 +137,7 @@ export async function voice(job: Job) {
 
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
-  await prisma.asset.deleteMany({ where: { projectId: project.id, kind: { in: ['voice', 'music'] } } })
+  await prisma.asset.deleteMany({ where: { projectId: project.id, kind: 'voice' } })
   // Se a voz escolhida for o OmniVoice, a narração inteira passa pelo Claude Code (skill omnivoice + MCP).
   // Cena que ele não entregar cai para a próxima voz da lista (Piper, depois macOS).
   // voicePreset vem como "fornecedor:voz" (ex.: "piper:faber"); o fornecedor escolhido vai para o topo.
@@ -214,11 +214,7 @@ export async function voice(job: Job) {
   }
   if (t > MAX_DURATION_S) throw new Error(`Com a locução o vídeo ficou com ${Math.round(t)}s, acima de 18 minutos. Encurte o roteiro.`)
 
-  // 5. Trilha de fundo (opcional).
-  await step('Buscando a trilha sonora', 96)
-  const style = MUSIC_STYLES.find((m) => m.id === (opts as { musicStyle?: string }).musicStyle) ?? MUSIC_STYLES[0]
-  const music = await pickMusic(project.ownerId, style.tags, t, join(dir, `trilha-${randomUUID().slice(0, 8)}`))
-  if (music) await prisma.asset.create({ data: { projectId: project.id, kind: 'music', filePath: music.path, mime: 'audio/mpeg', sourceProvider: music.provider, license: music.license, attribution: music.attribution || null } })
+  // A trilha não entra na criação: é escolhida no editor e buscada no render.
 
   await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering' } })
   await prisma.job.create({ data: { projectId: project.id, type: 'render', stage: 'Na fila' } })

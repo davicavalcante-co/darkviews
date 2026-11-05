@@ -88,16 +88,3 @@ export function FontSelect({ value, fonts, onChange, label = 'Fonte das legendas
     </div>
   )
 }
-
-const V_POS: [string, string][] = [['top', 'Em cima'], ['middle', 'Meio'], ['bottom', 'Embaixo']]
-const H_POS: [string, string][] = [['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']]
-// Posição da legenda em dois grupos de botões (vertical e horizontal); o valor é "bottom-center".
-export function CaptionPosition({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const [v, h = 'center'] = value.split('-')
-  const group = (opts: [string, string][], cur: string, set: (x: string) => void, name: string) => (
-    <div className="choice-row" role="radiogroup" aria-label={name}>
-      {opts.map(([id, l]) => <button key={id} type="button" role="radio" aria-checked={cur === id} className="choice small-choice" onClick={() => set(id)}>{l}</button>)}
-    </div>
-  )
-  return <>{group(V_POS, v, (x) => onChange(`${x}-${h}`), 'Alinhamento vertical')}{group(H_POS, h, (x) => onChange(`${v}-${x}`), 'Alinhamento horizontal')}</>
-}

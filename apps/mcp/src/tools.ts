@@ -1,11 +1,12 @@
 import { prisma, type User } from '@corte/db'
-import { claudeWarnings, DEFAULT_FONTS, DEFAULT_SETTINGS, MAX_DURATION_S, NewProjectInput, Part } from '@corte/shared'
+import { claudeWarnings, DEFAULT_SETTINGS, MAX_DURATION_S, NewProjectInput, Part } from '@corte/shared'
 
 // Regras iguais às da API: usuário comum só mexe nos próprios projetos (o resto "não existe"); admin vê todos.
 export class ToolError extends Error {}
 
-export async function actingUser(email = process.env.CORTE_FINAL_EMAIL): Promise<User> {
-  if (!email) throw new ToolError('Defina CORTE_FINAL_EMAIL no .env com o e-mail de um usuário do Corte Final.')
+// CORTE_FINAL_EMAIL: nome antigo da variável, ainda aceito para o .env de quem já tinha o sistema instalado.
+export async function actingUser(email = process.env.DARKVIEWS_EMAIL ?? process.env.CORTE_FINAL_EMAIL): Promise<User> {
+  if (!email) throw new ToolError('Defina DARKVIEWS_EMAIL no .env com o e-mail de um usuário do Darkviews.')
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } })
   if (!user || user.status !== 'active') throw new ToolError(`Usuário ${email} não encontrado ou desativado.`)
   return user
@@ -28,15 +29,14 @@ export async function listProjects(u: User) {
   return rows.map((p) => ({ ...p, status: STATUS[p.status] ?? p.status, link: `${WEB}/#/projeto/${p.id}` }))
 }
 
-export async function createVideo(u: User, a: { nome: string; prompt: string; duracao_minutos: number; link_referencia?: string; voz_desejada?: string; fonte?: string }) {
+export async function createVideo(u: User, a: { nome: string; prompt: string; duracao_minutos: number; link_referencia?: string; voz_desejada?: string }) {
   const settings = Object.fromEntries((await prisma.setting.findMany()).map((s) => [s.key, s.value]))
   const maxS = Number(settings.max_duration_s ?? DEFAULT_SETTINGS.max_duration_s)
   const input = NewProjectInput.parse({
     name: a.nome, prompt: a.prompt, link: a.link_referencia, targetDurationS: Math.round(a.duracao_minutos * 60),
-    fontFamily: a.fonte ?? 'Montserrat', highlightMode: 'palavra-chave', voiceBrief: a.voz_desejada,
+    voiceBrief: a.voz_desejada,
   })
   if (input.targetDurationS > Math.min(maxS, MAX_DURATION_S)) throw new ToolError(`Duração máxima: ${Math.floor(Math.min(maxS, MAX_DURATION_S) / 60)} min.`)
-  if (!DEFAULT_FONTS.includes(input.fontFamily as never) && !(await prisma.font.findFirst({ where: { family: input.fontFamily, enabled: true } }))) throw new ToolError('Fonte não liberada pelo admin.')
   const daily = Number(settings.daily_video_limit ?? 0)
   if (daily > 0 && await prisma.project.count({ where: { ownerId: u.id, createdAt: { gte: new Date(new Date().setHours(0, 0, 0, 0)) } } }) >= daily) {
     throw new ToolError(`Limite de ${daily} vídeos por dia atingido.`)
@@ -44,7 +44,7 @@ export async function createVideo(u: User, a: { nome: string; prompt: string; du
   const p = await prisma.project.create({
     data: {
       ownerId: u.id, name: input.name, prompt: input.prompt, targetDurationS: input.targetDurationS,
-      options: JSON.stringify({ fontFamily: input.fontFamily, highlightMode: input.highlightMode, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone }),
+      options: JSON.stringify({ voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone }),
       reference: input.link ? { create: { sourceType: 'link', url: input.link } } : undefined,
       jobs: { create: { type: 'ingest', stage: 'Na fila' } },
     },

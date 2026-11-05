@@ -73,10 +73,9 @@ describe('conectar ao Claude', () => {
 })
 
 describe('fontes', () => {
-  it('fonte bloqueada some para o usuário e é recusada na criação; não dá para bloquear todas', async () => {
+  it('fonte bloqueada some para o usuário; não dá para bloquear todas', async () => {
     expect((await app.inject({ method: 'PUT', url: '/api/admin/fonts/Inter', headers: admin, payload: { enabled: false } })).statusCode).toBe(200)
     expect((await app.inject({ url: '/api/fonts', headers: user })).json()).not.toContain('Inter')
-    expect((await create(user)).statusCode).toBe(400)
     // Bloqueia todas as liberadas menos uma (outros testes podem ter enviado fontes ao mesmo banco).
     const on = ((await app.inject({ url: '/api/fonts', headers: admin })).json() as string[])
     for (const f of on.slice(0, -1)) await app.inject({ method: 'PUT', url: `/api/admin/fonts/${encodeURIComponent(f)}`, headers: admin, payload: { enabled: false } })

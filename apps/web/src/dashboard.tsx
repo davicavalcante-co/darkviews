@@ -43,7 +43,7 @@ function ConnectClaude({ onDone }: { onDone: () => void }) {
       <div className="connect-copy">
         <span className="kicker">Primeiro acesso</span>
         <h2>Conecte o Claude para criar vídeos</h2>
-        <p className="muted">O Corte Final usa o Claude deste computador para analisar referências e escrever os roteiros. Entre com a conta do seu plano (Pro ou Max): a autorização acontece no site do Claude.</p>
+        <p className="muted">O Darkviews usa o Claude deste computador para analisar referências e escrever os roteiros. Entre com a conta do seu plano (Pro ou Max): a autorização acontece no site do Claude.</p>
       </div>
       <div className="connect-steps">
         {!url ? (

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { detectPlatform, MUSIC_STYLES, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
+import { detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
 
 type Voices = { voices: { id: string; label: string; provider: string; freeText: boolean }[]; current: string | null; tones: readonly { id: string; label: string }[] }
-import { api, uploadFont, useFonts } from './api'
-import { CaptionPosition, FontSelect, loadFontPreview, Modal } from './ui'
+import { api } from './api'
+import { Modal } from './ui'
 import { compact } from './dashboard'
 
 // "Novo vídeo" em formato de estúdio: configuração numa coluna à esquerda e as criações ao lado.
@@ -58,18 +58,12 @@ export function NewVideo() {
 }
 
 function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void }) {
-  const o = (base?.options ?? {}) as { fontFamily?: string; voicePreset?: string; voiceTone?: string; highlightColor?: string; captionPosition?: string; captionSize?: number; captionOutline?: boolean; bgColor?: string; useStock?: boolean; musicStyle?: string; musicVolume?: number; editStyle?: string }
-  const fonts = useFonts()
+  const o = (base?.options ?? {}) as { voicePreset?: string; voiceTone?: string; bgColor?: string; useStock?: boolean; editStyle?: string }
   const [name, setName] = useState(base?.name ?? '')
   const [prompt, setPrompt] = useState(base?.prompt ?? '')
-  const [captionSize, setCaptionSize] = useState(o.captionSize ?? 64)
-  const [outline, setOutline] = useState(o.captionOutline !== false)
   const [bgColor, setBgColor] = useState(o.bgColor ?? '#111418')
   const [useStock, setUseStock] = useState(o.useStock !== false)
-  const [preview, setPreview] = useState(false)
   const [editStyle, setEditStyle] = useState(o.editStyle ?? 'auto')
-  const [musicStyle, setMusicStyle] = useState(o.musicStyle ?? 'auto')
-  const [musicVolume, setMusicVolume] = useState(o.musicVolume ?? 35)
   const fileRef = useRef<HTMLInputElement>(null)
   const [link, setLink] = useState('')
   const [video, setVideo] = useState<File | null>(null)
@@ -77,11 +71,6 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
   const [minutes, setMinutes] = useState(base ? base.targetDurationS / 60 : 3)
   const [voicePreset, setVoicePreset] = useState(o.voicePreset ?? '')
   const [voiceTone, setVoiceTone] = useState(o.voiceTone ?? 'natural')
-  const [font, setFont] = useState(o.fontFamily ?? '')
-  const [highlightColor, setHighlightColor] = useState(o.highlightColor ?? '#FFD43B')
-  const [captionPosition, setCaptionPosition] = useState(o.captionPosition ?? 'bottom-center')
-  const [fontBusy, setFontBusy] = useState(false)
-  useEffect(() => { if (!font && fonts.length) setFont(fonts[0]) }, [fonts])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const platform = link ? detectPlatform(link) : null
@@ -121,17 +110,9 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
     const body = new FormData()
     body.append('name', name)
     body.append('prompt', prompt)
-    body.append('captionSize', String(captionSize))
-    body.append('captionOutline', outline ? '1' : '0')
     body.append('bgColor', bgColor)
     body.append('useStock', useStock ? '1' : '0')
     body.append('editStyle', editStyle)
-    body.append('musicStyle', musicStyle)
-    body.append('musicVolume', String(musicVolume))
-    body.append('fontFamily', font)
-    body.append('highlightColor', highlightColor)
-    body.append('captionPosition', captionPosition)
-    body.append('highlightMode', 'palavra-chave')
     body.append('voicePreset', voicePreset)
     body.append('voiceTone', voiceTone)
     body.append('targetDurationS', String(seconds))
@@ -219,71 +200,13 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
         </div>
 
         <div className="field">
-          <div className="field-label">Trilha sonora</div>
-          <div className="choice-grid" role="radiogroup" aria-label="Estilo da trilha">
-            {MUSIC_STYLES.map((m) => <button key={m.id} type="button" role="radio" aria-checked={musicStyle === m.id} className="choice small-choice" onClick={() => setMusicStyle(m.id)}>{m.label}</button>)}
-          </div>
-          {musicStyle !== 'none' && (
-            <label className="range-row">Volume
-              <input type="range" min={5} max={80} step={5} value={musicVolume} onChange={(e) => setMusicVolume(Number(e.target.value))} aria-label="Volume da trilha" />
-              <b>{musicVolume}%</b>
-            </label>
-          )}
-          <small className="muted">A trilha fica por baixo da narração e abaixa sozinha quando alguém fala. Mais fontes de música em Integrações.</small>
-        </div>
-
-        <div className="field">
-          <div className="field-label">Legenda <button type="button" className="link" onClick={() => setPreview(true)}>Ver prévia</button></div>
-          <div className="controls grid2">
-          <div className="control span2">
-            <span className="control-label">Fonte da legenda</span>
-            <div className="font-row">
-              <FontSelect value={font} fonts={fonts} onChange={setFont} />
-              <label className="chip upload-chip" title="Enviar uma fonte .ttf ou .otf">
-                {fontBusy ? '…' : '+'}
-                <input type="file" accept=".ttf,.otf,font/ttf,font/otf" hidden disabled={fontBusy} onChange={async (e) => {
-                  const f = e.target.files?.[0]; e.target.value = ''
-                  if (!f) return
-                  setFontBusy(true); setError('')
-                  try { setFont(await uploadFont(f)) } catch (err) { setError((err as Error).message) } finally { setFontBusy(false) }
-                }} />
-              </label>
-            </div>
-          </div>
+          <div className="field-label">Cor do fundo</div>
           <div className="control">
-            <span className="control-label">Tamanho</span>
-            <div className="stepper" role="group" aria-label="Tamanho da legenda">
-              <button type="button" aria-label="Menor" onClick={() => setCaptionSize((v) => Math.max(24, v - 4))}>−</button>
-              <span>{captionSize}</span>
-              <button type="button" aria-label="Maior" onClick={() => setCaptionSize((v) => Math.min(140, v + 4))}>+</button>
-            </div>
-          </div>
-          <div className="control">
-            <span className="control-label">Traçado</span>
-            <div className="choice-row" role="radiogroup" aria-label="Traçado nas letras">
-              <button type="button" role="radio" aria-checked={outline} className="choice small-choice" onClick={() => setOutline(true)}>Com</button>
-              <button type="button" role="radio" aria-checked={!outline} className="choice small-choice" onClick={() => setOutline(false)}>Sem</button>
-            </div>
-          </div>
-          <div className="control">
-            <span className="control-label">Cor: fundo</span>
             <input type="color" className="color-input" value={bgColor} onChange={(e) => setBgColor(e.target.value.toUpperCase())} aria-label="Cor do fundo do vídeo (aparece nos quadros de texto)" />
-          </div>
-          <div className="control">
-            <span className="control-label">Cor: destaque</span>
-            <input type="color" className="color-input" value={highlightColor} onChange={(e) => setHighlightColor(e.target.value.toUpperCase())} aria-label="Cor das palavras em destaque" />
-          </div>
-          <div className="control span2">
-            <span className="control-label">Posição da legenda</span>
-            <CaptionPosition value={captionPosition} onChange={setCaptionPosition} />
-          </div>
+            <small className="muted">Aparece nos quadros de título. A legenda você ajusta depois, na aba Legendas.</small>
           </div>
         </div>
       </div>
-      <Modal open={preview} onClose={() => setPreview(false)} kicker="Legenda" title="Prévia no vídeo" wide>
-        <CaptionPreview font={font} size={captionSize} color={highlightColor} outline={outline} position={captionPosition} bg={bgColor} />
-        <p className="muted">Assim a legenda aparece no vídeo 16:9 (o fundo só aparece nos quadros de texto).</p>
-      </Modal>
 
       <div className="composer-foot">
         <div className="controls grid2">
@@ -432,20 +355,6 @@ function ImagesNeeded({ seconds, count, useStock, setUseStock }: { seconds: numb
         <button type="button" role="radio" aria-checked={useStock} className="choice small-choice" onClick={() => setUseStock(true)}>Completar com banco de imagens</button>
         <button type="button" role="radio" aria-checked={!useStock} disabled={!count} className="choice small-choice" onClick={() => setUseStock(false)}>Repetir só as minhas</button>
       </div>
-    </div>
-  )
-}
-
-// Prévia de como a legenda fica no vídeo: fonte, tamanho, cor do destaque, traçado, posição e cor do fundo.
-function CaptionPreview({ font, size, color, outline, position, bg }: { font: string; size: number; color: string; outline: boolean; position: string; bg: string }) {
-  useEffect(() => { loadFontPreview(font) }, [font])
-  const [v, h = 'center'] = position.split('-')
-  return (
-    <div className="cap-preview" style={{ background: bg }} aria-label="Prévia da legenda">
-      <span className="cap-preview-tag">Prévia</span>
-      <p className={`cap-line ${v} ${h}${outline ? '' : ' no-outline'}`} style={{ fontFamily: `"${font}"`, fontSize: `${(size / 1920) * 100}cqw` }}>
-        Aqui o dia começa com <span style={{ color }}>farinha</span>
-      </p>
     </div>
   )
 }

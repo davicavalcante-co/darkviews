@@ -4,9 +4,9 @@ import { z } from 'zod'
 import { logEvent } from '@corte/db'
 import { actingUser, claudeUsage, createVideo, listProjects, projectStatus, regenerate, requestChange, ToolError, viewScript } from './tools.js'
 
-// Servidor MCP do Corte Final: deixa o Claude (Code ou Desktop) criar e acompanhar vídeos por conversa.
-// Atua como o usuário de CORTE_FINAL_EMAIL, com as mesmas regras de acesso do site. stdout é só do protocolo MCP.
-const server = new McpServer({ name: 'corte-final', version: '1.0.0' })
+// Servidor MCP do Darkviews: deixa o Claude (Code ou Desktop) criar e acompanhar vídeos por conversa.
+// Atua como o usuário de DARKVIEWS_EMAIL, com as mesmas regras de acesso do site. stdout é só do protocolo MCP.
+const server = new McpServer({ name: 'darkviews', version: '1.0.0' })
 const PARTS = ['video', 'caption', 'title', 'description', 'keywords'] as const
 
 function tool<S extends z.ZodRawShape>(name: string, description: string, shape: S, fn: (u: Awaited<ReturnType<typeof actingUser>>, a: z.infer<z.ZodObject<S>>) => Promise<unknown>) {
@@ -31,7 +31,6 @@ tool('criar_video', 'Cria um vídeo a partir de um prompt. Opcional: link de ref
   duracao_minutos: z.number().min(0.25).max(18).describe('Duração em minutos (até 18)'),
   link_referencia: z.string().optional(),
   voz_desejada: z.string().max(200).optional(),
-  fonte: z.string().optional().describe('Fonte Google das legendas (padrão Montserrat)'),
 }, (u, a) => createVideo(u, a))
 tool('status_projeto', 'Mostra em que etapa um vídeo está, o progresso e o tempo restante.', { id: z.string() }, (u, a) => projectStatus(u, a.id))
 tool('ver_roteiro', 'Mostra título, descrição, palavras-chave, roteiro e cenas de um vídeo.', { id: z.string() }, (u, a) => viewScript(u, a.id))

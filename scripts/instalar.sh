@@ -1,5 +1,5 @@
 #!/bin/zsh -l
-# Instala o Corte Final num Mac novo, do zero. Pode rodar de novo quando quiser: o que já existe é pulado.
+# Instala o Darkviews num Mac novo, do zero. Pode rodar de novo quando quiser: o que já existe é pulado.
 # Tudo fica dentro da pasta do projeto (programas de voz em vendor/ e .venv-*); só as ferramentas de sistema vêm do Homebrew.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -23,7 +23,7 @@ for f in node pnpm ffmpeg-full yt-dlp python@3.11 uv; do brew list --formula "$f
 command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code
 ok "pronto"
 
-step "4/8 Dependências do Corte Final"
+step "4/8 Dependências do Darkviews"
 pnpm install
 ok "pronto"
 
@@ -34,7 +34,7 @@ if [ ! -f .env ]; then
   ok "arquivo .env criado com chave nova"
 fi
 pnpm run db:push
-pnpm run db:seed | tee /tmp/corte-final-seed.txt
+pnpm run db:seed | tee /tmp/darkviews-seed.txt
 ok "pronto"
 
 step "6/8 Vozes locais (Kokoro e Piper)"
@@ -51,5 +51,5 @@ if claude auth status >/dev/null 2>&1; then ok "já está logado"
 else echo "Vai abrir o login do Claude. Entre com a sua conta e volte para esta janela."; claude auth login || claude; fi
 
 print -P "\n%F{green}Instalação concluída.%f"
-grep -A1 -i "token de primeiro acesso" /tmp/corte-final-seed.txt || true
-echo "Agora dê dois cliques em \"Ligar Corte Final\". No primeiro acesso, use a aba \"Primeiro acesso\" com o token acima."
+grep -A1 -i "token de primeiro acesso" /tmp/darkviews-seed.txt || true
+echo "Agora dê dois cliques em \"Ligar Darkviews\". No primeiro acesso, use a aba \"Primeiro acesso\" com o token acima."

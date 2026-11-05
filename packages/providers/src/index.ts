@@ -80,7 +80,7 @@ async function openverse(_a: Active, query: string, kind: 'image' | 'video', ori
   if (kind === 'video') return []
   const aspect = orientation === 'portrait' ? 'tall' : orientation === 'square' ? 'square' : 'wide'
   const d = await getJson(`https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&license_type=commercial,modification&aspect_ratio=${aspect}&size=large&page_size=5`,
-    { 'User-Agent': 'CorteFinal/1.0 (local)' })
+    { 'User-Agent': 'Darkviews/1.0 (local)' })
   return d.results.map((r: any) => ({
     provider: 'openverse', sourceId: String(r.id), kind, url: r.url, pageUrl: r.foreign_landing_url ?? r.url, description: r.title || query,
     color: null, author: r.creator ?? 'autor desconhecido', license: `CC ${String(r.license).toUpperCase()} ${r.license_version ?? ''}`.trim(),
@@ -244,7 +244,7 @@ export async function synthesize(text: string, outBase: string, ffmpeg: string, 
 // ---------- trilha sonora ----------
 export type MusicPick = { path: string; provider: string; license: string; attribution: string }
 // Só ASCII: com acento ("vídeos") os servidores recusam o pedido (403).
-const UA = { 'User-Agent': 'CorteFinal/1.0 (local video tool)' }
+const UA = { 'User-Agent': 'Darkviews/1.0 (local video tool)' }
 async function save(url: string, out: string, init: RequestInit = {}) {
   const res = await fetch(url, { ...init, headers: { ...UA, ...(init.headers as Record<string, string>) }, signal: AbortSignal.timeout(90_000) })
   if (!res.ok || !res.body) throw new Error(`download HTTP ${res.status}`)

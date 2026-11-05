@@ -231,6 +231,9 @@ export function Progress({ id }: { id: string }) {
   // Recarrega o detalhe quando o projeto muda de etapa (perfil e roteiro aparecem ao final de cada uma).
   useEffect(() => { api<Detail>(`/projects/${id}`).then(setDetail, () => setMissing(true)) }, [id, ev?.status])
   const name = detail?.name ?? ''
+  // Vídeo pronto: a tela de andamento dá lugar ao editor (baixar, editar e aprovar ficam lá).
+  const ready = !!ev && ['editing', 'in_approval', 'approved'].includes(ev.status) && !['queued', 'running', 'paused'].includes(ev.job?.status ?? '')
+  useEffect(() => { if (ready) location.replace(`#/editar/${id}`) }, [ready, id])
 
   if (missing) return <p>Projeto não encontrado. <a href="#/projetos">Voltar</a></p>
   if (!ev) return null

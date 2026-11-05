@@ -26,7 +26,7 @@ export async function claudeBlock(isAdmin: boolean) {
     const today = new Date(new Date().setHours(0, 0, 0, 0))
     const month = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
     const sessionStart = status?.sessionResetsAt ? new Date(status.sessionResetsAt.getTime() - 5 * 3600_000) : new Date(now - 5 * 3600_000)
-    // Tokens do Claude Code: histórico local da máquina + chamadas do Corte Final (que não entram no histórico).
+    // Tokens do Claude Code: histórico local da máquina + chamadas do Darkviews (que não entram no histórico).
     const appEvents = await prisma.claudeUsageEvent.findMany({ where: { createdAt: { gte: new Date(now - 31 * DAY) } } })
     const code = await claudeCodeUsage()
     const usage = [
@@ -41,7 +41,7 @@ export async function claudeBlock(isAdmin: boolean) {
     const renews = settings.plan_renews_at ? new Date(`${settings.plan_renews_at}T00:00:00`) : null
     Object.assign(claude, {
       tokens: { today: sum(today), session: sum(sessionStart), month: sum(month) },
-      // Quanto do mês veio do próprio Corte Final (o resto é o uso do Claude Code fora dele).
+      // Quanto do mês veio do próprio Darkviews (o resto é o uso do Claude Code fora dele).
       tokensApp: { month: usage.filter((u) => u.app && u.at >= month).reduce((n, u) => n + u.tokens, 0) },
       // null = "sem dados ainda" (o rate limit só chega depois da primeira resposta), nunca zero.
       sessionLeftPct: status?.sessionUsedPct == null ? null : Math.max(0, 100 - status.sessionUsedPct),

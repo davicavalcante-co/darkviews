@@ -1,10 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { PublicUser, Settings } from '@corte/shared'
+import type { PublicUser } from '@corte/shared'
 import { api, uploadFont } from './api'
-import { Integrations } from './integrations'
 import { PageHead } from './ui'
 
-const TABS = [['users', 'Usuários'], ['integrations', 'Integrações (padrão)'], ['fonts', 'Fontes'], ['plan', 'Plano e limites'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
+const TABS = [['users', 'Usuários'], ['fonts', 'Fontes'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
 type Tab = (typeof TABS)[number][0]
 
 async function act(fn: () => Promise<unknown>, after: () => unknown) {
@@ -21,9 +20,7 @@ export function AdminPage() {
           {TABS.map(([t, label]) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
         </div>
         {tab === 'users' && <Users />}
-        {tab === 'integrations' && <Integrations scope="system" />}
         {tab === 'fonts' && <Fonts />}
-        {tab === 'plan' && <Plan />}
         {tab === 'audit' && <Audit />}
         {tab === 'logs' && <Logs />}
       </div>
@@ -102,27 +99,6 @@ function Fonts() {
         }} />
       </label>
     </div>
-  )
-}
-
-function Plan() {
-  const [s, setS] = useState<Settings | null>(null)
-  const [msg, setMsg] = useState('')
-  useEffect(() => { api<Settings>('/admin/settings').then(setS) }, [])
-  if (!s) return null
-  const set = (patch: Partial<Settings>) => { setS({ ...s, ...patch }); setMsg('') }
-  return (
-    <form className="panel" onSubmit={(e) => { e.preventDefault(); act(() => api('/admin/settings', { method: 'PUT', body: s }), () => setMsg('Salvo')) }}>
-      <span className="panel-title">Plano do Claude e limites de uso</span>
-      <div className="grid">
-        <label>Plano do Claude<input value={s.plan_name} maxLength={60} placeholder="Ex.: Max 5x" onChange={(e) => set({ plan_name: e.target.value })} /></label>
-        <label>Data de renovação do plano<input type="date" value={s.plan_renews_at} onChange={(e) => set({ plan_renews_at: e.target.value })} />
-          <small className="muted">Não há fonte automática: informe a data da sua fatura.</small></label>
-        <label>Duração máxima do vídeo (minutos)<input type="number" min={0.25} max={18} step={0.25} value={s.max_duration_s / 60} onChange={(e) => set({ max_duration_s: Math.round(Number(e.target.value) * 60) })} /></label>
-        <label>Vídeos por dia por usuário (0 = sem limite)<input type="number" min={0} max={1000} value={s.daily_video_limit} onChange={(e) => set({ daily_video_limit: Number(e.target.value) })} /></label>
-      </div>
-      <div className="row"><span className="ok">{msg}</span><button>Salvar</button></div>
-    </form>
   )
 }
 

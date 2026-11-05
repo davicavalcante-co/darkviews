@@ -1,4 +1,4 @@
-# Corte Final
+# Darkviews
 
 Aplicação local que cria vídeos a partir de prompt, link de referência e imagens, e gera cortes 9:16. A especificação completa está em [SPEC.md](SPEC.md).
 
@@ -17,14 +17,14 @@ Contas de teste para desenvolvimento: `pnpm run db:demo` (senhas em `packages/sh
 
 Precisa de: um Mac com chip Apple (M1 ou mais novo), internet e uns **15 GB livres**. Leva de 20 a 40 minutos na primeira vez.
 
-1. Copie a pasta inteira do Corte Final para o Mac (ou baixe do GitHub).
-2. Dê **dois cliques** em `Instalar Corte Final`.
+1. Copie a pasta inteira do Darkviews para o Mac (ou baixe do GitHub).
+2. Dê **dois cliques** em `Instalar Darkviews`.
    - Se o Mac avisar que o arquivo é de fonte desconhecida: clique com o botão direito → **Abrir** → **Abrir**.
    - Se pedir a senha do Mac, digite (é o Homebrew instalando programas).
    - Se abrir uma janela da Apple pedindo para instalar ferramentas, aceite e, quando terminar, dê dois cliques no instalador de novo.
 3. No fim, ele abre o **login do Claude**: entre com a sua conta.
 4. Anote o **token de primeiro acesso** que aparece no final.
-5. Dê **dois cliques** em `Ligar Corte Final`. O navegador abre sozinho.
+5. Dê **dois cliques** em `Ligar Darkviews`. O navegador abre sozinho.
 6. Na tela de login, aba **Primeiro acesso**: cole o token e crie a senha do admin.
 7. Na aba **Vozes**, clique em **Ligar VoiceStudio** e depois em **Aceitar licença do modelo** (uso pessoal). A primeira voz demora uns 5 minutos (o modelo baixa uma vez só).
 
@@ -35,11 +35,11 @@ Pronto. Nos próximos dias, só o passo 5.
 | O quê | Onde fica |
 | --- | --- |
 | Homebrew, Node, pnpm, FFmpeg com legendas, yt-dlp, Python 3.11, uv, Claude Code | programas do Mac (Homebrew) |
-| Bibliotecas do Corte Final | `node_modules/` |
+| Bibliotecas do Darkviews | `node_modules/` |
 | Arquivo `.env` com chave de criptografia nova | `.env` |
 | Banco de dados | `data/app.db` |
 | Vozes Kokoro e Piper | `.venv-kokoro/`, `.venv-tts/` |
-| VoiceStudio (aba Vozes), na versão testada com o Corte Final | `vendor/voicestudio/` |
+| VoiceStudio (aba Vozes), na versão testada com o Darkviews | `vendor/voicestudio/` |
 | Skill do OmniVoice | já vem no projeto, em `.claude/skills/` |
 
 Pode rodar o instalador de novo quando quiser: o que já está instalado é pulado.
@@ -101,9 +101,9 @@ Licenças: a skill é MIT; o OmniVoice Studio (programa) é AGPL-3.0 e roda sepa
 
 ## Claude via MCP
 
-`apps/mcp` é um servidor MCP do Corte Final: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `CORTE_FINAL_EMAIL` (no `.env`), com as mesmas permissões do site.
+`apps/mcp` é um servidor MCP do Darkviews: o Claude cria e acompanha vídeos por conversa (`criar_video`, `listar_projetos`, `status_projeto`, `ver_roteiro`, `pedir_alteracao`, `regerar_parte`, `uso_claude`). Ele age como o usuário de `DARKVIEWS_EMAIL` (no `.env`), com as mesmas permissões do site.
 
-- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `corte-final` e `omnivoice`; aprove os dois na primeira vez.
+- **Claude Code:** abra esta pasta no Claude Code. O `.mcp.json` já registra `darkviews` e `omnivoice`; aprove os dois na primeira vez.
 - **App Claude (Desktop):** Integrações → Claude · MCP → "Como conectar no app Claude" mostra o trecho de configuração.
 
 ## Integrações
