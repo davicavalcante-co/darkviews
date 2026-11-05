@@ -11,14 +11,24 @@ const PATHS: Record<string, ReactNode> = {
   integracoes: <><path d="M9 7V4M15 7V4" /><path d="M6 7h12v4a6 6 0 0 1-12 0z" /><path d="M12 17v4" /></>,
   vozes: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
   legendas: <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="M7 15h4M13 15h4M7 11h10" /></>,
+  coracao: <path d="M12 20s-7-4.35-7-10a4 4 0 0 1 7-2.65A4 4 0 0 1 19 10c0 5.65-7 10-7 10z" />,
+  baixar: <><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5" /><path d="M5 19h14" /></>,
+  refazer: <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4.5h-4.5" /></>,
+  lixeira: <><path d="M4 7h16M10 11v6M14 11v6" /><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" /></>,
+  tocar: <path d="M8 5.5v13l10.5-6.5z" />,
+  pausar: <path d="M8 5v14M16 5v14" />,
+  mais: <><circle cx="5.5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="18.5" cy="12" r="1" /></>,
+  microfone: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></>,
+  brilho: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z" />,
+  fechar: <path d="M6 6l12 12M18 6 6 18" />,
   sair: <><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" /><path d="m15 16 4-4-4-4M19 12H9" /></>,
   expandir: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M13.5 9.5 16 12l-2.5 2.5" /></>,
   recolher: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M16 9.5 13.5 12l2.5 2.5" /></>,
 }
 
-export function Icon({ name, size = 20 }: { name: keyof typeof PATHS | string; size?: number }) {
+export function Icon({ name, size = 20, filled }: { name: keyof typeof PATHS | string; size?: number; filled?: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       {PATHS[name]}
     </svg>
   )

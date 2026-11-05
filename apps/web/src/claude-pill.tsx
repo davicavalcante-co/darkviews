@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Icon } from './icons'
 import { api } from './api'
 import { compact, num, type ClaudeBlock } from './dashboard'
 
@@ -55,7 +56,7 @@ export function ClaudePill({ isAdmin }: { isAdmin: boolean }) {
         {c.connected && <>
           <span className="sep" />
           <span className="pill-metric" title="Limite do plano, janela de 5 h (o chat do Claude usa a mesma cota)">Sessão {meter(session)} <b>{session != null ? `${session}%` : '—'}</b></span>
-          {sessionLeft && <span className="pill-muted">↻ {sessionLeft}</span>}
+          {sessionLeft && <span className="pill-muted"><Icon name="refazer" size={12} /> {sessionLeft}</span>}
           <span className="sep" />
           <span className="pill-metric" title="Limite do plano, janela de 7 dias (compartilhada com o chat)">Semana {meter(week)} <b>{week != null ? `${week}%` : '—'}</b></span>
           <span className="sep hide-sm" />

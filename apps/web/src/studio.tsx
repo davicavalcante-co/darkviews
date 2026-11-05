@@ -4,6 +4,7 @@ import { detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX
 type Voices = { voices: { id: string; label: string; provider: string; freeText: boolean }[]; current: string | null; tones: readonly { id: string; label: string }[] }
 import { api } from './api'
 import { Modal } from './ui'
+import { Icon } from './icons'
 import { compact } from './dashboard'
 
 // "Novo vídeo" em formato de estúdio: configuração numa coluna à esquerda e as criações ao lado.
@@ -157,7 +158,7 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
             {link && <small className={platform ? 'ok' : 'error'}>{platform ? `Plataforma: ${PLATFORM_LABEL[platform]}` : 'Plataforma não suportada'}</small>}
             <label className={`drop${link ? ' disabled' : ''}`}>
               <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={!!link} onChange={(e) => pickVideo(e.target.files?.[0])} />
-              <span aria-hidden="true">▶</span><span className="ellipsis">{video ? video.name : 'Enviar vídeo de referência'}</span>
+              <Icon name="tocar" size={14} /><span className="ellipsis">{video ? video.name : 'Enviar vídeo de referência'}</span>
             </label>
           </div>
         )}
@@ -305,10 +306,10 @@ function CreationRow({ r, onPick, picked, reload }: { r: Creation; onPick: (v?: 
   // Ações de cada versão, em cima do vídeo (como num banco de imagens).
   const actions = (v: Creation['versions'][number]) => (
     <span className="frame-actions" onClick={(e) => e.stopPropagation()}>
-      <button type="button" className={`fa${v.favorite ? ' on' : ''}`} onClick={() => fav(v)} aria-pressed={v.favorite} title={v.favorite ? 'Tirar dos favoritos' : 'Favoritar'} aria-label="Favoritar">{v.favorite ? '♥' : '♡'}</button>
-      <a className="fa" href={`/api/projects/${r.id}/video?v=${v.version}&download=1`} title="Baixar" aria-label="Baixar esta versão">⬇</a>
-      <button type="button" className="fa" onClick={() => onPick(v.version)} title="Recriar a partir desta versão" aria-label="Recriar a partir desta versão">↻</button>
-      {r.versions.length > 1 && <button type="button" className="fa danger" onClick={() => setToDelete(v.version)} title="Excluir esta versão" aria-label="Excluir esta versão">🗑</button>}
+      <button type="button" className={`fa${v.favorite ? ' on' : ''}`} onClick={() => fav(v)} aria-pressed={v.favorite} title={v.favorite ? 'Tirar dos favoritos' : 'Favoritar'} aria-label="Favoritar"><Icon name="coracao" size={16} filled={v.favorite} /></button>
+      <a className="fa" href={`/api/projects/${r.id}/video?v=${v.version}&download=1`} title="Baixar" aria-label="Baixar esta versão"><Icon name="baixar" size={16} /></a>
+      <button type="button" className="fa" onClick={() => onPick(v.version)} title="Recriar a partir desta versão" aria-label="Recriar a partir desta versão"><Icon name="refazer" size={16} /></button>
+      {r.versions.length > 1 && <button type="button" className="fa danger" onClick={() => setToDelete(v.version)} title="Excluir esta versão" aria-label="Excluir esta versão"><Icon name="lixeira" size={16} /></button>}
     </span>
   )
   // Clicar no card preenche o formulário; clicar num link, botão ou vídeo faz só a ação dele.
@@ -338,9 +339,9 @@ function CreationRow({ r, onPick, picked, reload }: { r: Creation; onPick: (v?: 
           <div key={v.version} className="frame version">
             <button type="button" className="frame-open" onClick={() => setOpen(v.version)} aria-label={`Abrir a versão ${v.version}`}>
               <video src={`/api/projects/${r.id}/video?v=${v.version}#t=1`} preload="metadata" muted tabIndex={-1} />
-              <span className="frame-play" aria-hidden="true">▶</span>
+              <span className="frame-play" aria-hidden="true"><Icon name="tocar" size={22} filled /></span>
             </button>
-            {v.favorite && <span className="frame-fav" aria-label="Favorita">♥</span>}
+            {v.favorite && <span className="frame-fav" aria-label="Favorita"><Icon name="coracao" size={16} filled /></span>}
             {actions(v)}
             <span className="frame-tag">Versão {v.version}{v.isCurrent ? ' · atual' : ''} · {fmt(v.durationS)}</span>
           </div>
@@ -352,7 +353,7 @@ function CreationRow({ r, onPick, picked, reload }: { r: Creation; onPick: (v?: 
           <video className="player" src={`/api/projects/${r.id}/video?v=${open}`} controls autoPlay />
           <footer className="modal-actions">
             <a className="btn ghost" href={`/api/projects/${r.id}/video?v=${open}&download=1`}>Baixar</a>
-            <button type="button" className="ghost-btn" onClick={() => { const v = r.versions.find((x) => x.version === open); if (v) fav(v) }}>{r.versions.find((x) => x.version === open)?.favorite ? '♥ Favorita' : '♡ Favoritar'}</button>
+            <button type="button" className="ghost-btn" onClick={() => { const v = r.versions.find((x) => x.version === open); if (v) fav(v) }}><Icon name="coracao" size={16} filled={r.versions.find((x) => x.version === open)?.favorite} /> {r.versions.find((x) => x.version === open)?.favorite ? 'Favorita' : 'Favoritar'}</button>
             <button type="button" className="ghost-btn" onClick={() => { onPick(open); setOpen(null) }}>Recriar desta versão</button>
             {r.versions.length > 1 && <button type="button" className="link danger" onClick={() => setToDelete(open)}>Excluir versão</button>}
             <span className="spacer" />

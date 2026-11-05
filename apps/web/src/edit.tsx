@@ -4,6 +4,7 @@ import { api, uploadFont, useFonts } from './api'
 import { ApprovePage } from './approve'
 import { FontSelect, Modal, PageHead } from './ui'
 import { ThumbnailTab } from './thumbnail'
+import { Icon } from './icons'
 
 type Segment = { startS: number; endS: number; text: string; highlights: number[] }
 type Track = { version: number; fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean; segments: Segment[] }
@@ -404,7 +405,7 @@ function MiniPlayer({ src, label }: { src: string; label: string }) {
     <div className="mini-player">
       <audio ref={ref} src={src} preload="metadata" onLoadedMetadata={(e) => setD(e.currentTarget.duration)} onDurationChange={(e) => setD(e.currentTarget.duration)} onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
-      <button type="button" className="icon-btn" aria-label={playing ? `Pausar ${label}` : `Tocar ${label}`} onClick={() => (playing ? ref.current?.pause() : ref.current?.play())}>{playing ? '❚❚' : '▶'}</button>
+      <button type="button" className="icon-btn" aria-label={playing ? `Pausar ${label}` : `Tocar ${label}`} onClick={() => (playing ? ref.current?.pause() : ref.current?.play())}><Icon name={playing ? 'pausar' : 'tocar'} size={14} filled={!playing} /></button>
       <input type="range" min={0} max={d || 1} step={0.1} value={t} aria-label={`Posição: ${label}`} onChange={(e) => { if (ref.current) ref.current.currentTime = Number(e.target.value) }} />
       <span className="tc">{fmt(t)}/{fmt(d)}</span>
     </div>
