@@ -167,7 +167,7 @@ export async function projectRoutes(app: FastifyInstance) {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, name: true, prompt: true, status: true, targetDurationS: true, aspect: true, createdAt: true, owner: { select: { name: true } },
-        videoVersions: { orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true } },
+        videoVersions: { orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true, favorite: true } },
         jobs: { where: { status: { in: ['queued', 'running', 'paused'] } }, orderBy: { createdAt: 'desc' }, take: 1, select: { stage: true, progress: true, status: true, etaS: true } },
         _count: { select: { assets: { where: { kind: 'user_image' } } } },
       },
@@ -204,9 +204,14 @@ export async function projectRoutes(app: FastifyInstance) {
     })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const { scripts, metadataFields, reference, videoVersions, ...rest } = p
+    // ?fromVersion=N: os campos com que aquela versão foi feita (para recriar a partir dela, não da última).
+    const from = Number((req.query as { fromVersion?: string }).fromVersion) || null
+    const src = from ? (JSON.parse((await prisma.videoVersion.findFirst({ where: { projectId: p.id, version: from }, select: { renderSettings: true } }))?.renderSettings ?? '{}').source as { name: string; prompt: string; targetDurationS: number; options: Record<string, unknown> } | undefined) : undefined
     return {
       ...rest,
-      options: JSON.parse(p.options),
+      ...(src && { name: src.name, prompt: src.prompt, targetDurationS: src.targetDurationS }),
+      fromVersion: src ? from : null,
+      options: src ? { ...JSON.parse(p.options), ...src.options } : JSON.parse(p.options),
       reference: reference && { ...reference, styleProfile: reference.styleProfile ? JSON.parse(reference.styleProfile) : null },
       script: scripts[0] ?? null,
       metadata: Object.fromEntries(metadataFields.map((m) => [m.field, m.value])),
@@ -401,6 +406,35 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!p._count.videoVersions) return reply.code(409).send({ error: 'Este vídeo ainda não tem versão pronta; use Excluir' })
     await prisma.project.update({ where: { id: p.id }, data: { status: 'editing' } })
     return { ok: true }
+  })
+
+  // Favoritar uma versão.
+  app.patch<{ Params: { id: string; v: string } }>('/api/projects/:id/versions/:v', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const { favorite } = z.object({ favorite: z.boolean() }).parse(req.body)
+    const { count } = await prisma.videoVersion.updateMany({ where: { projectId: p.id, version: Number(req.params.v) }, data: { favorite } })
+    return count ? { favorite } : reply.code(404).send({ error: 'Versão não encontrada' })
+  })
+
+  // Excluir uma versão sem apagar o projeto. A última que sobra não sai (aí é excluir o projeto).
+  app.delete<{ Params: { id: string; v: string } }>('/api/projects/:id/versions/:v', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, videoVersions: { orderBy: { version: 'desc' } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const v = p.videoVersions.find((x) => x.version === Number(req.params.v))
+    if (!v) return reply.code(404).send({ error: 'Versão não encontrada' })
+    if (p.videoVersions.length === 1) return reply.code(409).send({ error: 'É a única versão. Para apagar, exclua o projeto.' })
+    if (await prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } } })) return reply.code(409).send({ error: 'Espere a tarefa em andamento terminar' })
+    const others = p.videoVersions.filter((x) => x.id !== v.id)
+    await prisma.$transaction([
+      prisma.videoVersion.delete({ where: { id: v.id } }),
+      ...(v.isCurrent ? [prisma.videoVersion.update({ where: { id: others[0].id }, data: { isCurrent: true } })] : []),
+    ])
+    // Arquivos desta versão; o vídeo base e o limpo podem ser compartilhados com outra versão (troca rápida de legenda).
+    const used = new Set(others.flatMap((o) => { const r = JSON.parse(o.renderSettings) as { base?: string; clean?: string }; return [o.filePath, r.base, r.clean] }))
+    const rs = JSON.parse(v.renderSettings) as { base?: string; clean?: string }
+    await Promise.all([v.filePath, rs.base, rs.clean].filter((f): f is string => !!f && !used.has(f)).map((f) => rm(f, { force: true })))
+    return { ok: true, current: v.isCurrent ? others[0].version : others.find((o) => o.isCurrent)?.version }
   })
 
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {

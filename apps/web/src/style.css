@@ -947,3 +947,14 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .apply-all { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px dashed var(--nle-line, var(--border)); border-radius: 3px; }
 .apply-all .check { flex-direction: row; align-items: center; gap: 6px; font-size: .8rem; }
 .stack-sm label.check { flex-direction: row; align-items: center; gap: 6px; } .stack-sm label.check input { width: auto; margin: 0; }
+/* Ações em cima de cada versão (favoritar, baixar, recriar, excluir) */
+.frame.version { position: relative; padding: 0; }
+.frame-open { position: absolute; inset: 0; padding: 0; background: none; border-radius: inherit; overflow: hidden; }
+.frame-open video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.frame-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity .15s; }
+.frame.version:hover .frame-actions, .frame-actions:focus-within { opacity: 1; }
+@media (hover: none) { .frame-actions { opacity: 1; } }
+.frame-actions .fa { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; font-size: .9rem; line-height: 1; color: #fff; background: rgb(0 0 0 / .65); border-radius: var(--radius); text-decoration: none; }
+.frame-actions .fa:hover { background: rgb(0 0 0 / .85); } .frame-actions .fa.on { color: #ff6b6b; } .frame-actions .fa.danger:hover { background: #c92a2a; }
+.frame-fav { position: absolute; top: 8px; left: 8px; color: #ff6b6b; font-size: 1rem; text-shadow: 0 1px 3px #000; pointer-events: none; }
+.frame-tag, .frame-play { pointer-events: none; }

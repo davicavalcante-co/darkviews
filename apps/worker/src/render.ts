@@ -327,7 +327,8 @@ export async function render(job: Job) {
   await prisma.$transaction([
     prisma.videoVersion.updateMany({ where: { projectId: project.id }, data: { isCurrent: false } }),
     prisma.videoVersion.create({
-      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut, changes: opts.pendingChanges ?? [] }) },
+      data: { projectId: project.id, version, filePath: out, durationS: await durationOf(out), renderSettings: JSON.stringify({ width: 1920, height: 1080, fps: FPS, captionTrack: opts.captionsOn ? track.id : null, base, clean: cleanOut, changes: opts.pendingChanges ?? [],
+        source: { name: project.name, prompt: project.prompt, targetDurationS: project.targetDurationS, options: (({ pendingChanges: _p, musicPicked: _m, ...o }) => o)(opts) } }) },
     }),
   ])
   // As mudanças anotadas no editor ficaram gravadas nesta versão; a lista recomeça vazia.

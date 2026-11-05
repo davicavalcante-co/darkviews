@@ -10,7 +10,7 @@ import { compact } from './dashboard'
 type Creation = {
   id: string; name: string; prompt: string; status: ProjectStatus; targetDurationS: number; aspect: string; createdAt: string; images: number; tokens: number
   video: { version: number; durationS: number } | null
-  versions: { version: number; durationS: number; isCurrent: boolean }[]
+  versions: { version: number; durationS: number; isCurrent: boolean; favorite: boolean }[]
   job: { stage: string | null; progress: number; status: string; etaS: number | null } | null
 }
 type Img = { file?: File; id?: string; caption: string; url: string } // id = imagem já enviada (nova versão)
@@ -18,6 +18,7 @@ type Img = { file?: File; id?: string; caption: string; url: string } // id = im
 type Base = {
   id: string; name: string; prompt: string; targetDurationS: number; options: Record<string, unknown>
   reference: { sourceType: string; url: string | null } | null; assets: { id: string; userCaption: string | null }[]
+  fromVersion: number | null
 }
 
 const STATUS: Record<ProjectStatus, string> = {
@@ -48,10 +49,11 @@ function ago(iso: string) {
 
 export function NewVideo() {
   const [base, setBase] = useState<Base | null>(null)
-  const pick = (id: string) => api<Base>(`/projects/${id}`).then((b) => { setBase(b); scrollTo({ top: 0, behavior: 'smooth' }) })
+  // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
+  const pick = (id: string, v?: number) => api<Base>(`/projects/${id}${v ? `?fromVersion=${v}` : ''}`).then((b) => { setBase(b); scrollTo({ top: 0, behavior: 'smooth' }) })
   return (
     <div className="studio">
-      <Composer key={base?.id ?? 'novo'} base={base} onCancel={() => setBase(null)} />
+      <Composer key={`${base?.id ?? 'novo'}-${base?.fromVersion ?? ''}`} base={base} onCancel={() => setBase(null)} />
       <Creations onPick={pick} picked={base?.id ?? null} />
     </div>
   )
@@ -139,7 +141,7 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
       </div>
 
       <div className="composer-body">
-        {base && <div className="notice">Nova versão de <b>{base.name}</b>: ajuste o que quiser; o vídeo novo entra no mesmo card, em primeiro. <button type="button" className="link" onClick={onCancel}>Começar do zero</button></div>}
+        {base && <div className="notice">Nova versão de <b>{base.name}</b>{base.fromVersion ? <> a partir da <b>versão {base.fromVersion}</b></> : null}: ajuste o que quiser; o vídeo novo entra no mesmo card, em primeiro. <button type="button" className="link" onClick={onCancel}>Começar do zero</button></div>}
         <label className="field-label">Nome<input name="name" required maxLength={120} placeholder="Ex.: Lançamento do café especial" value={name} onChange={(e) => setName(e.target.value)} /></label>
 
         {base ? (
@@ -254,7 +256,7 @@ function VoicePicker({ preset, setPreset, tone, setTone }: { preset: string; set
   )
 }
 
-function Creations({ onPick, picked }: { onPick: (id: string) => void; picked: string | null }) {
+function Creations({ onPick, picked }: { onPick: (id: string, v?: number) => void; picked: string | null }) {
   const [rows, setRows] = useState<Creation[] | null>(null)
   const [filter, setFilter] = useState<(typeof FILTERS)[number][0]>('all')
   const [q, setQ] = useState('')
@@ -286,16 +288,29 @@ function Creations({ onPick, picked }: { onPick: (id: string) => void; picked: s
           <p className="muted">{rows.length ? 'Troque o filtro ou a busca.' : 'Preencha o prompt ao lado e clique em Criar vídeo. Você acompanha a análise, o roteiro e o render por aqui.'}</p>
         </div>
       ) : (
-        <div className="feed">{shown.map((r) => <CreationRow key={r.id} r={r} onPick={() => onPick(r.id)} picked={picked === r.id} />)}</div>
+        <div className="feed">{shown.map((r) => <CreationRow key={r.id} r={r} onPick={(v) => onPick(r.id, v)} picked={picked === r.id} reload={load} />)}</div>
       )}
     </section>
   )
 }
 
 // Card do vídeo: as versões lado a lado (a mais nova primeiro). Clicar no card preenche o formulário para gerar outra versão.
-function CreationRow({ r, onPick, picked }: { r: Creation; onPick: () => void; picked: boolean }) {
+function CreationRow({ r, onPick, picked, reload }: { r: Creation; onPick: (v?: number) => void; picked: boolean; reload: () => void }) {
   const working = !!r.job || r.status === 'failed'
   const [open, setOpen] = useState<number | null>(null)
+  const [toDelete, setToDelete] = useState<number | null>(null)
+  const [error, setError] = useState('')
+  const run = (fn: () => Promise<unknown>) => fn().then(reload, (e) => setError((e as Error).message))
+  const fav = (v: { version: number; favorite: boolean }) => run(() => api(`/projects/${r.id}/versions/${v.version}`, { method: 'PATCH', body: { favorite: !v.favorite } }))
+  // Ações de cada versão, em cima do vídeo (como num banco de imagens).
+  const actions = (v: Creation['versions'][number]) => (
+    <span className="frame-actions" onClick={(e) => e.stopPropagation()}>
+      <button type="button" className={`fa${v.favorite ? ' on' : ''}`} onClick={() => fav(v)} aria-pressed={v.favorite} title={v.favorite ? 'Tirar dos favoritos' : 'Favoritar'} aria-label="Favoritar">{v.favorite ? '♥' : '♡'}</button>
+      <a className="fa" href={`/api/projects/${r.id}/video?v=${v.version}&download=1`} title="Baixar" aria-label="Baixar esta versão">⬇</a>
+      <button type="button" className="fa" onClick={() => onPick(v.version)} title="Recriar a partir desta versão" aria-label="Recriar a partir desta versão">↻</button>
+      {r.versions.length > 1 && <button type="button" className="fa danger" onClick={() => setToDelete(v.version)} title="Excluir esta versão" aria-label="Excluir esta versão">🗑</button>}
+    </span>
+  )
   // Clicar no card preenche o formulário; clicar num link, botão ou vídeo faz só a ação dele.
   const pickCard = (e: React.MouseEvent) => { if (!(e.target as HTMLElement).closest('a, button, video, dialog')) onPick() }
   return (
@@ -320,11 +335,15 @@ function CreationRow({ r, onPick, picked }: { r: Creation; onPick: () => void; p
           </a>
         )}
         {r.versions.map((v) => (
-          <button key={v.version} type="button" className="frame version" onClick={() => setOpen(v.version)} aria-label={`Abrir a versão ${v.version}`}>
-            <video src={`/api/projects/${r.id}/video?v=${v.version}#t=1`} preload="metadata" muted tabIndex={-1} />
-            <span className="frame-play" aria-hidden="true">▶</span>
+          <div key={v.version} className="frame version">
+            <button type="button" className="frame-open" onClick={() => setOpen(v.version)} aria-label={`Abrir a versão ${v.version}`}>
+              <video src={`/api/projects/${r.id}/video?v=${v.version}#t=1`} preload="metadata" muted tabIndex={-1} />
+              <span className="frame-play" aria-hidden="true">▶</span>
+            </button>
+            {v.favorite && <span className="frame-fav" aria-label="Favorita">♥</span>}
+            {actions(v)}
             <span className="frame-tag">Versão {v.version}{v.isCurrent ? ' · atual' : ''} · {fmt(v.durationS)}</span>
-          </button>
+          </div>
         ))}
         {!working && !r.versions.length && <div className="frame empty" aria-hidden="true" />}
       </div>
@@ -333,10 +352,22 @@ function CreationRow({ r, onPick, picked }: { r: Creation; onPick: () => void; p
           <video className="player" src={`/api/projects/${r.id}/video?v=${open}`} controls autoPlay />
           <footer className="modal-actions">
             <a className="btn ghost" href={`/api/projects/${r.id}/video?v=${open}&download=1`}>Baixar</a>
-            <a className="btn ghost" href={`#/projeto/${r.id}`}>Andamento</a>
+            <button type="button" className="ghost-btn" onClick={() => { const v = r.versions.find((x) => x.version === open); if (v) fav(v) }}>{r.versions.find((x) => x.version === open)?.favorite ? '♥ Favorita' : '♡ Favoritar'}</button>
+            <button type="button" className="ghost-btn" onClick={() => { onPick(open); setOpen(null) }}>Recriar desta versão</button>
+            {r.versions.length > 1 && <button type="button" className="link danger" onClick={() => setToDelete(open)}>Excluir versão</button>}
             <span className="spacer" />
             <a className="btn ghost" href={`#/editar/${r.id}`}>Editar</a>
             <a className="btn" href={`#/aprovar/${r.id}`}>{r.status === 'approved' ? 'Cortes' : 'Aprovar'}</a>
+          </footer>
+        </Modal>
+      )}
+      {toDelete != null && (
+        <Modal open onClose={() => setToDelete(null)} kicker={`Versão ${toDelete}`} title="Excluir esta versão?">
+          <p>Só esta versão some. O projeto e as outras versões continuam.{r.versions.find((x) => x.version === toDelete)?.isCurrent ? ' A versão anterior passa a ser a atual.' : ''}</p>
+          {error && <p className="notice alert" role="alert">✕ {error}</p>}
+          <footer className="modal-actions"><span className="spacer" />
+            <button type="button" className="ghost-btn" onClick={() => setToDelete(null)}>Cancelar</button>
+            <button type="button" onClick={() => run(async () => { await api(`/projects/${r.id}/versions/${toDelete}`, { method: 'DELETE' }); setToDelete(null); if (open === toDelete) setOpen(null) })}>Excluir versão</button>
           </footer>
         </Modal>
       )}

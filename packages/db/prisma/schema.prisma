@@ -150,6 +150,7 @@ model VideoVersion {
   durationS      Float
   renderSettings String   // JSON
   isCurrent      Boolean  @default(true)
+  favorite       Boolean  @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   @@unique([projectId, version])
