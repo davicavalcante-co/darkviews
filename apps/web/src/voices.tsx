@@ -106,6 +106,7 @@ function VoiceList({ list, onEdit, reload }: { list: Voice[]; onEdit: (v: Voice)
 function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload: () => void }) {
   const [menu, setMenu] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  const [testing, setTesting] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => {
     if (!menu) return
@@ -122,6 +123,7 @@ function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload
           <button type="button" className="icon-btn" aria-label="Mais opções" aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu(!menu) }}><Icon name="mais" size={18} /></button>
           {menu && (
             <div className="menu" role="menu">
+              <button type="button" role="menuitem" onClick={() => setTesting(true)}>Testar áudio</button>
               <button type="button" role="menuitem" onClick={onEdit}>Editar</button>
               <button type="button" role="menuitem" className="danger-item" onClick={() => setConfirm(true)}>Excluir</button>
             </div>
@@ -130,6 +132,9 @@ function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload
       </header>
       <PlayButton path={`/studio/voices/${v.id}/sample`} label="Ouvir a voz" />
       {error && <p className="notice alert" role="alert">✕ {error}</p>}
+      <Modal open={testing} onClose={() => { setTesting(false); reload() }} kicker="Testar áudio" title={v.name}>
+        {testing && <VoiceTune voice={v} noPublish />}
+      </Modal>
       <Modal open={confirm} onClose={() => setConfirm(false)} title="Excluir esta voz?">
         <p>A voz "{v.name}" some da lista. Vídeos já prontos não mudam.</p>
         <footer className="modal-actions"><span className="spacer" />
@@ -142,7 +147,7 @@ function VoiceCard({ v, onEdit, reload }: { v: Voice; onEdit: () => void; reload
 }
 
 // Dentro do pop-up de edição: testar com um texto, velocidade e publicar ou voltar para rascunho (salvam na hora).
-function VoiceTune({ voice }: { voice: Voice }) {
+function VoiceTune({ voice, noPublish }: { voice: Voice; noPublish?: boolean }) {
   const [text, setText] = useState('')
   const [speed, setSpeed] = useState(voice.speed)
   const [status, setStatus] = useState(voice.status)
@@ -150,19 +155,19 @@ function VoiceTune({ voice }: { voice: Voice }) {
   const patch = (body: object) => api(`/studio/voices/${voice.id}`, { method: 'PATCH', body }).catch((e) => setError((e as Error).message))
   return (
     <section className="tune">
-      <span className="field-label">Testar e ajustar</span>
+      {!noPublish && <span className="field-label">Testar e ajustar</span>}
       <div className="try-row">
-        <input maxLength={300} value={text} placeholder="Digite uma frase para ouvir esta voz…" onChange={(e) => setText(e.target.value)} />
+        <textarea rows={3} maxLength={300} value={text} placeholder="Digite o texto para ouvir esta voz…" onChange={(e) => setText(e.target.value)} />
         <PlayButton path={`/studio/voices/${voice.id}/preview`} body={{ text }} label="Ouvir" disabled={!text.trim()} />
       </div>
       <label className="range-row">Velocidade
         <input type="range" min={0.7} max={1.3} step={0.05} value={speed} onChange={(e) => setSpeed(Number(e.target.value))} onPointerUp={() => patch({ speed })} />
         <b>{speed.toFixed(2)}×</b>
       </label>
-      <label className="switch-row">
+      {!noPublish && <label className="switch-row">
         <input type="checkbox" checked={status === 'published'} onChange={(e) => { const on = e.target.checked; setStatus(on ? 'published' : 'draft'); patch({ published: on }) }} />
         <span>{status === 'published' ? 'Publicada: aparece no Novo vídeo' : 'Rascunho: ainda não aparece no Novo vídeo'}</span>
-      </label>
+      </label>}
       {error && <p className="notice alert" role="alert">✕ {error}</p>}
     </section>
   )

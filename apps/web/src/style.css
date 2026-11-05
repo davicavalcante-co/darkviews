@@ -965,3 +965,4 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .kind-icon { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius); background: var(--soft); color: var(--accent); }
 .mini-player .icon-btn svg { display: block; }
 .pill-muted svg { vertical-align: -2px; }
+.tune .try-row { align-items: start; } .tune textarea { margin: 0; resize: vertical; }
