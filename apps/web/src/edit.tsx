@@ -20,7 +20,7 @@ type EditData = {
   scenes: Scene[]
   music: { id: string; attribution: string | null } | null
   options: Options
-  videos: { version: number; durationS: number; isCurrent: boolean; createdAt: string }[]
+  videos: { version: number; durationS: number; isCurrent: boolean; createdAt: string; changes: string[] | null }[]
   caption: Track | null
   captionVersions: { version: number; isCurrent: boolean; createdAt: string; fontFamily: string; segments: number }[]
   metadata: Meta[]
@@ -575,9 +575,16 @@ function VersionLog({ data }: { data: EditData }) {
           <li key={v.version} className="nle-panel">
             <header className="nle-head"><span>Versão {v.version}{v.isCurrent ? ' · atual' : ''}</span><span className="tc">{fmt(v.durationS)}</span><span>{when(v.createdAt)}</span></header>
             <div className="ctx-body">
-              {v.version === 1 && !asks.length && <p className="muted small">Primeira versão, criada a partir do roteiro.</p>}
-              {v.version > 1 && !asks.length && <p className="muted small">Ajustes feitos no editor (cenas, legenda, enunciados ou áudio).</p>}
-              {asks.length > 0 && <ul className="plain-list">{asks.map((c) => <li key={c.id}>{c.frameTimeS != null && <b>{fmt(c.frameTimeS)} </b>}{c.text} <small className="muted">· {c.author}</small></li>)}</ul>}
+              {v.version === 1 && !asks.length && !v.changes?.length && <p className="muted small">Primeira versão, criada a partir do roteiro.</p>}
+              {v.version > 1 && !asks.length && !v.changes?.length && <p className="muted small">{v.changes ? 'Renderizada de novo, sem mudanças anotadas.' : 'Versão anterior ao registro detalhado das mudanças.'}</p>}
+              {asks.length > 0 && (
+                <><span className="log-tag">Pedidos ao Claude</span>
+                <ul className="change-list">{asks.map((c) => <li key={c.id}>{c.frameTimeS != null && <b className="tc">{fmt(c.frameTimeS)}</b>}<span>{c.text}</span><small className="muted">{c.author}</small></li>)}</ul></>
+              )}
+              {!!v.changes?.length && (
+                <><span className="log-tag">Mudanças no editor · {v.changes.length}</span>
+                <ul className="change-list">{v.changes.map((c, i) => { const [where, what] = c.includes(': ') ? [c.slice(0, c.indexOf(': ')), c.slice(c.indexOf(': ') + 2)] : ['', c]; return <li key={i}>{where && <b>{where}</b>}<span>{what}</span></li> })}</ul></>
+              )}
             </div>
           </li>
         )

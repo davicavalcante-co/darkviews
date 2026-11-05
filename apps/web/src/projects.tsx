@@ -14,7 +14,7 @@ function stageIndex(e: ProgressEvent) {
     case 'queued': return 0
     case 'analyzing': return 1
     case 'scripting': return 2
-    case 'media': return e.job?.stage?.includes('áudio') ? 4 : 3
+    case 'media': return e.job?.type === 'voice' ? 4 : 3
     case 'image_review': return 3
     case 'talking_head': return 1
     case 'rendering': return 5
@@ -33,7 +33,7 @@ const talkingText = (t: TalkingHeadInfo) => (t.present ? t.segments.map((s) => `
 
 const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 
-type ProjectRow = { id: string; name: string; status: ProjectStatus; targetDurationS: number; createdAt: string; owner: { name: string } }
+type ProjectRow = { id: string; name: string; status: ProjectStatus; targetDurationS: number; createdAt: string; owner: { name: string }; video: { version: number; durationS: number } | null }
 
 type ListProps = {
   isAdmin: boolean
@@ -64,21 +64,24 @@ export function ProjectList({ isAdmin, title = 'Projetos', statuses, href = (id)
       <PageHead kicker={`${rows.length} ${rows.length === 1 ? 'vídeo' : 'vídeos'}`} title={title}>
         <a className="btn" href="#/novo">+ Novo vídeo</a>
       </PageHead>
-      <div className="panel">
-        {rows.length === 0 ? <p className="muted">{empty}</p> : (
-          <div className="table-wrap"><table>
-            <thead><tr><th>Nome</th>{isAdmin && <th>Dono</th>}<th>Duração</th><th>Status</th><th>Criado em</th><th /></tr></thead>
-            <tbody>{rows.map((p) => (
-              <tr key={p.id}>
-                <td><a href={href(p.id)}><strong>{p.name}</strong></a></td>
-                {isAdmin && <td>{p.owner.name}</td>}
-                <td>{fmtDuration(p.targetDurationS)}</td>
-                <td><span className="pill"><span className={`dot ${p.status === 'approved' ? 'on' : p.status === 'failed' ? 'off' : ''}`} />{STATUS_LABEL[p.status]}</span></td>
-                <td className="muted">{new Date(p.createdAt).toLocaleDateString('pt-BR')}</td>
-                <td>{(isAdmin || p.status !== 'approved') && <button className="link" onClick={() => { setDelError(''); setToDelete(p) }}>Excluir</button>}</td>
-              </tr>))}
-            </tbody>
-          </table></div>
+      <div>
+        {rows.length === 0 ? <p className="panel muted">{empty}</p> : (
+          <div className="project-grid">{rows.map((p) => (
+            <article key={p.id} className={`project-card ${p.status}`}>
+              <a href={href(p.id)} className="project-thumb" aria-label={`Abrir ${p.name}`}>
+                {p.video ? <img src={`/api/projects/${p.id}/frame?t=2&v=${p.video.version}`} alt="" loading="lazy" /> : <span className="muted">{STATUS_LABEL[p.status]}</span>}
+                <span className="project-dur">{fmtDuration(p.video?.durationS ?? p.targetDurationS)}</span>
+              </a>
+              <div className="project-body">
+                <a href={href(p.id)} className="project-name">{p.name}</a>
+                <div className="project-meta">
+                  <span className="pill"><span className={`dot ${p.status === 'approved' ? 'on' : p.status === 'failed' ? 'off' : ''}`} />{STATUS_LABEL[p.status]}</span>
+                  <span className="muted">{new Date(p.createdAt).toLocaleDateString('pt-BR')}{isAdmin ? ` · ${p.owner.name}` : ''}</span>
+                </div>
+              </div>
+              {(isAdmin || p.status !== 'approved') && <button className="link project-del" onClick={() => { setDelError(''); setToDelete(p) }} aria-label={`Excluir ${p.name}`}>Excluir</button>}
+            </article>))}
+          </div>
         )}
       </div>
       {toDelete && (
@@ -198,10 +201,64 @@ function ImageReview({ id }: { id: string }) {
   )
 }
 
+type Timing = { stages: { type: string; status: string; elapsedS: number; estimateS: number }[]; elapsedS: number; estimateS: number }
+const STAGE_NAME: Record<string, string> = { ingest: 'Referência', analyze: 'Análise', script: 'Roteiro', media: 'Imagens', voice: 'Áudio', render: 'Vídeo' }
+const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+// Cronômetro da criação: tempo de cada etapa e estimativa total. Passou do previsto: pergunta se continua.
+function Timer({ id, running }: { id: string; running: boolean }) {
+  const [t, setT] = useState<Timing | null>(null)
+  const [tick, setTick] = useState(0)
+  const [limit, setLimit] = useState(1) // "continuar esperando" dá mais 50% de prazo
+  const [stopping, setStopping] = useState(false)
+  useEffect(() => { api<Timing>(`/projects/${id}/timing`).then(setT).catch(() => {}) }, [id, Math.floor(tick / 5)])
+  useEffect(() => { if (!running) return; const i = setInterval(() => setTick((x) => x + 1), 1000); return () => clearInterval(i) }, [running])
+  if (!t) return null
+  const live = (tick % 5) // segundos desde a última leitura do servidor
+  const runningStage = t.stages.find((s) => s.status === 'running')
+  const elapsed = t.elapsedS + (running && runningStage ? live : 0)
+  const late = running && elapsed > t.estimateS * limit
+  return (
+    <div className="timer">
+      <div className="timer-total">
+        <span><b>{mmss(elapsed)}</b><small>decorrido</small></span>
+        <span><b>{mmss(t.estimateS)}</b><small>previsto no total</small></span>
+        <span><b>{elapsed < t.estimateS ? mmss(t.estimateS - elapsed) : '—'}</b><small>falta</small></span>
+      </div>
+      <ol className="timer-stages">{t.stages.map((s) => (
+        <li key={s.type} className={s.status}>
+          <span>{STAGE_NAME[s.type] ?? s.type}</span>
+          <span className="tc">{s.status === 'pending' ? `~${mmss(s.estimateS)}` : mmss(s.elapsedS + (s.status === 'running' ? live : 0))}</span>
+        </li>
+      ))}</ol>
+      {late && (
+        <div className="notice warn-box" role="alert">
+          <p>Está levando mais do que o previsto ({mmss(elapsed)} de {mmss(t.estimateS)}). Quer continuar esperando?</p>
+          <div className="row wrap">
+            <button type="button" onClick={() => setLimit(limit + 0.5)}>Continuar esperando</button>
+            <button type="button" className="ghost-btn" disabled={stopping} onClick={async () => { setStopping(true); await api(`/projects/${id}/cancel`, { method: 'POST' }).catch(() => {}); setStopping(false) }}>
+              {stopping ? 'Parando…' : 'Parar a criação'}
+            </button>
+          </div>
+          <small className="muted">Parar termina a etapa atual e não segue para as próximas. Depois dá para tentar de novo.</small>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Saída para vídeo que falhou: explica em uma frase e repete só a etapa que deu erro.
-function Retry({ id, error }: { id: string; error: string | null }) {
+function Retry({ id, error, hasVideo }: { id: string; error: string | null; hasVideo: boolean }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
+  const [confirm, setConfirm] = useState(false)
+  async function drop() {
+    setBusy(true); setMsg('')
+    try {
+      if (hasVideo) { await api(`/projects/${id}/discard`, { method: 'POST' }); location.hash = `#/editar/${id}` }
+      else { await api(`/projects/${id}`, { method: 'DELETE' }); location.hash = '#/projetos' }
+    } catch (e) { setMsg((e as Error).message); setBusy(false) }
+  }
   return (
     <div className="retry">
       <p className="alert" role="alert"><b>Esta etapa falhou.</b> {error ? `Motivo: ${error}` : 'Abra Admin → Logs para ver o motivo.'}</p>
@@ -212,8 +269,16 @@ function Retry({ id, error }: { id: string; error: string | null }) {
           setBusy(true); setMsg('')
           try { await api(`/projects/${id}/retry`, { method: 'POST' }) } catch (e) { setMsg((e as Error).message) } finally { setBusy(false) }
         }}>{busy ? 'Enviando…' : 'Tentar de novo'}</button>
+        <button type="button" className="ghost-btn" disabled={busy} onClick={() => setConfirm(true)}>{hasVideo ? 'Descartar esta tentativa' : 'Excluir este vídeo'}</button>
       </div>
       {msg && <p className="error" role="alert">{msg}</p>}
+      <Modal open={confirm} onClose={() => setConfirm(false)} title={hasVideo ? 'Descartar esta tentativa?' : 'Excluir este vídeo?'}>
+        <p>{hasVideo ? 'O vídeo volta para a última versão pronta. O que esta tentativa fez é deixado de lado.' : 'O vídeo e tudo o que ele usou são apagados. Não dá para desfazer.'}</p>
+        <footer className="modal-actions"><span className="spacer" />
+          <button type="button" className="ghost-btn" onClick={() => setConfirm(false)}>Cancelar</button>
+          <button type="button" disabled={busy} onClick={drop}>{hasVideo ? 'Descartar' : 'Excluir'}</button>
+        </footer>
+      </Modal>
     </div>
   )
 }
@@ -253,12 +318,13 @@ export function Progress({ id }: { id: string }) {
         <div className="cards">
           <div className="panel narrow">
             {current === -1 ? (
-              <Retry id={id} error={ev.job?.error ?? null} />
+              <Retry id={id} error={ev.job?.error ?? null} hasVideo={!!detail?.video} />
             ) : (
               <>
                 <ol className="stages">{STAGES.map((s, i) => (
                   <li key={s} className={i < current ? 'done' : i === current ? 'now' : ''}>{s}</li>
                 ))}</ol>
+                <Timer id={id} running={['queued', 'running', 'paused'].includes(ev.job?.status ?? '')} />
                 <progress max={100} value={ev.job?.progress ?? 0} aria-label="Progresso da etapa" />
                 <p className="muted">
                   {ev.job?.stage ?? STAGES[current]} · {ev.job?.progress ?? 0}%

@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
-import { prisma, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
+import { estimateSeconds, prisma, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
 import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
@@ -347,6 +347,48 @@ export async function projectRoutes(app: FastifyInstance) {
     return reply.code(202).send({ retried: failed.type })
   })
 
+  // Tempo de cada etapa da criação e a estimativa total (sem contar o tempo esperando a sua aprovação das imagens).
+  app.get<{ Params: { id: string } }>('/api/projects/:id/timing', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, targetDurationS: true, options: true, jobs: { orderBy: { createdAt: 'asc' }, select: { type: true, status: true, startedAt: true, finishedAt: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    // A criação atual começa na última ingestão ou no último roteiro novo (nova versão).
+    const jobs = p.jobs.filter((j) => j.type !== 'cuts' && j.type !== 'regen_part')
+    let start = 0
+    jobs.forEach((j, i) => { if (j.type === 'ingest' || (j.type === 'script' && i > 0 && !['analyze', 'script'].includes(jobs[i - 1].type))) start = i })
+    const run = jobs.slice(start)
+    const ownVoice = String(JSON.parse(p.options).voicePreset ?? '').startsWith('studio:')
+    const now = Date.now()
+    const stages = await Promise.all(PIPELINE.filter((t) => t !== 'ingest' || run[0]?.type === 'ingest').map(async (type) => {
+      const done = run.filter((j) => j.type === type)
+      const elapsedS = done.reduce((n, j) => n + (j.startedAt ? ((j.finishedAt?.getTime() ?? now) - j.startedAt.getTime()) / 1000 : 0), 0)
+      const last = done.at(-1)
+      return { type, status: last?.status ?? 'pending', elapsedS: Math.round(elapsedS), estimateS: await stageEstimate(type, p.targetDurationS, ownVoice) }
+    }))
+    return { stages, elapsedS: stages.reduce((n, s) => n + s.elapsedS, 0), estimateS: stages.reduce((n, s) => n + s.estimateS, 0) }
+  })
+
+  // "Parar a criação": a etapa em andamento termina e nada mais segue; o vídeo fica como "Falhou" (dá para tentar de novo).
+  app.post<{ Params: { id: string } }>('/api/projects/:id/cancel', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    await prisma.$transaction([
+      prisma.job.updateMany({ where: { projectId: p.id, status: { in: ['queued', 'paused'] } }, data: { status: 'failed', error: CANCELED, finishedAt: new Date() } }),
+      prisma.job.updateMany({ where: { projectId: p.id, status: 'running' }, data: { error: CANCELED } }), // o worker vê e para ao fim da etapa
+      prisma.project.update({ where: { id: p.id }, data: { status: 'failed' } }),
+    ])
+    return { ok: true }
+  })
+
+  // Tentativa que falhou: volta para a última versão pronta do vídeo (se houver).
+  app.post<{ Params: { id: string } }>('/api/projects/:id/discard', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, _count: { select: { videoVersions: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'failed') return reply.code(409).send({ error: 'Só dá para descartar uma tentativa que falhou' })
+    if (!p._count.videoVersions) return reply.code(409).send({ error: 'Este vídeo ainda não tem versão pronta; use Excluir' })
+    await prisma.project.update({ where: { id: p.id }, data: { status: 'editing' } })
+    return { ok: true }
+  })
+
   app.delete<{ Params: { id: string } }>('/api/projects/:id', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({
       where: projectScope(req, req.params.id),
@@ -400,3 +442,15 @@ function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string
 }
 
 const RegenOrder = z.array(z.union([z.object({ id: z.string().uuid(), caption: z.string().max(200).default('') }), z.object({ new: z.literal(true), caption: z.string().max(200).default('') })])).max(200)
+
+export const CANCELED = 'Parado por você'
+const PIPELINE = ['ingest', 'analyze', 'script', 'media', 'voice', 'render'] as const
+// Estimativa de cada etapa: o histórico real desta máquina, mas nunca menos que a conta conservadora
+// (segundos fixos + segundos por minuto de vídeo). Vídeo longo demora mais, e a estimativa diz isso.
+const BASE: Record<string, [number, number]> = { ingest: [30, 15], analyze: [90, 40], script: [120, 60], media: [90, 75], voice: [40, 70], render: [60, 100] }
+async function stageEstimate(type: string, durationS: number, ownVoice: boolean) {
+  const [fixed, perMin] = type === 'voice' && ownVoice ? [60, 200] : BASE[type]
+  const floor = fixed + perMin * (durationS / 60)
+  const history = await estimateSeconds(type, durationS)
+  return Math.round(Math.max(floor * 0.8, history ?? floor))
+}

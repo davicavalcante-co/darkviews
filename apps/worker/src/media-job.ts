@@ -1,6 +1,6 @@
-import { createWriteStream } from 'node:fs'
+import { createWriteStream, existsSync } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -164,12 +164,20 @@ export async function voice(job: Job) {
   // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
   if (chosenProvider === 'studio') {
     const own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
-    await step(`Narrando com a sua voz${own ? ` "${own.name}"` : ''}`, 55)
-    for (const s of own?.profileId ? scenes.filter((x) => x.narration?.trim()) : []) {
+    const todo = own?.profileId ? scenes.filter((x) => x.narration?.trim()) : []
+    const started = Date.now()
+    for (const [n, s] of todo.entries()) {
+      // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
+      const left = n ? Math.round(((Date.now() - started) / n) * (todo.length - n) / 1000) : null
+      await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own!.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
+      // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, as cenas já narradas não são refeitas.
+      const key = createHash('sha1').update(`${own!.profileId}|${own!.speed}|${s.narration}`).digest('hex').slice(0, 16)
+      const out = join(dir, `voz-propria-${key}`)
       try {
-        const out = join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)
-        await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own!.profileId!, speed: own!.speed }))
-        await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
+        if (!existsSync(out + '.wav')) {
+          await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own!.profileId!, speed: own!.speed }))
+          await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
+        }
         directed.set(s.index, out + '.wav')
       } catch (e) {
         logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index}: ${(e as Error).message}`, details: { jobId: job.id } })

@@ -34,6 +34,21 @@ async function newMetadataVersion(projectId: string, field: string, value: strin
   })
 }
 
+// Anota o que mudou (em português, com antes → depois). O próximo render grava a lista na versão nova (aba Versões).
+async function noteChanges(projectId: string, notes: string[]) {
+  if (!notes.length) return
+  const p = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { options: true } })
+  const o = JSON.parse(p.options) as { pendingChanges?: string[] }
+  await prisma.project.update({ where: { id: projectId }, data: { options: JSON.stringify({ ...o, pendingChanges: [...(o.pendingChanges ?? []), ...notes].slice(-200) }) } })
+}
+const LABELS: Record<string, Record<string, string>> = {
+  motion: { ken_burns: 'Ken Burns', parallax: 'Parallax 2.5D', cutout: 'Recorte de revista', snap_zoom: 'Zoom rápido', static: 'Parada' },
+  easing: { ease_in_out: 'suave nas pontas', ease_in: 'começa lento', ease_out: 'termina lento', linear: 'constante' },
+  transition: { cut: 'corte seco', fade: 'dissolver', zoom_through: 'zoom através', slide_left: 'deslizar ←', slide_right: 'deslizar →', slide_up: 'deslizar ↑', slide_down: 'deslizar ↓', whip: 'chicote', punch_in: 'soco de zoom' },
+}
+const fmtS = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`
+const say = (k: string, v: unknown) => (v == null || v === '' ? 'nada' : LABELS[k]?.[String(v)] ?? String(v))
+
 export async function editRoutes(app: FastifyInstance) {
   const guard = { preHandler: requireAuth }
 
@@ -42,7 +57,7 @@ export async function editRoutes(app: FastifyInstance) {
     const p = await project(req)
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const [videos, tracks, meta, requests, job, script, audio] = await Promise.all([
-      prisma.videoVersion.findMany({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true, createdAt: true } }),
+      prisma.videoVersion.findMany({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true, createdAt: true, renderSettings: true } }),
       prisma.captionTrack.findMany({
         where: { projectId: p.id }, orderBy: { version: 'desc' },
         include: { segments: { orderBy: { startS: 'asc' }, select: { startS: true, endS: true, text: true, highlights: true } } },
@@ -60,7 +75,7 @@ export async function editRoutes(app: FastifyInstance) {
       scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, ...s }) => ({ ...s, kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
       music: audio.find((a) => a.kind === 'music') ?? null,
       options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = null, bgColor = '#111418', musicStyle = 'none' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle }))(JSON.parse(p.options)),
-      videos,
+      videos: videos.map(({ renderSettings, ...v }) => ({ ...v, changes: (JSON.parse(renderSettings).changes ?? null) as string[] | null })),
       caption: current && { ...current, segments: current.segments.map((s) => ({ ...s, highlights: JSON.parse(s.highlights) })) },
       captionVersions: tracks.map((t) => ({ version: t.version, isCurrent: t.isCurrent, createdAt: t.createdAt, fontFamily: t.fontFamily, segments: t.segments.length })),
       metadata: meta,
@@ -115,6 +130,24 @@ export async function editRoutes(app: FastifyInstance) {
     const video = await prisma.videoVersion.findFirst({ where: { projectId: p.id, isCurrent: true } })
     if (video && input.segments.some((s) => s.endS > video.durationS + 0.5)) return reply.code(400).send({ error: 'Há legenda depois do fim do vídeo' })
     const { segments, ...style } = input
+    const prev = await prisma.captionTrack.findFirst({ where: { projectId: p.id, isCurrent: true }, include: { segments: { orderBy: { startS: 'asc' } } } })
+    if (prev) {
+      const notes: string[] = []
+      const NAMES: Record<string, string> = { fontFamily: 'fonte', fontWeight: 'peso', size: 'tamanho', color: 'cor', highlightColor: 'cor do destaque', highlightMode: 'modo de destaque', position: 'posição', outline: 'traçado' }
+      for (const [k, v] of Object.entries(style)) if (String(prev[k as keyof typeof prev]) !== String(v)) notes.push(`Legenda · ${NAMES[k] ?? k}: ${String(prev[k as keyof typeof prev])} → ${String(v)}`)
+      const was = new Map(prev.segments.map((g) => [g.startS.toFixed(1), g]))
+      const now = [...segments].sort((a, b) => a.startS - b.startS)
+      for (const g of now) {
+        const o = was.get(g.startS.toFixed(1))
+        if (!o) notes.push(`Legenda · nova linha em ${fmtS(g.startS)}: "${g.text}"`)
+        else if (o.text !== g.text) notes.push(`Legenda · ${fmtS(g.startS)}: "${o.text}" → "${g.text}"`)
+        else if (Math.abs(o.endS - g.endS) > 0.05) notes.push(`Legenda · ${fmtS(g.startS)}: fim ${fmtS(o.endS)} → ${fmtS(g.endS)}`)
+        else if (o.highlights !== JSON.stringify(g.highlights)) notes.push(`Legenda · ${fmtS(g.startS)}: destaque de palavras em "${g.text}"`)
+      }
+      const kept = new Set(now.map((g) => g.startS.toFixed(1)))
+      for (const o of prev.segments) if (!kept.has(o.startS.toFixed(1))) notes.push(`Legenda · apagada a linha de ${fmtS(o.startS)}: "${o.text}"`)
+      await noteChanges(p.id, notes)
+    }
     const track = await prisma.$transaction(async (tx) => {
       const last = await tx.captionTrack.aggregate({ where: { projectId: p.id }, _max: { version: true } })
       await tx.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } })
@@ -178,8 +211,10 @@ export async function editRoutes(app: FastifyInstance) {
     if (!EDITABLE.includes(p.status)) return reply.code(409).send({ error: 'O vídeo ainda está sendo criado' })
     if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
     const on = (req.body as { on?: boolean } | null)?.on !== false
+    if (on !== (JSON.parse(p.options).captionsOn === true)) await noteChanges(p.id, [on ? 'Legenda ligada no vídeo' : 'Legenda tirada do vídeo'])
     await prisma.$transaction([
-      prisma.project.update({ where: { id: p.id }, data: { status: 'rendering', options: JSON.stringify({ ...JSON.parse(p.options), captionsOn: on }) } }),
+      // Lê de novo: a anotação acima já mudou as opções.
+      prisma.project.update({ where: { id: p.id }, data: { status: 'rendering', options: JSON.stringify({ ...JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: p.id }, select: { options: true } })).options), captionsOn: on }) } }),
       prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila', payload: JSON.stringify({ captionsOnly: true }) } }),
     ])
     return reply.code(202).send({ captionsOn: on })
@@ -191,8 +226,14 @@ export async function editRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const data = ScenePatch.parse(req.body)
     const script = await prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { id: true } })
-    const { count } = await prisma.scene.updateMany({ where: { scriptId: script?.id ?? '', index: Number(req.params.index) }, data })
-    return count ? { ok: true } : reply.code(404).send({ error: 'Cena não encontrada' })
+    const where = { scriptId: script?.id ?? '', index: Number(req.params.index) }
+    const before = await prisma.scene.findFirst({ where })
+    if (!before) return reply.code(404).send({ error: 'Cena não encontrada' })
+    await prisma.scene.updateMany({ where, data })
+    const n = Number(req.params.index) + 1, names = { onScreenText: 'enunciado', motion: 'motion', easing: 'curva do movimento', transition: 'transição' } as const
+    await noteChanges(p.id, (Object.keys(data) as (keyof typeof names)[]).filter((k) => data[k] !== undefined && (before[k] ?? null) !== (data[k] ?? null))
+      .map((k) => k === 'onScreenText' ? `Cena ${n} · enunciado: "${before.onScreenText ?? ''}" → "${data.onScreenText ?? ''}"` : `Cena ${n} · ${names[k]}: ${say(k, before[k])} → ${say(k, data[k])}`))
+    return { ok: true }
   })
 
   // Editor: opções gerais do vídeo (volume da trilha e dos efeitos, estilo dos enunciados, cor de fundo).
@@ -201,8 +242,17 @@ export async function editRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const patch = OptionsPatch.parse(req.body)
     if (patch.titleStyle && !(await enabledFonts()).includes(patch.titleStyle.fontFamily)) return reply.code(400).send({ error: 'Fonte não liberada pelo admin' })
+    const old = { musicVolume: 35, sfxVolume: 55, musicStyle: 'none', ...JSON.parse(p.options) } as Record<string, unknown>
+    const ts = (t: unknown) => { const x = t as { fontFamily: string; size: number; color: string; bandColor: string } | null; return x ? `${x.fontFamily}, tamanho ${x.size}, texto ${x.color}, faixa ${x.bandColor}` : 'padrão' }
+    const notes: string[] = []
+    if (patch.musicStyle !== undefined && patch.musicStyle !== old.musicStyle) notes.push(`Trilha: ${MUSIC_STYLES.find((m) => m.id === old.musicStyle)?.label ?? 'nenhuma'} → ${MUSIC_STYLES.find((m) => m.id === patch.musicStyle)?.label}`)
+    if (patch.musicVolume !== undefined && patch.musicVolume !== old.musicVolume) notes.push(`Volume da trilha: ${old.musicVolume}% → ${patch.musicVolume}%`)
+    if (patch.sfxVolume !== undefined && patch.sfxVolume !== old.sfxVolume) notes.push(`Efeitos sonoros: ${old.sfxVolume}% → ${patch.sfxVolume}%`)
+    if (patch.titleStyle && JSON.stringify(patch.titleStyle) !== JSON.stringify(old.titleStyle ?? null)) notes.push(`Estilo dos enunciados: ${ts(old.titleStyle)} → ${ts(patch.titleStyle)}`)
+    if (patch.bgColor && patch.bgColor !== old.bgColor) notes.push(`Cor do fundo: ${old.bgColor ?? 'padrão'} → ${patch.bgColor}`)
     // Estilo novo de trilha: o próximo render busca outra música.
     await prisma.project.update({ where: { id: p.id }, data: { options: JSON.stringify({ ...JSON.parse(p.options), ...patch, ...(patch.musicStyle && { musicPicked: null }) }) } })
+    await noteChanges(p.id, notes)
     return { ok: true }
   })
 

@@ -101,3 +101,29 @@ describe('editor em camadas', () => {
     expect(edit.scenes[0]).toMatchObject({ onScreenText: 'Novo título', kind: 'card' })
   })
 })
+
+describe('aba Versões: o que mudou fica anotado', () => {
+  it('cena, opções e legenda anotam antes → depois', async () => {
+    await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/scenes/0`, headers: dono, payload: { motion: 'snap_zoom' } })
+    await app.inject({ method: 'PATCH', url: `/api/projects/${projectId}/options`, headers: dono, payload: { musicVolume: 20 } })
+    const notes = JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).options).pendingChanges as string[]
+    expect(notes).toContain('Cena 1 · motion: Parallax 2.5D → Zoom rápido')
+    expect(notes.some((n) => n.startsWith('Volume da trilha:') && n.endsWith('→ 20%'))).toBe(true)
+  })
+})
+
+describe('criação: tempo, parar e descartar', () => {
+  it('estima cada etapa, para a criação e descarta a tentativa que falhou', async () => {
+    const t = (await app.inject({ url: `/api/projects/${projectId}/timing`, headers: dono })).json()
+    expect(t.estimateS).toBeGreaterThan(0)
+    expect(t.stages.map((s: { type: string }) => s.type)).toContain('render')
+    await prisma.job.create({ data: { projectId, type: 'render', status: 'queued', stage: 'Na fila' } })
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/cancel`, headers: dono })).statusCode).toBe(200)
+    expect((await prisma.job.findFirstOrThrow({ where: { projectId, type: 'render' }, orderBy: { createdAt: 'desc' } })).status).toBe('failed')
+    // Sem versão pronta não dá para descartar; com versão, volta para a edição.
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/discard`, headers: dono })).statusCode).toBe(409)
+    await prisma.videoVersion.create({ data: { projectId, version: 1, filePath: '/x.mp4', durationS: 10, renderSettings: '{}' } })
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${projectId}/discard`, headers: dono })).statusCode).toBe(200)
+    expect((await prisma.project.findUniqueOrThrow({ where: { id: projectId } })).status).toBe('editing')
+  })
+})
