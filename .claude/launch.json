@@ -1,0 +1,1 @@
+{ "version": "0.0.1", "configurations": [ { "name": "sistema", "runtimeExecutable": "sh", "runtimeArgs": ["-c", "PORT=3333 pnpm dev"], "port": 5173 } ] }
