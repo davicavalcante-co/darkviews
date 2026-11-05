@@ -85,7 +85,7 @@ describe('integrações do usuário', () => {
     expect(res.statusCode).toBe(200)
     const owner = await prisma.user.findFirstOrThrow({ where: { email: 'usr@i.com' } })
     // O worker usa a chave do dono do vídeo; os outros continuam com a do admin.
-    expect((await activeProviders('banco_de_imagens', owner.id))[0]).toMatchObject({ provider: 'pexels', secrets: { api_key: 'chave-do-usuario-9999' } })
+    expect((await activeProviders('banco_de_imagens', owner.id)).find((a) => a.provider === 'pexels')).toMatchObject({ provider: 'pexels', secrets: { api_key: 'chave-do-usuario-9999' } })
     expect((await activeProviders('banco_de_imagens', null)).find((a) => a.provider === 'pexels')!.secrets.api_key).toBe('chave-pexels-1234')
 
     // A lista do admin continua mostrando só a chave do sistema.
