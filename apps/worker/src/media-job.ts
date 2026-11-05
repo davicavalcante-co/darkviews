@@ -32,7 +32,7 @@ async function download(url: string, dir: string) {
   return { path: tmp, ...type }
 }
 
-const BANK_NAMES: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse' }
+const BANK_NAMES: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
 
 const Choices = z.object({ choices: z.array(z.object({ scene: z.number().int(), candidate: z.number().int().min(0) })) })
 
@@ -52,9 +52,9 @@ export async function media(job: Job) {
   const wanted = script.scenes.filter((s) => !s.assetId && s.searchQuery && JSON.parse(s.searchQuery).type === 'stock')
   const found = new Map<number, StockCandidate[]>()
   for (const [i, s] of wanted.entries()) {
-    const q = JSON.parse(s.searchQuery!) as { queries: string[]; kind: 'image' | 'video'; orientation: string; rejected?: string[] }
+    const q = JSON.parse(s.searchQuery!) as { queries: string[]; levels?: number[]; kind: 'image' | 'video'; orientation: string; rejected?: string[] }
     const rejected = new Set(q.rejected ?? [])
-    found.set(s.index, (await searchStock(q.queries, q.kind, q.orientation, project.ownerId)).filter((c) => !rejected.has(`${c.provider}:${c.sourceId}`)))
+    found.set(s.index, (await searchStock(q.queries, q.kind, q.orientation, project.ownerId, q.levels)).filter((c) => !rejected.has(`${c.provider}:${c.sourceId}`)))
     await step('Buscando imagens', 5 + Math.round((i / Math.max(wanted.length, 1)) * 25))
   }
 
@@ -67,11 +67,11 @@ export async function media(job: Job) {
     const out = await askClaude({
       jobId: job.id, cwd: dir, effort: 'low', schema: Choices, model: LIGHT_MODEL, maxTurns: 3,
       prompt: [
-        'Escolha a melhor opção de banco de imagens para cada cena de um vídeo. Considere o texto da cena, a descrição de cada opção e as cores.',
+        'Escolha a melhor imagem para cada cena de um vídeo. Prefira a mais fiel ao que é dito: nível 1 (exato) antes do 2, do 3 e do 4. Só desça de nível se a descrição mostrar que a opção não serve. Pessoa famosa citada: a foto dela. Produto citado: a foto do próprio produto (mesma marca e modelo), nunca um parecido ou genérico. Considere também as cores.',
         style ? `Paleta e estilo desejados: ${JSON.stringify({ palette: style.palette, tone: style.tone })}` : '',
         ...toChoose.map(([idx, cands]) => {
           const s = script.scenes.find((x) => x.index === idx)!
-          return `Cena ${idx}: "${s.narration ?? ''}"\n${cands.map((c, j) => `  opção ${j}: ${c.kind}, ${c.description}${c.color ? `, cor ${c.color}` : ''}`).join('\n')}`
+          return `Cena ${idx}: "${s.narration ?? ''}"\n${cands.map((c, j) => `  opção ${j} (nível ${c.level ?? 4}): ${c.kind}, ${c.description}${c.color ? `, cor ${c.color}` : ''}`).join('\n')}`
         }),
       ].join('\n\n'),
     })
@@ -115,7 +115,9 @@ export async function media(job: Job) {
   }
 
   // Para aqui e espera o usuário aprovar as imagens do banco (tela de Andamento). Sem imagens de banco, segue direto.
-  const stock = await prisma.scene.count({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } } })
+  // Só para de novo se sobrou imagem de banco sem aprovar (as aprovadas antes não voltam para a aprovação).
+  const stock = (await prisma.scene.findMany({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { searchQuery: true } }))
+    .filter((s) => !(s.searchQuery && JSON.parse(s.searchQuery).approved === true)).length
   if (stock) {
     await prisma.project.update({ where: { id: project.id }, data: { status: 'image_review' } })
   } else {

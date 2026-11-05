@@ -57,7 +57,16 @@ export async function script(job: Job) {
       options.useStock === false && images.length
         ? 'O cliente pediu para usar SÓ as imagens dele: não use banco de imagens. Repita as imagens dele quando faltar, variando a ordem e a transição.'
         : '',
-      'Para cenas sem imagem do cliente, use banco de imagens/vídeos com 2 a 3 termos de busca em inglês. Use quadro de texto só quando nada servir. Não use pessoas de banco para representar clientes reais.',
+      [
+        'Para cenas sem imagem do cliente, busque a imagem mais fiel possível ao que está sendo dito, em níveis (do mais específico ao mais genérico), 1 ou 2 termos por nível, e preencha "levels" com o nível de cada termo:',
+        'nível 1: exatamente o que é dito, com o nome real (ex.: fala sobre Vini Jr chorando → "Vinicius Junior chorando", "Vinicius Junior crying");',
+        'nível 2: relação direta que explica bem o que é dito (ex.: "Vinicius Junior cabeça baixa", "Vinicius Junior triste sério");',
+        'nível 3: relação indireta, mas dentro do assunto (ex.: "Vinicius Junior Real Madrid");',
+        'nível 4: pouca relação direta (ex.: "jogador de futebol triste").',
+        'Pessoa famosa citada (de qualquer área): sempre o nome real dela nos níveis 1 a 3, em português e em inglês. Fatos, jogos, lugares e marcas: o nome real também. Seja específico e realista.',
+        'Produto citado: a foto do próprio produto, nunca uma imagem que só lembre ele. Use marca + nome + modelo/versão exatos nos níveis 1 a 3 (ex.: "iPhone 15 Pro Max titânio natural", "Nike Air Jordan 1 Chicago", "Açaí Só a Papa Sabor do Norte embalagem"); nível 4 só a categoria do produto.',
+        'Use quadro de texto só quando nada servir. Não use pessoas de banco para representar clientes reais.',
+      ].join(' '),
       options.talkingHead === 'upload' && talkingVideo
         ? 'Nos trechos em que a referência mostra uma pessoa falando para a câmera, use media.type "user_video" (o vídeo do cliente, sem som, com a legenda passando).'
         : options.talkingHead === 'stock'

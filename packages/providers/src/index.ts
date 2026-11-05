@@ -12,6 +12,7 @@ import { PROVIDERS, type IntegrationCategory } from '@corte/shared'
 const run = promisify(execFile)
 
 export type StockCandidate = {
+  level?: number // 1 = fiel ao que é dito … 4 = pouca relação
   provider: string; sourceId: string; kind: 'image' | 'video'; url: string; pageUrl: string
   altUrl?: string // versão menor, tentada se a principal falhar
   description: string; color: string | null; author: string; license: string; durationS?: number
@@ -86,28 +87,74 @@ async function openverse(_a: Active, query: string, kind: 'image' | 'video', ori
     color: null, author: r.creator ?? 'autor desconhecido', license: `CC ${String(r.license).toUpperCase()} ${r.license_version ?? ''}`.trim(),
   }))
 }
+
+// Serper: resultados do Google Imagens. Sem licença garantida, por isso fica por último na fila.
+async function serper(a: Active, query: string, kind: 'image' | 'video', orientation: string): Promise<StockCandidate[]> {
+  if (kind === 'video') return []
+  const res = await fetch('https://google.serper.dev/images', {
+    method: 'POST', headers: { 'X-API-KEY': a.secrets.api_key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ q: query, gl: 'br', hl: 'pt-br', num: 20 }), signal: AbortSignal.timeout(20_000),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const d = (await res.json()) as any
+  const fits = (i: any) => !i.imageWidth || !i.imageHeight || (orientation === 'portrait' ? i.imageHeight >= i.imageWidth : orientation === 'square' ? true : i.imageWidth >= i.imageHeight)
+  return (d.images ?? []).filter((i: any) => i.imageUrl && fits(i)).slice(0, 5).map((i: any) => ({
+    provider: 'serper', sourceId: i.imageUrl, kind, url: i.imageUrl, altUrl: i.thumbnailUrl, pageUrl: i.link ?? i.imageUrl, description: i.title || query,
+    color: null, author: i.source ?? i.domain ?? 'Google Imagens', license: 'Sem licença verificada',
+  }))
+}
+// Imagens da web (DuckDuckGo, sem chave): fotos reais de pessoas e fatos. Têm dono: a licença diz isso.
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'
+async function web(_a: Active, query: string, kind: 'image' | 'video', orientation: string): Promise<StockCandidate[]> {
+  if (kind === 'video') return []
+  const page = await (await fetch(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`, { headers: { 'User-Agent': BROWSER_UA }, signal: AbortSignal.timeout(15_000) })).text()
+  const vqd = /vqd=["']?([\d-]+)/.exec(page)?.[1]
+  if (!vqd) throw new Error('busca na web indisponível agora')
+  const res = await fetch(`https://duckduckgo.com/i.js?l=br-pt&o=json&q=${encodeURIComponent(query)}&vqd=${vqd}&f=,,,,,&p=-1`, { headers: { 'User-Agent': BROWSER_UA, Referer: 'https://duckduckgo.com/' }, signal: AbortSignal.timeout(15_000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const d = (await res.json()) as any
+  const fits = (i: any) => orientation === 'portrait' ? i.height >= i.width : orientation === 'square' ? true : i.width >= i.height * 1.1
+  // Fotos grandes primeiro (as pequenas ficam borradas em 1080p).
+  return (d.results ?? []).filter((i: any) => i.image && i.width >= 800 && fits(i)).slice(0, 6).map((i: any) => ({
+    provider: 'web', sourceId: i.image, kind, url: i.image, altUrl: i.thumbnail, pageUrl: i.url ?? i.image, description: i.title || query,
+    color: null, author: i.source || new URL(i.url ?? i.image).hostname, license: 'Direitos autorais do dono (não verificado)',
+  }))
+}
+
+// Wikimedia Commons (sem chave): fotos reais de pessoas famosas, lugares e eventos, com licença livre.
+async function wikimedia(_a: Active, query: string, kind: 'image' | 'video', _orientation: string): Promise<StockCandidate[]> {
+  if (kind === 'video') return []
+  const d = await getJson(`https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrnamespace=6&gsrlimit=6&gsrsearch=${encodeURIComponent(`${query} filetype:bitmap`)}&prop=imageinfo&iiprop=url|extmetadata|size&iiurlwidth=1920`,
+    { 'User-Agent': 'Darkviews/1.0 (local video tool)' })
+  return Object.values(d.query?.pages ?? {}).filter((p: any) => p.imageinfo?.[0]?.width >= 800).map((p: any) => {
+    const i = p.imageinfo[0], m = i.extmetadata ?? {}
+    return {
+      provider: 'wikimedia', sourceId: String(p.pageid), kind, url: i.thumburl ?? i.url, altUrl: i.url, pageUrl: i.descriptionurl,
+      description: String(m.ImageDescription?.value ?? p.title).replace(/<[^>]+>/g, '').slice(0, 160), color: null,
+      author: String(m.Artist?.value ?? 'Wikimedia Commons').replace(/<[^>]+>/g, '').slice(0, 80), license: String(m.LicenseShortName?.value ?? 'Wikimedia Commons'),
+    }
+  })
+}
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const STOCK: Record<string, typeof pexels> = { pexels, pixabay, openverse }
+const STOCK: Record<string, typeof pexels> = { pexels, pixabay, openverse, serper, web, wikimedia }
 
-// Tenta cada banco por prioridade; se um falhar ou estourar a cota, vai para o próximo.
-// Até 5 opções do banco principal e 2 de reserva de cada um dos outros (se o download do principal falhar, a cena não fica vazia).
-export async function searchStock(queries: string[], kind: 'image' | 'video', orientation: string, userId?: string | null) {
-  const all: StockCandidate[] = []
-  for (const a of await activeProviders('banco_de_imagens', userId)) {
-    const max = all.length ? 2 : 5
-    try {
-      const found: StockCandidate[] = []
-      for (const q of queries) {
-        for (const c of await STOCK[a.provider](a, q, kind, orientation)) if (!found.some((f) => f.sourceId === c.sourceId)) found.push(c)
-        if (found.length >= max) break
-      }
-      all.push(...found.slice(0, max))
-    } catch (e) {
-      warn(a.provider, (e as Error).message, userId)
+// Busca por níveis: os termos vêm do mais fiel (nível 1) ao mais genérico (nível 4). Para cada termo, tenta as fontes
+// por prioridade (web e Wikimedia antes dos bancos de foto genérica) e para quando já tem opções suficientes.
+// As opções voltam em ordem de nível: a escolha prefere a mais fiel.
+export async function searchStock(queries: string[], kind: 'image' | 'video', orientation: string, userId?: string | null, levels: number[] = []) {
+  const all: (StockCandidate & { level: number })[] = []
+  const providers = await activeProviders('banco_de_imagens', userId)
+  for (const [k, q] of queries.entries()) {
+    const level = levels[k] ?? Math.min(4, k + 1)
+    for (const a of providers) {
+      try {
+        for (const c of (await STOCK[a.provider](a, q, kind, orientation)).slice(0, 3)) if (!all.some((f) => f.url === c.url)) all.push({ ...c, level })
+      } catch (e) { warn(a.provider, (e as Error).message, userId) }
     }
+    if (all.length >= 8) break
   }
-  return all
+  return all.sort((x, y) => x.level - y.level)
 }
 
 // ---------- voz ----------
@@ -319,6 +366,7 @@ export async function testIntegration(provider: string, secrets: Record<string, 
   try {
     if (provider === 'pexels') await pexels(a, 'coffee', 'image', 'landscape')
     else if (provider === 'pixabay') await pixabay(a, 'coffee', 'image', 'landscape')
+    else if (provider === 'serper') { if (!(await serper(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'openverse') { if (!(await openverse(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'elevenlabs') await getJson('https://api.elevenlabs.io/v1/user', { 'xi-api-key': secrets.api_key })
     else if (provider === 'openai_tts') await getJson('https://api.openai.com/v1/models/gpt-4o-mini-tts', { authorization: `Bearer ${secrets.api_key}` })

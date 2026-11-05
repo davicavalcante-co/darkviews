@@ -278,7 +278,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
 
   // ---------- Aprovação das imagens (antes da narração) ----------
-  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse' }
+  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
   // A referência tem uma pessoa falando: o cliente escolhe vídeo de banco (JSON {choice:'stock'}) ou envia o vídeo dele (multipart, campo "video").
   app.post<{ Params: { id: string } }>('/api/projects/:id/talking-head', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
@@ -302,11 +302,12 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const scenes = await prisma.scene.findMany({
       where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, orderBy: { index: 'asc' },
-      select: { index: true, narration: true, asset: { select: { id: true, kind: true, sourceProvider: true, attribution: true } } },
+      select: { index: true, narration: true, searchQuery: true, asset: { select: { id: true, kind: true, sourceProvider: true, attribution: true, license: true } } },
     })
     return {
       status: p.status,
-      scenes: scenes.map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution })),
+      // Só as que ainda não foram aprovadas: as aprovadas numa rodada anterior já esperam pela narração.
+      scenes: scenes.filter((s) => !approvedScene(s.searchQuery)).map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution, copyright: /não verificad|sem licença/i.test(s.asset!.license ?? '') })),
     }
   })
 
@@ -326,10 +327,16 @@ export async function projectRoutes(app: FastifyInstance) {
     if (p.status !== 'image_review') return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     const { rejected } = ReviewInput.parse(req.body)
     const scenes = await prisma.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', index: { in: rejected } }, include: { asset: true } })
-    const ok = await advance(p.id, 'image_review', { status: 'media' }, scenes.length ? 'media' : 'voice', (tx) => Promise.all(scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
-      const q = JSON.parse(s.searchQuery!)
-      return tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
-    })))
+    // As que estavam nesta rodada e não foram recusadas ficam aprovadas de vez.
+    const pending = (await prisma.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { id: true, index: true, searchQuery: true } }))
+      .filter((s) => !approvedScene(s.searchQuery) && !rejected.includes(s.index))
+    const ok = await advance(p.id, 'image_review', { status: 'media' }, scenes.length ? 'media' : 'voice', (tx) => Promise.all([
+      ...scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
+        const q = JSON.parse(s.searchQuery!)
+        return tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
+      }),
+      ...pending.map((s) => tx.scene.update({ where: { id: s.id }, data: { searchQuery: JSON.stringify({ ...(s.searchQuery ? JSON.parse(s.searchQuery) : {}), approved: true }) } })),
+    ]))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
   })
@@ -502,3 +509,6 @@ async function stageEstimate(type: string, durationS: number, ownVoice: boolean)
   const history = await estimateSeconds(type, durationS)
   return Math.round(Math.max(floor * 0.8, history ?? floor))
 }
+
+// Imagem já aprovada numa rodada anterior da aprovação (fica guardada na busca da cena).
+export const approvedScene = (searchQuery: string | null) => !!searchQuery && (JSON.parse(searchQuery) as { approved?: boolean }).approved === true
