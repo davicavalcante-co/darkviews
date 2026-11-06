@@ -6,6 +6,7 @@ import { logEvent, prisma, STORAGE_DIR } from '@corte/db'
 import { AnalysisDetails, StyleProfile } from '@corte/shared'
 import { researchKit, youtubeStats } from '@corte/providers'
 import { askClaude } from './claude.js'
+import { deadline } from './deadline.js'
 import { FFMPEG, run } from './ffmpeg.js'
 import { download, probeDuration } from './ingest.js'
 import { contactSheet, detectScenes, transcribe } from './media.js'
@@ -16,12 +17,13 @@ const Result = z.object({ profile: StyleProfile, details: AnalysisDetails })
 export async function runNextAnalysis(workerJobId: string | null) {
   const next = await prisma.videoAnalysis.findFirst({ where: { status: 'queued' }, orderBy: { createdAt: 'asc' } })
   if (!next) return false
-  const { count } = await prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'queued' }, data: { status: 'running', stage: 'Baixando o vídeo', error: null } })
+  const { count } = await prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'queued' }, data: { status: 'running', stage: 'Baixando o vídeo', error: null, startedAt: new Date(), finishedAt: null } })
   if (!count) return true
-  const stage = (s: string) => prisma.videoAnalysis.update({ where: { id: next.id }, data: { stage: s } })
+  const stage = (s: string) => prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'running' }, data: { stage: s } })
   const dir = await mkdtemp(join(tmpdir(), 'darkviews-analise-'))
   let video: string | null = null
   try {
+    await deadline((async () => {
     const got = await download(next.url)
     video = got.path
     const durationS = (await probeDuration(video)) ?? 0
@@ -30,7 +32,7 @@ export async function runNextAnalysis(workerJobId: string | null) {
     await mkdir(thumbs, { recursive: true })
     const thumbPath = join(thumbs, `${next.id}.jpg`)
     await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.min(3, durationS * 0.1)), '-i', video, '-frames:v', '1', '-vf', 'scale=960:-2', thumbPath])
-    await prisma.videoAnalysis.update({ where: { id: next.id }, data: { title: got.title, channel: got.channel, durationS, thumbPath } })
+    await prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'running' }, data: { title: got.title, channel: got.channel, durationS, thumbPath } })
 
     await stage('Detectando cortes e transições')
     const cuts = await detectScenes(video)
@@ -55,11 +57,12 @@ export async function runNextAnalysis(workerJobId: string | null) {
         'Responda em português do Brasil.',
       ].filter(Boolean).join('\n\n'),
     })
-    await prisma.videoAnalysis.update({ where: { id: next.id }, data: { status: 'done', stage: null, profile: JSON.stringify({ ...out.profile, transcriptAvailable: !!transcript }), details: JSON.stringify(out.details) } })
+    await prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'running' }, data: { status: 'done', stage: null, finishedAt: new Date(), profile: JSON.stringify({ ...out.profile, transcriptAvailable: !!transcript }), details: JSON.stringify(out.details) } })
+    })(), 45)
   } catch (e) {
     const message = (e as Error).message
     logEvent({ level: 'error', source: 'worker', kind: 'job', message: `análise de vídeo falhou: ${message}`, details: { analysisId: next.id } })
-    await prisma.videoAnalysis.update({ where: { id: next.id }, data: { status: 'failed', stage: null, error: message.slice(0, 500) } })
+    await prisma.videoAnalysis.updateMany({ where: { id: next.id, status: 'running' }, data: { status: 'failed', stage: null, finishedAt: new Date(), error: message.slice(0, 500) } })
   } finally {
     await rm(dir, { recursive: true, force: true })
     if (video) await rm(video, { force: true })

@@ -88,3 +88,12 @@ export function FontSelect({ value, fonts, onChange, label = 'Fonte das legendas
     </div>
   )
 }
+
+// Cronômetro m:ss. Enquanto roda, conta até agora (o componente pai atualiza a cada segundo).
+export const clock = (ms: number) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` }
+export const elapsed = (r: { startedAt: string | null; finishedAt: string | null }, now: number) => r.startedAt ? clock((r.finishedAt ? Date.parse(r.finishedAt) : now) - Date.parse(r.startedAt)) : null
+export function useNow(on: boolean | undefined) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { if (!on) return; const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i) }, [on])
+  return now
+}
