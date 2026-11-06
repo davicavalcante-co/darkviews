@@ -7,6 +7,7 @@ import { media, voice } from './media-job.js'
 import { render } from './render.js'
 import { regenPart } from './regen-part.js'
 import { cuts } from './cuts.js'
+import { runNextAnalysis } from './video-analysis.js'
 import { ClaudeUnavailable, recordStatus } from './claude.js'
 import { checkClaude, holdLongVideo } from './claude-check.js'
 
@@ -24,7 +25,7 @@ async function runOne() {
   // Jobs pausados pelo limite do Claude voltam sozinhos para a fila no horário de reinício.
   await prisma.job.updateMany({ where: { status: 'paused', resumeAt: { lte: new Date() } }, data: { status: 'queued', resumeAt: null } })
   const job = await claimNextJob(WORKER_ID, Object.keys(HANDLERS))
-  if (!job) return false
+  if (!job) return runNextAnalysis(null) // sem vídeo na fila: faz as análises da aba Análise
   // Jobs que usam o Claude: vídeo longo espera se a sessão estiver perto do limite.
   if (['analyze', 'script', 'regen_part'].includes(job.type)) {
     const until = await holdLongVideo(job.projectId)

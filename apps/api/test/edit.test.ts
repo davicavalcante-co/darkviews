@@ -213,3 +213,21 @@ describe('aprovação do roteiro', () => {
     expect((await prisma.job.findFirstOrThrow({ where: { projectId, status: 'queued' } })).type).toBe('media')
   })
 })
+
+describe('aba Análise', () => {
+  it('cria a análise pelo link, abre os detalhes e usa o estilo num vídeo novo (direto para o roteiro)', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/analyses', headers: dono, payload: { url: 'https://exemplo.com/x' } })).statusCode).toBe(400)
+    const a = (await app.inject({ method: 'POST', url: '/api/analyses', headers: dono, payload: { url: 'https://www.youtube.com/watch?v=abc123' } })).json()
+    expect(a).toMatchObject({ status: 'queued', platform: 'youtube' })
+    expect((await app.inject({ url: `/api/analyses/${a.id}`, headers: outro })).statusCode).toBe(404)
+    await prisma.videoAnalysis.update({ where: { id: a.id }, data: { status: 'done', title: 'Vídeo X', profile: JSON.stringify({ pacing: 'rápido' }), details: JSON.stringify({ summary: 'ok' }) } })
+    expect((await app.inject({ url: `/api/analyses/${a.id}`, headers: dono })).json().details.summary).toBe('ok')
+    const form = new FormData()
+    for (const [k, v] of Object.entries({ name: 'Do estilo', prompt: 'Vídeo novo', targetDurationS: '60', analysisId: a.id })) form.append(k, v)
+    const req = new Request('http://x', { method: 'POST', body: form })
+    const res = await app.inject({ method: 'POST', url: '/api/projects', headers: { ...dono, 'content-type': req.headers.get('content-type')! }, payload: Buffer.from(await req.arrayBuffer()) })
+    expect(res.statusCode).toBe(201)
+    const p = await prisma.project.findUniqueOrThrow({ where: { id: res.json().id }, include: { reference: true, jobs: true } })
+    expect([p.status, p.jobs.map((j) => j.type), p.reference?.sourceType, p.reference?.styleProfile]).toEqual(['scripting', ['script'], 'analysis', JSON.stringify({ pacing: 'rápido' })])
+  })
+})

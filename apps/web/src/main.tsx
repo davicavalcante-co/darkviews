@@ -12,6 +12,7 @@ import { MyIntegrations } from './integrations'
 import { EditPage } from './edit'
 import { ApprovePage } from './approve'
 import { VoicesPage } from './voices'
+import { AnalysesPage } from './analyses'
 import './style.css'
 
 type Session = { user: PublicUser; csrfToken: string }
@@ -112,7 +113,8 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
   // Cada item fica ativo também nas telas que pertencem a ele (ex.: #/editar/:id está dentro de Edição).
   const items = [
     { href: '#/', label: 'Painel', icon: 'painel', match: (h: string) => h === '' || h === '#/' },
-    { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h === '#/novo' },
+    { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h.startsWith('#/novo') },
+    { href: '#/analises', label: 'Análise', icon: 'analise', match: (h: string) => h === '#/analises' },
     { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') || h.startsWith('#/editar/') },
     { href: '#/aprovados', label: 'Aprovados', icon: 'aprovacao', match: (h: string) => h === '#/aprovados' || h.startsWith('#/aprovar/') },
     { href: '#/vozes', label: 'Vozes', icon: 'vozes', match: (h: string) => h === '#/vozes' },
@@ -166,7 +168,8 @@ function App() {
         onLogout={() => api('/auth/logout', { method: 'POST' }).finally(() => accept(null))} />
       <main>
         <div className="top-bar"><ThemeToggle /><ClaudePill isAdmin={isAdmin} /></div>
-        {hash === '#/novo' ? <NewVideo />
+        {hash.startsWith('#/novo') ? <NewVideo key={hash} />
+          : hash === '#/analises' ? <AnalysesPage />
           : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />
           : hash === '#/vozes' ? <VoicesPage />
           : hash === '#/projetos' ? <ProjectList isAdmin={isAdmin} />

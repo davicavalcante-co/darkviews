@@ -63,6 +63,7 @@ export const CAPTION_POSITION = /^(top|middle|bottom)(-(left|center|right))?$/
 export const NewProjectInput = z.object({
   name: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(5000),
+  analysisId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)), // estilo vindo da aba Análise
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
   targetDurationS: z.coerce.number().int().min(15).max(MAX_DURATION_S, 'Máximo de 18 minutos'),

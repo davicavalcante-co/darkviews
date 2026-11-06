@@ -25,6 +25,31 @@ export const StyleProfile = z.object({
 })
 export type StyleProfile = z.infer<typeof StyleProfile>
 
+const Moment = z.object({ timeS: z.number().describe('Segundo do vídeo'), text: z.string() })
+// Análise completa de um vídeo (aba Análise): tudo o que dá para aprender e copiar do estilo.
+export const AnalysisDetails = z.object({
+  summary: z.string().describe('Do que o vídeo trata e por que funciona, em 2 a 4 frases'),
+  audience: z.string().describe('Para quem é e o que prende esse público'),
+  hook: z.object({ timeS: z.number(), text: z.string().describe('O gancho, como foi dito ou mostrado'), why: z.string().describe('Por que ele prende') }),
+  script: z.object({
+    structure: z.array(z.string()).describe('Partes do roteiro na ordem, com o tempo aproximado de cada uma'),
+    techniques: z.array(z.string()).describe('Técnicas de roteiro usadas: perguntas abertas, curiosidades, histórias, viradas, chamadas para imaginar...'),
+    keyLines: z.array(Moment).describe('Falas mais marcantes, com o segundo'),
+  }),
+  speech: z.object({ tone: z.string(), pace: z.string().describe('Velocidade e variação da fala'), pauses: z.string().describe('Onde e como usa pausas e silêncio') }),
+  highlights: z.array(Moment).describe('Destaques de texto, ênfases e momentos de impacto'),
+  editing: z.object({ cutsPerMinute: z.number(), rhythm: z.string(), notes: z.array(z.string()) }),
+  motion: z.array(z.string()).describe('Movimentos de câmera e de imagem: zoom, pan, parallax, shake...'),
+  transitions: z.array(z.string()).describe('Transições usadas, quando e com que frequência'),
+  design: z.object({ palette: z.array(z.string()).describe('Cores em hex'), typography: z.string(), elements: z.array(z.string()).describe('Elementos gráficos: faixas, setas, molduras, ícones...') }),
+  dynamics: z.string().describe('Como o vídeo mantém a atenção do começo ao fim'),
+  audio: z.object({ music: z.string(), effects: z.string() }),
+  callToAction: z.string(),
+  timeline: z.array(Moment).describe('Linha do tempo dos principais momentos'),
+  howToRecreate: z.array(z.string()).describe('Passos práticos para fazer um vídeo novo neste estilo'),
+})
+export type AnalysisDetails = z.infer<typeof AnalysisDetails>
+
 const Media = z.discriminatedUnion('type', [
   z.object({ type: z.literal('user_image'), imageIndex: z.number().int().min(0).describe('Índice da imagem enviada pelo usuário') }),
   z.object({

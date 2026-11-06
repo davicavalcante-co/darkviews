@@ -80,6 +80,10 @@ export async function projectRoutes(app: FastifyInstance) {
       const images = files.filter((f) => f.field === 'images')
       if (video.length > 1) throw httpError(400, 'Envie só um vídeo de referência')
       if (video.length && input.link) throw httpError(400, 'Use link ou vídeo de referência, não os dois')
+      // Estilo de uma análise pronta: a referência já vem analisada; pula baixar e analisar e vai direto ao roteiro.
+      const analysis = input.analysisId ? await prisma.videoAnalysis.findFirst({ where: { id: input.analysisId, ownerId: req.user!.id, status: 'done' } }) : null
+      if (input.analysisId && !analysis) throw httpError(400, 'Análise não encontrada ou ainda não terminou')
+      if (analysis && (input.link || video.length)) throw httpError(400, 'Use a análise ou outra referência, não as duas')
 
       const project = await prisma.project.create({
         data: {
@@ -88,7 +92,9 @@ export async function projectRoutes(app: FastifyInstance) {
           prompt: input.prompt,
           targetDurationS: input.targetDurationS,
           options: optionsJson(input),
-          reference: input.link
+          reference: analysis
+            ? { create: { sourceType: 'analysis', url: analysis.url, platform: analysis.platform, durationS: analysis.durationS, styleProfile: analysis.profile } }
+            : input.link
             ? { create: { sourceType: 'link', url: input.link, platform: detectPlatform(input.link) } }
             : video[0] ? { create: { sourceType: 'upload', filePath: video[0].path } } : undefined,
           assets: {
@@ -96,7 +102,8 @@ export async function projectRoutes(app: FastifyInstance) {
               kind: 'user_image', filePath: f.path, mime: f.mime, sortOrder: i, userCaption: input.captions[i] || null,
             })),
           },
-          jobs: { create: { type: 'ingest', stage: 'Na fila' } },
+          ...(analysis && { status: 'scripting' }),
+          jobs: { create: analysis ? { type: 'script', stage: 'Na fila' } : { type: 'ingest', stage: 'Na fila' } },
         },
       })
       return reply.code(201).send({ id: project.id })
