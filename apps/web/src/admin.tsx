@@ -45,12 +45,10 @@ function Users() {
   return (
     <div className="cards">
       <div className="panel wide"><span className="panel-title">Usuários · {users.length}</span><div className="table-wrap"><table>
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th>Status</th><th>Último acesso</th></tr></thead>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Status</th><th>Último acesso</th></tr></thead>
         <tbody>{users.map((u) => (
           <tr key={u.id}>
             <td>{u.name}</td><td>{u.email}</td>
-            <td><select value={u.role} aria-label={`Papel de ${u.name}`} onChange={(e) => patch(u.id, { role: e.target.value })}>
-              <option value="user">Usuário</option><option value="admin">Admin</option></select></td>
             <td><select value={u.status} aria-label={`Status de ${u.name}`} onChange={(e) => patch(u.id, { status: e.target.value })}>
               <option value="active">Ativo</option><option value="disabled">Desativado</option></select></td>
             <td className="muted">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
@@ -64,7 +62,6 @@ function Users() {
             <label>Nome<input name="name" required maxLength={120} /></label>
             <label>E-mail<input name="email" type="email" required /></label>
             <label>Senha inicial (mín. 10)<input name="password" type="password" minLength={10} required autoComplete="new-password" /></label>
-            <label>Papel<select name="role"><option value="user">Usuário</option><option value="admin">Admin</option></select></label>
           </div>
           <button>Criar usuário</button>
         </fieldset>

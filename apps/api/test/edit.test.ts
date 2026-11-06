@@ -183,5 +183,13 @@ describe('aprovação das imagens em rodadas', () => {
     await prisma.project.update({ where: { id: projectId }, data: { status: 'image_review' } })
     const second = (await app.inject({ url: `/api/projects/${projectId}/review`, headers: dono })).json()
     expect(second.scenes.map((s: { index: number }) => s.index)).toEqual([1])
+    expect(second.round).toBe(2)
+    // 2ª rodada: envia a própria foto para a cena; ela sai da lista já aprovada.
+    const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(32)])
+    const form = new FormData(); form.append('images', new Blob([new Uint8Array(PNG)]), 'minha.png')
+    const req = new Request('http://x', { method: 'POST', body: form })
+    const up = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/review/1/upload`, headers: { ...dono, 'content-type': req.headers.get('content-type')! }, payload: Buffer.from(await req.arrayBuffer()) })
+    expect(up.statusCode).toBe(201)
+    expect((await app.inject({ url: `/api/projects/${projectId}/review`, headers: dono })).json().scenes).toEqual([])
   })
 })

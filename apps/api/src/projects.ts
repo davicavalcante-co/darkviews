@@ -305,6 +305,8 @@ export async function projectRoutes(app: FastifyInstance) {
     })
     return {
       status: p.status,
+      // 2ª rodada em diante (alguma cena já foi recusada): dá para enviar a própria foto no lugar.
+      round: 1 + Math.max(0, ...scenes.filter((s) => !approvedScene(s.searchQuery)).map((s) => (s.searchQuery ? (JSON.parse(s.searchQuery) as { rejected?: string[] }).rejected?.length ?? 0 : 0))),
       // Só as que ainda não foram aprovadas: as aprovadas numa rodada anterior já esperam pela narração.
       scenes: scenes.filter((s) => !approvedScene(s.searchQuery)).map((s) => ({ index: s.index, narration: s.narration, assetId: s.asset!.id, kind: s.asset!.kind === 'stock_video' ? 'video' : 'image', bank: BANK[s.asset!.sourceProvider ?? ''] ?? s.asset!.sourceProvider, credit: s.asset!.attribution, copyright: /não verificad|sem licença/i.test(s.asset!.license ?? '') })),
     }
@@ -338,6 +340,21 @@ export async function projectRoutes(app: FastifyInstance) {
     ]))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
+  })
+
+  // Na aprovação: troca a imagem de uma cena por uma foto enviada pela pessoa. Ela já fica aprovada.
+  app.post<{ Params: { id: string; index: string } }>('/api/projects/:id/review/:index/upload', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'image_review') return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
+    const scene = await prisma.scene.findFirst({ where: { scriptId: p.scripts[0]?.id ?? '', index: Number(req.params.index) } })
+    if (!scene) return reply.code(404).send({ error: 'Cena não encontrada' })
+    const part = await req.file()
+    if (!part || part.fieldname !== 'images') return reply.code(400).send({ error: 'Envie a foto' })
+    const saved = await saveUpload(part) // mesma checagem de tipo real e tamanho das outras imagens
+    const asset = await prisma.asset.create({ data: { projectId: p.id, kind: 'review_image', filePath: saved.path, mime: saved.mime, sortOrder: scene.index } })
+    await prisma.scene.update({ where: { id: scene.id }, data: { assetId: asset.id, searchQuery: JSON.stringify({ ...(scene.searchQuery ? JSON.parse(scene.searchQuery) : {}), approved: true }) } })
+    return reply.code(201).send({ ok: true })
   })
 
   // ---------- Thumbnails (miniaturas do YouTube) ----------

@@ -202,9 +202,15 @@ export async function synthesizeMany(items: { key: number; text: string; outBase
       warn('kokoro', `voz falhou, usando a próxima: ${(e as Error).message}`, userId)
     }
   }
+  // A primeira voz que falar narra o vídeo todo: as cenas seguintes não trocam de voz (melhor falhar do que misturar).
+  const names = (await activeProviders('voz', userId)).map((a) => a.provider)
+  let locked: string | null = null
   for (const i of items) {
-    const v = await synthesize(i.text, i.outBase, ffmpeg, userId, first?.provider === 'kokoro' ? ['kokoro'] : [], choice)
-    if (v) result.set(i.key, v)
+    const skip = locked ? names.filter((n) => n !== locked) : first?.provider === 'kokoro' ? ['kokoro'] : []
+    const v = await synthesize(i.text, i.outBase, ffmpeg, userId, skip, choice)
+    if (!v) throw new Error(locked ? `A voz ${locked} falhou numa cena. Clique em Tentar de novo.` : 'Nenhuma voz disponível para narrar.')
+    locked = v.provider
+    result.set(i.key, v)
   }
   return result
 }
@@ -425,6 +431,6 @@ export const studioDeleteProfile = (id: string) => studioFetch(`/profiles/${enco
 
 // Qualquer áudio vira WAV mono 24 kHz de até 30 s. Se o FFmpeg não ler, não é áudio.
 export async function toStudioWav(input: string, out: string) {
-  try { await run(STUDIO_FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', '30', '-vn', '-ac', '1', '-ar', '24000', out]) }
+  try { await run(STUDIO_FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', '12', '-vn', '-ac', '1', '-ar', '24000', out]) }
   catch { throw new StudioError('Não consegui ler esse áudio. Envie MP3, WAV, M4A ou grave de novo.') }
 }

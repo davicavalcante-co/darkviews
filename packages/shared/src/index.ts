@@ -14,7 +14,7 @@ export const CreateUserInput = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(120),
   password,
-  role: Role.default('user'),
+  role: Role.default('admin'), // um nível de acesso só: toda conta tem acesso completo
 })
 export const UpdateUserInput = z.object({ role: Role.optional(), status: UserStatus.optional() })
 
