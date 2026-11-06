@@ -73,7 +73,7 @@ Para usar vozes próprias (aba **Vozes**): clique em **Ligar VoiceStudio** e, na
 
 ## Licenças
 
-O Darkviews conversa com o VoiceStudio (AGPL-3.0) pela rede local, sem incluir o código dele. O modelo de voz `k2-fsa/OmniVoice` é **não comercial** (CC-BY-NC): uso pessoal.
+O Darkviews conversa com o VoiceStudio (AGPL-3.0) pela rede local, sem incluir o código dele. O modelo de voz padrão do VoiceStudio é **não comercial** (CC-BY-NC): uso pessoal.
 
 ## Para quem desenvolve
 

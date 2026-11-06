@@ -8,11 +8,9 @@ type Item = {
   provider: string; label: string; category: string; tier: Tier; help: string; signup: string | null; tutorial: string[]
   secrets: string[]; choices: Record<string, string[]>; builtIn: boolean
   configured: boolean; enabled: boolean; priority: number; config: Record<string, string>
-  secretsSet: Record<string, string | null>; systemDefault: { enabled: boolean } | null
+  secretsSet: Record<string, string | null>
   lastTestAt: string | null; lastTestOk: boolean | null
 }
-type Scope = 'me' | 'system'
-
 const CATEGORIES: [string, string, string][] = [
   ['voz', 'Voz', 'Quem narra o vídeo'],
   ['banco_de_imagens', 'Fotos e vídeos', 'De onde vêm as imagens reais das cenas'],
@@ -21,19 +19,18 @@ const CATEGORIES: [string, string, string][] = [
 const TIER: Record<Tier, [string, string]> = { gratis: ['Grátis', 'free'], gratis_chave: ['Grátis com cadastro', 'freekey'], pago: ['Pago', 'paid'] }
 const FIELD_LABEL: Record<string, string> = { voice: 'Voz', voice_id: 'ID da voz', speed: 'Velocidade da fala', steps: 'Qualidade', api_key: 'Chave da API' }
 
-// Pronta para usar: ligada e com a chave (se precisa de chave). Para o usuário, sem preferência própria vale o padrão do admin.
-const ready = (i: Item, scope: Scope) => (scope === 'me' && !i.configured ? !!i.systemDefault?.enabled : i.enabled && i.secrets.every((n) => i.secretsSet[n]))
-const isOn = (i: Item, scope: Scope) => (scope === 'me' && !i.configured ? !!i.systemDefault?.enabled : i.enabled)
+// Pronta para usar: ligada e com a chave (se precisa de chave). As gratuitas sem chave já vêm ligadas.
+const ready = (i: Item) => i.enabled && i.secrets.every((n) => i.secretsSet[n])
 
-export function Integrations({ scope }: { scope: Scope }) {
+function Integrations({ isAdmin }: { isAdmin?: boolean }) {
   const [items, setItems] = useState<Item[]>([])
   const [open, setOpen] = useState<string | null>(null)
-  const base = scope === 'system' ? '/admin/integrations' : '/integrations'
+  const base = '/integrations'
   const load = () => api<Item[]>(base).then(setItems)
-  useEffect(() => { load() }, [scope])
+  useEffect(() => { load() }, [])
 
   const put = (i: Item, body: Partial<{ enabled: boolean; priority: number; config: Record<string, string>; secrets: Record<string, string> }>) =>
-    api(`${base}/${i.provider}`, { method: 'PUT', body: { enabled: isOn(i, scope), priority: i.priority, config: i.config, secrets: {}, ...body } })
+    api(`${base}/${i.provider}`, { method: 'PUT', body: { enabled: i.enabled, priority: i.priority, config: i.config, secrets: {}, ...body } })
 
   // "Usar como principal": a escolhida vai para o topo da categoria e as outras seguem na ordem em que estavam.
   async function makePrimary(i: Item) {
@@ -47,14 +44,12 @@ export function Integrations({ scope }: { scope: Scope }) {
   return (
     <div className="stack">
       <p className="muted lead">
-        {scope === 'system'
-          ? 'O padrão para todos os usuários. Quem configurar as próprias contas usa as dele; o resto segue este padrão.'
-          : 'Já vem tudo pronto para usar. Se quiser, conecte suas próprias contas (grátis ou pagas) para vozes e imagens melhores.'}
+        Já vem tudo pronto para usar: as opções grátis estão ligadas. Se quiser, conecte suas próprias contas (grátis ou pagas) para vozes e imagens melhores.
       </p>
-      {scope === 'me' && <ClaudeLinkSlot />}
+      {isAdmin && <ClaudeLink compact />}
       {CATEGORIES.map(([cat, title, hint], ci) => {
         const list = items.filter((i) => i.category === cat).sort((a, b) => a.priority - b.priority)
-        const inUse = list.find((i) => ready(i, scope))
+        const inUse = list.find((i) => ready(i))
         return (
           <Section key={cat} idx={ci + 1} title={title} aside={hint}>
             <div className="in-use">
@@ -63,7 +58,7 @@ export function Integrations({ scope }: { scope: Scope }) {
             </div>
             <ul className="int-list">
               {list.map((i) => (
-                <Row key={i.provider} item={i} scope={scope} inUse={i.provider === inUse?.provider}
+                <Row key={i.provider} item={i} inUse={i.provider === inUse?.provider}
                   onToggle={async (on) => { await put(i, { enabled: on }); load() }} onOpen={() => setOpen(i.provider)} />
               ))}
             </ul>
@@ -71,24 +66,17 @@ export function Integrations({ scope }: { scope: Scope }) {
         )
       })}
       {current && (
-        <Setup key={current.provider + current.lastTestAt + Object.values(current.secretsSet).join()} item={current} scope={scope} base={base}
-          inUse={items.filter((x) => x.category === current.category && ready(x, scope)).sort((a, b) => a.priority - b.priority)[0]?.provider === current.provider}
+        <Setup key={current.provider + current.lastTestAt + Object.values(current.secretsSet).join()} item={current} isAdmin={isAdmin} base={base}
+          inUse={items.filter((x) => x.category === current.category && ready(x)).sort((a, b) => a.priority - b.priority)[0]?.provider === current.provider}
           onClose={() => setOpen(null)} reload={load} makePrimary={() => makePrimary(current)} />
       )}
     </div>
   )
 }
 
-// O botão do Claude só aparece para o admin (é ele quem conecta o computador).
-function ClaudeLinkSlot() {
-  const [admin, setAdmin] = useState(false)
-  useEffect(() => { api<{ user: { role: string } }>('/auth/me').then((r) => setAdmin(r.user.role === 'admin')).catch(() => {}) }, [])
-  return admin ? <ClaudeLink compact /> : null
-}
-
-function Row({ item, scope, inUse, onToggle, onOpen }: { item: Item; scope: Scope; inUse: boolean; onToggle: (on: boolean) => void; onOpen: () => void }) {
-  const on = isOn(item, scope)
-  const needsKey = on && item.secrets.some((n) => !item.secretsSet[n]) && !(scope === 'me' && !item.configured)
+function Row({ item, inUse, onToggle, onOpen }: { item: Item; inUse: boolean; onToggle: (on: boolean) => void; onOpen: () => void }) {
+  const on = item.enabled
+  const needsKey = on && item.secrets.some((n) => !item.secretsSet[n])
   const [tierLabel, tierClass] = TIER[item.tier]
   return (
     <li className={`int-row${inUse ? ' in-use-row' : ''}`}>
@@ -107,15 +95,15 @@ function Row({ item, scope, inUse, onToggle, onOpen }: { item: Item; scope: Scop
 }
 
 // Popup de configuração: passo a passo, campos e ações no mesmo lugar.
-function Setup({ item, scope, base, inUse, onClose, reload, makePrimary }: {
-  item: Item; scope: Scope; base: string; inUse: boolean; onClose: () => void; reload: () => void; makePrimary: () => Promise<void>
+function Setup({ item, isAdmin, base, inUse, onClose, reload, makePrimary }: {
+  item: Item; isAdmin?: boolean; base: string; inUse: boolean; onClose: () => void; reload: () => void; makePrimary: () => Promise<void>
 }) {
   const [config, setConfig] = useState(item.config)
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [editKey, setEditKey] = useState(false)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const on = isOn(item, scope)
+  const on = item.enabled
   const [tierLabel, tierClass] = TIER[item.tier]
   const missingKey = item.secrets.some((n) => !item.secretsSet[n])
 
@@ -169,12 +157,12 @@ function Setup({ item, scope, base, inUse, onClose, reload, makePrimary }: {
         </div>
       )}
 
-      {item.provider === 'local_music' && scope === 'system' && <MusicLibrary />}
+      {item.provider === 'local_music' && isAdmin && <MusicLibrary />}
 
       {msg && <p className={msg.ok ? 'notice ok-box' : 'notice alert'} role="status">{msg.ok ? '✓' : '✕'} {msg.text}</p>}
 
       <footer className="modal-actions">
-        {scope === 'me' && item.configured && <button type="button" className="link" disabled={busy} onClick={() => act(async () => { await api(`${base}/${item.provider}`, { method: 'DELETE' }); onClose() })}>Voltar ao padrão</button>}
+        {item.configured && <button type="button" className="link" disabled={busy} onClick={() => act(async () => { await api(`${base}/${item.provider}`, { method: 'DELETE' }); onClose() })}>Voltar ao padrão</button>}
         {!inUse && <button type="button" className="link" disabled={busy} onClick={() => act(makePrimary, 'Agora é a principal.')}>Usar como principal</button>}
         <span className="spacer" />
         <button type="button" className="ghost-btn" disabled={busy} onClick={test}>{busy ? 'Testando…' : 'Testar'}</button>
@@ -184,20 +172,12 @@ function Setup({ item, scope, base, inUse, onClose, reload, makePrimary }: {
   )
 }
 
-// Página "Integrações" de cada usuário (suas contas; o resto segue o padrão do admin).
+// Página "Integrações": as contas de cada usuário. O botão do Claude e as músicas locais só aparecem para o admin.
 export function MyIntegrations({ isAdmin }: { isAdmin?: boolean }) {
-  // O admin também define aqui o padrão que vale para todos (antes era uma aba repetida dentro do Admin).
-  const [scope, setScope] = useState<'me' | 'system'>('me')
   return (
     <div className="page">
       <PageHead kicker="Voz, fotos e música" title="Integrações" />
-      {isAdmin && (
-        <div className="tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={scope === 'me'} onClick={() => setScope('me')}>Minhas contas</button>
-          <button type="button" role="tab" aria-selected={scope === 'system'} onClick={() => setScope('system')}>Padrão para todos</button>
-        </div>
-      )}
-      <Integrations key={scope} scope={scope} />
+      <Integrations isAdmin={isAdmin} />
     </div>
   )
 }

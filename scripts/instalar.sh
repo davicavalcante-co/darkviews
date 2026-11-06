@@ -43,7 +43,7 @@ step "6/8 Vozes locais (Kokoro e Piper)"
 ok "pronto (os modelos de voz baixam sozinhos na primeira fala)"
 
 step "7/8 VoiceStudio (aba Vozes: criar e clonar vozes)"
-bash scripts/omnivoice-setup.sh
+bash scripts/voicestudio-setup.sh
 ok "pronto (o modelo de voz, ~2,4 GB, baixa sozinho no primeiro uso)"
 
 step "8/8 Login do Claude"

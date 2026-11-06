@@ -73,8 +73,8 @@ export async function voiceStudioRoutes(app: FastifyInstance) {
   // Botão "Ligar VoiceStudio": usa o mesmo script de partida que a narração já usa.
   app.post('/api/studio/start', { preHandler: requireAuth }, async (_req, reply) => {
     if ((await studioStatus()).online) return { online: true }
-    const home = process.env.OMNIVOICE_HOME ?? join(PROJECT_DIR, 'vendor/voicestudio')
-    await promisify(execFile)(join(PROJECT_DIR, '.claude/skills/omnivoice/scripts/start-backend.sh'), [], { env: { ...process.env, OMNIVOICE_HOME: home }, timeout: 180_000 }).catch(() => {})
+    const home = process.env.VOICESTUDIO_HOME ?? join(PROJECT_DIR, 'vendor/voicestudio')
+    await promisify(execFile)(join(PROJECT_DIR, 'scripts/voicestudio-start.sh'), [], { env: { ...process.env, VOICESTUDIO_HOME: home }, timeout: 180_000 }).catch(() => {})
     const { online } = await studioStatus()
     return online ? { online } : reply.code(503).send({ error: 'Não consegui ligar o VoiceStudio. Confira se ele está instalado nesta máquina.' })
   })

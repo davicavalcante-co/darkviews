@@ -262,14 +262,13 @@ export async function projectRoutes(app: FastifyInstance) {
   // Todas as vozes prontas para este usuário, com a origem: "Faber - Masculina (Piper)". O id é "fornecedor:voz".
   app.get('/api/voices', { preHandler: requireAuth }, async (req) => {
     const active = preferProvider(await activeProviders('voz', req.user!.id)) // Piper e macOS por último (erram mais a pronúncia)
-    // OmniVoice fica de fora: o modelo dele é não comercial e costuma estar bloqueado pela licença.
-    const voices = active.filter((a) => a.provider !== 'omnivoice').flatMap((a) => {
+    const voices = active.flatMap((a) => {
       const label = (PROVIDERS.find((x) => x.provider === a.provider)?.label ?? a.provider).split(' · ')[0].split(' (')[0]
-      return (VOICE_PRESETS[a.provider] ?? []).map((v) => ({ id: `${a.provider}:${v.id}`, label: `${v.label} (${label})`, provider: a.provider, freeText: a.provider === 'omnivoice' }))
+      return (VOICE_PRESETS[a.provider] ?? []).map((v) => ({ id: `${a.provider}:${v.id}`, label: `${v.label} (${label})`, provider: a.provider }))
     })
     // Vozes próprias publicadas na aba Vozes vêm primeiro.
     const own = (await prisma.studioVoice.findMany({ where: { ownerId: req.user!.id, status: 'published' }, orderBy: { name: 'asc' } }))
-      .map((v) => ({ id: `studio:${v.id}`, label: `${v.name} (Minha voz)`, provider: 'studio', freeText: false }))
+      .map((v) => ({ id: `studio:${v.id}`, label: `${v.name} (Minha voz)`, provider: 'studio' }))
     voices.unshift(...own)
     const first = active[0]
     const current = first && `${first.provider}:${first.config.voice ?? ''}`
@@ -278,7 +277,7 @@ export async function projectRoutes(app: FastifyInstance) {
 
 
   // ---------- Aprovação das imagens (antes da narração) ----------
-  const BANK: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
+  const BANK: Record<string, string> = { pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
   // A referência tem uma pessoa falando: o cliente escolhe vídeo de banco (JSON {choice:'stock'}) ou envia o vídeo dele (multipart, campo "video").
   app.post<{ Params: { id: string } }>('/api/projects/:id/talking-head', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })

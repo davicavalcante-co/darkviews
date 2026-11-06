@@ -175,7 +175,7 @@ describe('aprovação das imagens', () => {
     const id = (await create(ana)).json().id
     await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
     const script = await prisma.script.create({ data: { projectId: id, version: 1, body: 'b', scenePlan: '[]', createdBy: 'claude' } })
-    const mk = (i: number, sid: string) => prisma.asset.create({ data: { projectId: id, kind: 'stock_image', filePath: '/tmp/x.jpg', mime: 'image/jpeg', sourceProvider: 'pexels', sourceId: sid } })
+    const mk = (i: number, sid: string) => prisma.asset.create({ data: { projectId: id, kind: 'stock_image', filePath: '/tmp/x.jpg', mime: 'image/jpeg', sourceProvider: 'pixabay', sourceId: sid } })
     const [a0, a1] = [await mk(0, 'p0'), await mk(1, 'p1')]
     const q = JSON.stringify({ type: 'stock', kind: 'image', queries: ['coffee'], orientation: 'landscape' })
     await prisma.scene.createMany({ data: [
@@ -189,7 +189,7 @@ describe('aprovação das imagens', () => {
   it('lista as imagens para aprovar sem expor caminho; outro usuário recebe 404', async () => {
     const id = await setup()
     const r = (await app.inject({ url: `/api/projects/${id}/review`, headers: ana.headers })).json()
-    expect(r.scenes.map((s: { index: number; bank: string }) => [s.index, s.bank])).toEqual([[0, 'Pexels'], [1, 'Pexels']])
+    expect(r.scenes.map((s: { index: number; bank: string }) => [s.index, s.bank])).toEqual([[0, 'Pixabay'], [1, 'Pixabay']])
     expect(JSON.stringify(r)).not.toMatch(/filePath|\/tmp/)
     expect((await app.inject({ url: `/api/projects/${id}/review`, headers: beto.headers })).statusCode).toBe(404)
   })
@@ -208,7 +208,7 @@ describe('aprovação das imagens', () => {
     const scenes = await prisma.scene.findMany({ where: { script: { projectId: id } }, orderBy: { index: 'asc' } })
     expect(scenes[0].assetId).not.toBeNull() // aprovada fica
     expect(scenes[1].assetId).toBeNull()
-    expect(JSON.parse(scenes[1].searchQuery!).rejected).toEqual(['pexels:p1'])
+    expect(JSON.parse(scenes[1].searchQuery!).rejected).toEqual(['pixabay:p1'])
     expect(await prisma.job.count({ where: { projectId: id, type: 'media', status: 'queued' } })).toBe(1)
     expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/review`, headers: ana.headers, payload: { rejected: [] } })).statusCode).toBe(409)
   })

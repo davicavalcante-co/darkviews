@@ -6,10 +6,9 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { activeProviders, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
 import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
-import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
@@ -32,7 +31,7 @@ async function download(url: string, dir: string) {
   return { path: tmp, ...type }
 }
 
-const BANK_NAMES: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
+const BANK_NAMES: Record<string, string> = { pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
 
 const Choices = z.object({ choices: z.array(z.object({ scene: z.number().int(), candidate: z.number().int().min(0) })) })
 
@@ -140,28 +139,10 @@ export async function voice(job: Job) {
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
   await prisma.asset.deleteMany({ where: { projectId: project.id, kind: 'voice' } })
-  // Se a voz escolhida for o OmniVoice, a narração inteira passa pelo Claude Code (skill omnivoice + MCP).
-  // Cena que ele não entregar cai para a próxima voz da lista (Piper, depois macOS).
   // voicePreset vem como "fornecedor:voz" (ex.: "piper:faber"); o fornecedor escolhido vai para o topo.
   const opts = JSON.parse(project.options) as { voiceBrief?: string; voicePreset?: string; voiceTone?: string }
   const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
-  const voices = preferProvider(await activeProviders('voz', project.ownerId), chosenProvider)
-  let directed = new Map<number, string>()
-  if (voices[0]?.provider === 'omnivoice' && chosenProvider !== 'studio') {
-    await step('Claude Code criando a voz (OmniVoice)', 55)
-    if (await ensureOmniVoice()) {
-      directed = await narrateWithClaude({
-        jobId: job.id, projectId: project.id, dir, brief: opts.voiceBrief ?? chosenVoice ?? null, steps: voices[0].config.steps || '16', speed: voices[0].config.speed || '1.0',
-        scenes: scenes.filter((s) => s.narration?.trim()).map((s) => ({ index: s.index, text: s.narration! })),
-      }).catch((e) => {
-        if (e instanceof ClaudeUnavailable) throw e
-        logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `omnivoice via Claude Code falhou: ${(e as Error).message}`, details: { jobId: job.id } })
-        return new Map<number, string>()
-      })
-    } else {
-      logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: desligado ou com a licença do modelo não aceita; usando a próxima voz', details: { jobId: job.id } })
-    }
-  }
+  const directed = new Map<number, string>()
 
   // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
   if (chosenProvider === 'studio') {
@@ -188,14 +169,14 @@ export async function voice(job: Job) {
     }
   }
 
-  // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que o Claude/OmniVoice já narrou é reaproveitado.
+  // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que a voz própria já narrou é reaproveitado.
   await step('Gerando áudio da locução', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   const made = await synthesizeMany(todo.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
     { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
-  for (const [idx, file] of directed) made.set(idx, { path: file, provider: chosenProvider === 'studio' ? 'studio' : 'omnivoice' })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
 
   // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
