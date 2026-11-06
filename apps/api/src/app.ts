@@ -4,7 +4,7 @@ import rateLimit from '@fastify/rate-limit'
 import { hash, verify } from '@node-rs/argon2'
 import { ZodError } from 'zod'
 import { logEvent, prisma, type User } from '@corte/db'
-import { CompleteSetupInput, CreateUserInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
+import { CompleteSetupInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
 import { csrfFor, newToken, sha256 } from './security.js'
 import { requireAdmin, requireAuth } from './auth.js'
 import { projectRoutes } from './projects.js'
@@ -157,17 +157,7 @@ export async function buildApp() {
       select: { id: true, email: true, name: true, role: true, status: true, lastLoginAt: true, createdAt: true },
     }))
 
-  app.post('/api/admin/users', { preHandler: requireAdmin }, async (req, reply) => {
-    const input = CreateUserInput.parse(req.body)
-    const email = input.email.toLowerCase()
-    if (await prisma.user.findUnique({ where: { email } })) return reply.code(409).send({ error: 'E-mail já cadastrado' })
-    const user = await prisma.user.create({
-      data: { email, name: input.name, role: input.role, passwordHash: await hash(input.password) },
-    })
-    await audit(req, 'user.create', 'user', user.id, { email, role: input.role })
-    return reply.code(201).send(toPublic(user))
-  })
-
+  // Uma conta por computador: não existe criar outro usuário (a conta nasce no primeiro acesso).
   app.patch<{ Params: { id: string } }>('/api/admin/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
     const input = UpdateUserInput.parse(req.body)
     const target = await prisma.user.findUnique({ where: { id: req.params.id } })

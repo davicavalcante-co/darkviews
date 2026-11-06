@@ -26,7 +26,6 @@ beforeAll(async () => {
 describe('permissões', () => {
   const adminRoutes = (id: string) => [
     { method: 'GET' as const, url: '/api/admin/users' },
-    { method: 'POST' as const, url: '/api/admin/users', payload: { email: 'x@t.com', name: 'X', password: PASS } },
     { method: 'PATCH' as const, url: `/api/admin/users/${id}`, payload: { role: 'admin' } },
   ]
 
@@ -47,9 +46,8 @@ describe('permissões', () => {
   it('admin acessa e a ação vai para o audit_logs', async () => {
     const { headers } = await login('admin@t.com')
     expect((await app.inject({ method: 'GET', url: '/api/admin/users', headers })).statusCode).toBe(200)
-    const res = await app.inject({ method: 'POST', url: '/api/admin/users', headers, payload: { email: 'novo@t.com', name: 'N', password: PASS } })
-    expect(res.statusCode).toBe(201)
-    expect(await prisma.auditLog.count({ where: { action: 'user.create', actorId: adminId } })).toBe(1)
+    // Uma conta por computador: criar outro usuário não existe mais.
+    expect((await app.inject({ method: 'POST', url: '/api/admin/users', headers, payload: { email: 'novo@t.com', name: 'N', password: PASS } })).statusCode).toBe(404)
   })
 
   it('recusa rebaixar ou desativar o último admin', async () => {

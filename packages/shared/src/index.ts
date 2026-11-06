@@ -12,12 +12,6 @@ export const LoginInput = z.object({ email: z.string().email(), password: z.stri
 // Primeiro acesso: só o token. Dentro do sistema, a pessoa define o e-mail e a senha (CompleteSetupInput).
 export const SetupInput = z.object({ token: z.string().min(10) })
 export const CompleteSetupInput = z.object({ email: z.string().trim().email().max(200), name: z.string().trim().min(1).max(120), password })
-export const CreateUserInput = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(120),
-  password,
-  role: Role.default('admin'), // um nível de acesso só: toda conta tem acesso completo
-})
 export const UpdateUserInput = z.object({ role: Role.optional(), status: UserStatus.optional() })
 
 export type PublicUser = { id: string; email: string; name: string; role: Role; needsSetup?: boolean }

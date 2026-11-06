@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import type { PublicUser } from '@corte/shared'
 import { api, uploadFont } from './api'
 import { PageHead } from './ui'
@@ -36,15 +36,9 @@ function Users() {
   useEffect(() => { load() }, [])
   const patch = (id: string, body: object) => act(() => api(`/admin/users/${id}`, { method: 'PATCH', body }), load)
 
-  async function create(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const form = e.currentTarget
-    await act(() => api('/admin/users', { method: 'POST', body: Object.fromEntries(new FormData(form)) }), () => { form.reset(); return load() })
-  }
-
   return (
     <div className="cards">
-      <div className="panel wide"><span className="panel-title">Usuários · {users.length}</span><div className="table-wrap"><table>
+      <div className="panel wide"><span className="panel-title">Conta deste computador</span><div className="table-wrap"><table>
         <thead><tr><th>Nome</th><th>E-mail</th><th>Status</th><th>Último acesso</th></tr></thead>
         <tbody>{users.map((u) => (
           <tr key={u.id}>
@@ -55,17 +49,6 @@ function Users() {
           </tr>))}
         </tbody>
       </table></div></div>
-      <form onSubmit={create} className="narrow">
-        <fieldset>
-          <legend>Novo usuário</legend>
-          <div className="grid">
-            <label>Nome<input name="name" required maxLength={120} /></label>
-            <label>E-mail<input name="email" type="email" required /></label>
-            <label>Senha inicial (mín. 10)<input name="password" type="password" minLength={10} required autoComplete="new-password" /></label>
-          </div>
-          <button>Criar usuário</button>
-        </fieldset>
-      </form>
     </div>
   )
 }
