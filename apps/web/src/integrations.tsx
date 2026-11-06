@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Tier } from '@corte/shared'
 import { api } from './api'
 import { ClaudeLink } from './claude-connect'
-import { Modal, PageHead, Section, Steps } from './ui'
+import { Modal, PageHead, Steps } from './ui'
 
 type Item = {
   provider: string; label: string; category: string; tier: Tier; help: string; signup: string | null; tutorial: string[]
@@ -12,8 +12,8 @@ type Item = {
   lastTestAt: string | null; lastTestOk: boolean | null
 }
 const CATEGORIES: [string, string, string][] = [
-  ['voz', 'Voz', 'Quem narra o vídeo'],
-  ['banco_de_imagens', 'Fotos e vídeos', 'De onde vêm as imagens reais das cenas'],
+  ['voz', 'Vozes', 'Quem narra o vídeo'],
+  ['banco_de_imagens', 'Fotos e Vídeos', 'De onde vêm as imagens reais das cenas'],
   ['música', 'Música', 'Trilha de fundo'],
 ]
 const TIER: Record<Tier, [string, string]> = { gratis: ['Grátis', 'free'], gratis_chave: ['Grátis com cadastro', 'freekey'], pago: ['Pago', 'paid'] }
@@ -25,6 +25,7 @@ const ready = (i: Item) => i.enabled && i.secrets.every((n) => i.secretsSet[n])
 function Integrations({ isAdmin }: { isAdmin?: boolean }) {
   const [items, setItems] = useState<Item[]>([])
   const [open, setOpen] = useState<string | null>(null)
+  const [tab, setTab] = useState(CATEGORIES[0][0])
   const base = '/integrations'
   const load = () => api<Item[]>(base).then(setItems)
   useEffect(() => { load() }, [])
@@ -47,11 +48,15 @@ function Integrations({ isAdmin }: { isAdmin?: boolean }) {
         Já vem tudo pronto para usar: as opções grátis estão ligadas. Se quiser, conecte suas próprias contas (grátis ou pagas) para vozes e imagens melhores.
       </p>
       {isAdmin && <ClaudeLink compact />}
-      {CATEGORIES.map(([cat, title, hint], ci) => {
+      <div className="tabs" role="tablist">
+        {CATEGORIES.map(([cat, title]) => <button key={cat} type="button" role="tab" aria-selected={tab === cat} onClick={() => setTab(cat)}>{title}</button>)}
+      </div>
+      {CATEGORIES.filter(([cat]) => cat === tab).map(([cat, , hint]) => {
         const list = items.filter((i) => i.category === cat).sort((a, b) => a.priority - b.priority)
         const inUse = list.find((i) => ready(i))
         return (
-          <Section key={cat} idx={ci + 1} title={title} aside={hint}>
+          <div key={cat} className="stack" role="tabpanel">
+            <p className="muted">{hint}</p>
             <div className="in-use">
               <span className={`dot ${inUse ? 'on' : 'off'}`} />
               {inUse ? <>Em uso agora: <b>{inUse.label}</b></> : <>Nenhuma opção pronta. Ligue uma abaixo.</>}
@@ -62,7 +67,7 @@ function Integrations({ isAdmin }: { isAdmin?: boolean }) {
                   onToggle={async (on) => { await put(i, { enabled: on }); load() }} onOpen={() => setOpen(i.provider)} />
               ))}
             </ul>
-          </Section>
+          </div>
         )
       })}
       {current && (
