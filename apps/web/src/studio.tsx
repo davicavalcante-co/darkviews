@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
+import { DEFAULT_IDENTITY, detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
 
 type Voices = { voices: { id: string; label: string; provider: string }[]; current: string | null; tones: readonly { id: string; label: string }[] }
 import { api } from './api'
@@ -67,7 +67,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   const idea = base ? null : new URLSearchParams(location.hash.split('?')[1] ?? '')
   const [name, setName] = useState(base?.name ?? idea?.get('nome') ?? '')
   const [prompt, setPrompt] = useState(base?.prompt ?? idea?.get('prompt') ?? '')
-  const [bgColor, setBgColor] = useState(o.bgColor ?? '#111418')
+  const [bgColor, setBgColor] = useState(o.bgColor ?? DEFAULT_IDENTITY.bgColor)
   // Vídeo novo começa com a cor de fundo da identidade da pessoa (Admin → Identidade).
   useEffect(() => { if (!o.bgColor) api<{ identity: { bgColor: string } }>('/me/identity').then((r) => setBgColor(r.identity.bgColor)).catch(() => {}) }, [])
   const [useStock, setUseStock] = useState(o.useStock !== false)

@@ -242,9 +242,10 @@ export const Identity = z.object({
   }),
 })
 export type Identity = z.infer<typeof Identity>
-// Identidade padrão do sistema (vale até a pessoa salvar a dela).
+// Identidade padrão = a identidade visual do Darkviews: azul-marinho, destaque azul claro, Space Grotesk nos títulos e Inter no texto.
+// Vale até a pessoa salvar a dela.
 export const DEFAULT_IDENTITY: Identity = {
-  bgColor: '#111418',
-  caption: { fontFamily: 'Montserrat', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', highlightMode: 'palavra-chave', position: 'bottom-center', outline: true },
-  title: { fontFamily: 'Montserrat', size: 154, color: '#FFFFFF', bandColor: '#FFD43B', bandSize: 62, cardAlign: 'middle-center', bandAlign: 'top-left', upper: true },
+  bgColor: '#15273D',
+  caption: { fontFamily: 'Inter', fontWeight: 700, size: 64, color: '#F5F5F7', highlightColor: '#8FB4E3', highlightMode: 'palavra-chave', position: 'bottom-center', outline: true },
+  title: { fontFamily: 'Space Grotesk', size: 154, color: '#F5F5F7', bandColor: '#E4E4E4', bandSize: 62, cardAlign: 'middle-center', bandAlign: 'top-left', upper: true },
 }
