@@ -37,15 +37,16 @@ async function saveRateLimit(info: SDKRateLimitInfo) {
 }
 
 type Ask<T> = {
-  jobId: string; prompt: string; schema: ZodType<T>; cwd: string; canReadFiles?: boolean; effort?: 'low' | 'medium' | 'high'
+  jobId: string; prompt: string; schema: ZodType<T>; cwd: string; canReadFiles?: boolean; research?: boolean; effort?: 'low' | 'medium' | 'high'
   // Skills do projeto (.claude/skills) + servidores MCP: o Claude Code usa só as ferramentas listadas em `allow`.
   skills?: { projectDir: string; names: string[] }; mcpServers?: Record<string, McpServerConfig>; allow?: string[]; maxTurns?: number
   model?: string // tarefas simples (escolher entre opções) usam um modelo menor e mais barato
 }
 
 // Uma chamada ao Claude local (login do Claude Code da máquina) com saída JSON validada.
-export async function askClaude<T>({ jobId, prompt, schema, cwd, canReadFiles, effort = 'high', skills, mcpServers, allow = [], maxTurns = 30, model = MODEL }: Ask<T>): Promise<T> {
-  const builtIn = [...(canReadFiles ? ['Read'] : []), ...(skills ? ['Skill'] : [])]
+export async function askClaude<T>({ jobId, prompt, schema, cwd, canReadFiles, research, effort = 'high', skills, mcpServers, allow = [], maxTurns = 30, model = MODEL }: Ask<T>): Promise<T> {
+  // research: pode pesquisar na web (fatos, curiosidades, datas) antes de escrever.
+  const builtIn = [...(canReadFiles ? ['Read'] : []), ...(research ? ['WebSearch', 'WebFetch'] : []), ...(skills ? ['Skill'] : [])]
   let limit: SDKRateLimitInfo | null = null
   const run = query({
     prompt,
