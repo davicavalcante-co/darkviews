@@ -40,7 +40,23 @@ export async function script(job: Job) {
     await prisma.job.update({ where: { id: job.id }, data: { stage: 'Claude escrevendo o roteiro', progress: 20 } })
 
     const base = [
-      'Você é roteirista e editor de vídeos. Escreva o roteiro e o plano de cenas de um vídeo horizontal 16:9.',
+      'Você é roteirista de YouTube e editor de vídeos. Escreva o roteiro e o plano de cenas de um vídeo horizontal 16:9.',
+      [
+        'Antes de escrever:',
+        '1) Pesquise na web (WebSearch/WebFetch) o assunto: fatos confirmados, datas, números, curiosidades pouco conhecidas e detalhes humanos. Não invente nada; prefira o que aparece em mais de uma fonte.',
+        '2) Analise o público desse assunto: quem assiste, o que já sabe, o que mais desperta curiosidade e emoção nesse nicho, quais perguntas ele faz e o que faria ele parar de rolar o feed.',
+        '3) Analise o estilo de vídeo pedido (pelo prompt e pela referência, se houver) e escreva nesse estilo.',
+      ].join(' '),
+      [
+        'Escreva no estilo dos melhores canais de YouTube:',
+        'gancho nos primeiros 5 segundos (uma pergunta, um fato surpreendente ou uma cena forte, nunca "olá, neste vídeo");',
+        'conte como uma história, com começo, tensão e virada, em ordem que prenda (pode abrir pelo momento mais marcante e voltar);',
+        'abra perguntas e só responda mais à frente ("e o que ele fez depois mudou tudo...");',
+        'espalhe curiosidades ao longo do vídeo, uma a cada 20 a 40 segundos, para renovar a atenção;',
+        'convide quem assiste a imaginar, sentir e refletir ("imagine você...", "pense nisso por um segundo...");',
+        'ênfase: frases curtas nos momentos fortes, ritmo variado, palavras concretas e visuais, fala de conversa (você, a gente), sem jargão;',
+        'feche com um final que emocione ou surpreenda e um convite natural para comentar ou se inscrever.',
+      ].join(' '),
       `Pedido do cliente:\n"""\n${project.prompt}\n"""`,
       // Refazer o roteiro pela tela de aprovação: a orientação do cliente manda.
       hint ? `O cliente leu o roteiro anterior e pediu para refazer assim:\n"""\n${hint}\n"""` : '',
@@ -82,7 +98,7 @@ export async function script(job: Job) {
     let plan: ScriptOutput | null = null
     let feedback = ''
     for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
-      const out = await askClaude({ jobId: job.id, cwd: dir, canReadFiles: images.length > 0, schema: ScriptOutput, prompt: base + feedback })
+      const out = await askClaude({ jobId: job.id, cwd: dir, canReadFiles: images.length > 0, research: true, maxTurns: 40, schema: ScriptOutput, prompt: base + feedback })
       const problems = checkPlan(out, project.targetDurationS, images.length)
       if (!problems.length) plan = out
       else feedback = `\n\nSua resposta anterior tinha estes problemas; corrija todos:\n- ${problems.join('\n- ')}`
