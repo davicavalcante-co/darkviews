@@ -156,10 +156,20 @@ function TalkingHead({ id }: { id: string }) {
 
 function ImageReview({ id }: { id: string }) {
   const [scenes, setScenes] = useState<ReviewScene[] | null>(null)
+  const [round, setRound] = useState(1)
   const [swap, setSwap] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { api<{ scenes: ReviewScene[] }>(`/projects/${id}/review`).then((r) => setScenes(r.scenes)).catch((e) => setError(e.message)) }, [id])
+  const load = () => api<{ scenes: ReviewScene[]; round: number }>(`/projects/${id}/review`).then((r) => { setScenes(r.scenes); setRound(r.round) }).catch((e) => setError(e.message))
+  useEffect(() => { load() }, [id])
+  // 2ª rodada: a pessoa pode enviar a própria foto para a cena; ela já entra aprovada e sai desta lista.
+  async function upload(index: number, f: File | undefined) {
+    if (!f) return
+    setBusy(true); setError('')
+    const body = new FormData(); body.append('images', f)
+    try { await api(`/projects/${id}/review/${index}/upload`, { method: 'POST', body }); setSwap((cur) => { const n = new Set(cur); n.delete(index); return n }); await load() }
+    catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
   if (!scenes) return error ? <p className="error">{error}</p> : null
   const toggle = (i: number) => setSwap((cur) => { const n = new Set(cur); n.has(i) ? n.delete(i) : n.add(i); return n })
   async function send() {
@@ -171,10 +181,12 @@ function ImageReview({ id }: { id: string }) {
       <div className="review-head">
         <div>
           <h3>Aprove as imagens antes da narração</h3>
-          <p className="muted">Todas começam aprovadas. Clique em <b>Trocar</b> nas que não servem: o sistema busca outra opção só para essas cenas e mostra de novo.</p>
+          <p className="muted">{round > 1
+            ? <>Estas são as novas opções para as cenas que você trocou ({scenes.length}). Se nenhuma servir, clique em <b>Enviar minha foto</b> na cena.</>
+            : <>Todas começam aprovadas. Clique em <b>Trocar</b> nas que não servem: o sistema busca outra opção só para essas cenas e mostra de novo.</>}</p>
         </div>
         <button type="button" disabled={busy} onClick={send}>
-          {busy ? 'Enviando…' : swap.size ? `Trocar ${swap.size} e aprovar o resto` : 'Aprovar todas e continuar'}
+          {busy ? 'Enviando…' : !scenes.length ? 'Tudo aprovado · continuar' : swap.size ? `Trocar ${swap.size} e aprovar o resto` : 'Aprovar todas e continuar'}
         </button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
@@ -191,8 +203,13 @@ function ImageReview({ id }: { id: string }) {
             <div className="row">
               <small className="muted">{s.bank}</small>
               {s.copyright && <small className="copyright" title={s.credit ?? ""}>Tem direitos autorais do dono</small>}
+              {round > 1 && (
+                <label className="btn ghost upload-photo">Enviar minha foto
+                  <input type="file" hidden accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(e) => { upload(s.index, e.target.files?.[0]); e.target.value = '' }} />
+                </label>
+              )}
               <button type="button" className={swap.has(s.index) ? 'ghost-btn on' : 'ghost-btn'} aria-pressed={swap.has(s.index)} onClick={() => toggle(s.index)}>
-                {swap.has(s.index) ? 'Vai trocar ✕' : 'Trocar'}
+                {swap.has(s.index) ? 'Vai trocar' : 'Trocar'}
               </button>
             </div>
           </article>

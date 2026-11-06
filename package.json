@@ -10,9 +10,7 @@
     "db:demo": "pnpm --filter @corte/api seed:demo",
     "db:setup": "pnpm db:push && pnpm db:seed",
     "tts:setup": "python3 -m venv .venv-tts && .venv-tts/bin/pip install -q piper-tts",
-    "omnivoice:setup": "bash scripts/omnivoice-setup.sh",
-    "omnivoice:start": ".claude/skills/omnivoice/scripts/start-backend.sh",
-    "omnivoice:stop": ".claude/skills/omnivoice/scripts/stop-backend.sh"
+    "voicestudio:start": "bash scripts/voicestudio-start.sh"
   },
   "devDependencies": {
     "typescript": "^5.6"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Instala o OmniVoice Studio (servidor de voz local usado pela skill omnivoice). Baixa ~1,6 GB agora
+# Instala o VoiceStudio (servidor de voz local da aba Vozes). Baixa ~1,6 GB agora
 # e ~2,4 GB do modelo na primeira narração. Idempotente: pode rodar de novo para atualizar.
 set -euo pipefail
-HOME_DIR="${OMNIVOICE_HOME:-$(cd "$(dirname "$0")/.." && pwd)/vendor/voicestudio}"
+HOME_DIR="${VOICESTUDIO_HOME:-$(cd "$(dirname "$0")/.." && pwd)/vendor/voicestudio}"
 
 if ! command -v uv >/dev/null; then
   echo "→ instalando uv (gerenciador de Python) via Homebrew"
@@ -18,5 +18,4 @@ git -C "$HOME_DIR" checkout -q "$VERSION"
 cd "$HOME_DIR"
 echo "→ instalando dependências (pode levar alguns minutos)"
 uv sync
-VIRTUAL_ENV="$(pwd)/.venv" uv pip install 'mcp[cli]'
-echo "✓ OmniVoice instalado. Ligue com: pnpm run omnivoice:start"
+echo "✓ VoiceStudio instalado. Ligue com: pnpm run voicestudio:start"

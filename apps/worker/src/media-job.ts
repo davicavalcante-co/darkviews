@@ -6,10 +6,9 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { activeProviders, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
+import { searchStock, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
-import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
@@ -32,7 +31,7 @@ async function download(url: string, dir: string) {
   return { path: tmp, ...type }
 }
 
-const BANK_NAMES: Record<string, string> = { pexels: 'Pexels', pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
+const BANK_NAMES: Record<string, string> = { pixabay: 'Pixabay', openverse: 'Openverse', serper: 'Google Imagens', web: 'Web', wikimedia: 'Wikimedia Commons' }
 
 const Choices = z.object({ choices: z.array(z.object({ scene: z.number().int(), candidate: z.number().int().min(0) })) })
 
@@ -140,62 +139,49 @@ export async function voice(job: Job) {
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
   await prisma.asset.deleteMany({ where: { projectId: project.id, kind: 'voice' } })
-  // Se a voz escolhida for o OmniVoice, a narração inteira passa pelo Claude Code (skill omnivoice + MCP).
-  // Cena que ele não entregar cai para a próxima voz da lista (Piper, depois macOS).
   // voicePreset vem como "fornecedor:voz" (ex.: "piper:faber"); o fornecedor escolhido vai para o topo.
   const opts = JSON.parse(project.options) as { voiceBrief?: string; voicePreset?: string; voiceTone?: string }
   const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
-  const voices = preferProvider(await activeProviders('voz', project.ownerId), chosenProvider)
-  let directed = new Map<number, string>()
-  if (voices[0]?.provider === 'omnivoice' && chosenProvider !== 'studio') {
-    await step('Claude Code criando a voz (OmniVoice)', 55)
-    if (await ensureOmniVoice()) {
-      directed = await narrateWithClaude({
-        jobId: job.id, projectId: project.id, dir, brief: opts.voiceBrief ?? chosenVoice ?? null, steps: voices[0].config.steps || '16', speed: voices[0].config.speed || '1.0',
-        scenes: scenes.filter((s) => s.narration?.trim()).map((s) => ({ index: s.index, text: s.narration! })),
-      }).catch((e) => {
-        if (e instanceof ClaudeUnavailable) throw e
-        logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `omnivoice via Claude Code falhou: ${(e as Error).message}`, details: { jobId: job.id } })
-        return new Map<number, string>()
-      })
-    } else {
-      logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: 'omnivoice: desligado ou com a licença do modelo não aceita; usando a próxima voz', details: { jobId: job.id } })
-    }
-  }
+  const directed = new Map<number, string>()
 
   // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
   if (chosenProvider === 'studio') {
     const own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
-    const todo = own?.profileId ? scenes.filter((x) => x.narration?.trim()) : []
+    // A voz escolhida narra o vídeo inteiro: sem ela, para (nunca troca por outra voz no meio).
+    if (!own?.profileId) throw new Error('A voz escolhida não existe mais. Escolha outra voz no Novo vídeo ou no editor.')
+    const todo = scenes.filter((x) => x.narration?.trim())
     const started = Date.now()
     for (const [n, s] of todo.entries()) {
       // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
       const left = n ? Math.round(((Date.now() - started) / n) * (todo.length - n) / 1000) : null
-      await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own!.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
+      await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
       // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, as cenas já narradas não são refeitas.
-      const key = createHash('sha1').update(`${own!.profileId}|${own!.speed}|${s.narration}`).digest('hex').slice(0, 16)
+      const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${s.narration}`).digest('hex').slice(0, 16)
       const out = join(dir, `voz-propria-${key}`)
-      try {
-        if (!existsSync(out + '.wav')) {
-          await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own!.profileId!, speed: own!.speed }))
+      // Falha passageira (ex.: o Mac sem memória livre): espera e tenta de novo, até 6 vezes. Demora mais, mas a voz não muda.
+      for (let attempt = 1; !existsSync(out + '.wav'); attempt++) {
+        try {
+          await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own.profileId, speed: own.speed }))
           await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
+        } catch (e) {
+          logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index} (tentativa ${attempt} de 6): ${(e as Error).message}`, details: { jobId: job.id } })
+          if (attempt >= 6) throw new Error(`A sua voz não conseguiu narrar a cena ${s.index + 1}: ${(e as Error).message} Feche outros programas (o VoiceStudio precisa de memória livre) e clique em Tentar de novo: as cenas já narradas são aproveitadas.`)
+          await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length} · tentando de novo (${attempt + 1} de 6)` } })
+          await new Promise((r) => setTimeout(r, attempt * 15_000))
         }
-        directed.set(s.index, out + '.wav')
-      } catch (e) {
-        logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index}: ${(e as Error).message}`, details: { jobId: job.id } })
-        if (e instanceof StudioError) break // VoiceStudio desligado ou sem licença: não adianta tentar as outras cenas
       }
+      directed.set(s.index, out + '.wav')
     }
   }
 
-  // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que o Claude/OmniVoice já narrou é reaproveitado.
+  // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que a voz própria já narrou é reaproveitado.
   await step('Gerando áudio da locução', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   const made = await synthesizeMany(todo.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
     { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
-  for (const [idx, file] of directed) made.set(idx, { path: file, provider: chosenProvider === 'studio' ? 'studio' : 'omnivoice' })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
 
   // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
@@ -229,6 +215,8 @@ export async function voice(job: Job) {
 
   // A trilha não entra na criação: é escolhida no editor e buscada no render.
 
-  await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering' } })
+  // Guarda com qual voz/ritmo a narração foi feita: o render compara com a escolha atual e narra de novo se mudou.
+  const fresh = JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: project.id }, select: { options: true } })).options)
+  await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering', options: JSON.stringify({ ...fresh, voicedWith: voiceKey(opts) }) } })
   await prisma.job.create({ data: { projectId: project.id, type: 'render', stage: 'Na fila' } })
 }

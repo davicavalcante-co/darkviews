@@ -173,7 +173,7 @@ Cada categoria tem uma interface única no backend (por exemplo, `VoiceProvider.
 | Transcrição | Entender a fala da referência e gerar a base das legendas | whisper.cpp (local, gratuito), OpenAI transcrição, Deepgram, AssemblyAI | Comece pelo local; APIs ajudam em áudio ruim ou volume alto |
 | Locução | Narração em português com voz natural | [ElevenLabs](https://elevenlabs.io/developers), OpenAI TTS, Azure Speech, Google Cloud TTS | Guarde a voz escolhida no projeto para manter consistência nas regravações |
 | Música | Trilha de fundo no ritmo do vídeo | [Eleven Music](https://elevenlabs.io/docs/overview/capabilities/music) (faixas de 3 s a 5 min, plano pago), bibliotecas licenciadas (Epidemic Sound, Artlist, Pixabay Music) | Para vídeos acima de 5 min, emendar faixas ou usar biblioteca; confira a licença de uso comercial |
-| Banco de imagens e vídeos reais | Fotos e trechos filmados reais para as cenas | [Pexels](https://www.pexels.com/api/documentation/) (gratuito, fotos e vídeos, 200 req/h e 20.000 req/mês por padrão), Pixabay, Unsplash (só fotos), Shutterstock, Getty Images / iStock, Storyblocks | Gratuitos pedem crédito ao autor; pagos dão mais variedade e licença mais clara para marcas |
+| Banco de imagens e vídeos reais | Fotos e trechos filmados reais para as cenas | Pixabay, Unsplash (só fotos), Shutterstock, Getty Images / iStock, Storyblocks | Gratuitos pedem crédito ao autor; pagos dão mais variedade e licença mais clara para marcas |
 | Geração de imagem | Imagens que não existem em banco (produto em cenário, ilustração) | OpenAI Images, Google Imagen (Gemini API), Black Forest Labs (FLUX), Stability AI, Ideogram (bom com texto na imagem) | Use para complementar, não para substituir fotos de pessoas reais |
 | Geração de vídeo | Planos curtos animados (5 a 10 s) entre fotos e vídeos de banco | Google Veo (Gemini API), Runway, Luma, Kling | Caro e lento por segundo gerado; reserve para aberturas e transições |
 | Avatar / apresentador | Pessoa digital falando o roteiro | HeyGen, Synthesia, D-ID | Precisa de consentimento quando o avatar imita alguém real |
@@ -192,7 +192,7 @@ Para sair do vídeo só com elementos 2D e 3D, o sistema precisa de três fontes
 
 ### 1. Contas e chaves
 
-- [ ] Uma conta gratuita na Pexels (fotos e vídeos) para começar sem custo.
+- [ ] Uma conta gratuita na Pixabay (fotos e vídeos), se quiser mais imagens.
 - [ ] Pixabay como segunda opção gratuita.
 - [ ] Se for produzir para marcas ou anúncios pagos: um banco pago com licença comercial clara (Shutterstock, Getty/iStock ou Storyblocks).
 - [ ] Uma conta de locução (ElevenLabs ou similar) e uma fonte de música licenciada.

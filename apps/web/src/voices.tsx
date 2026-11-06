@@ -89,7 +89,7 @@ export function VoicesPage() {
       </ol>
       {!voices.length && (
         <button type="button" className="voice-empty" onClick={() => setEditing('new')}>
-          <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Crie a sua primeira voz</b><small>Clone a sua voz em 30 segundos ou invente uma nova.</small>
+          <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Crie a sua primeira voz</b><small>Clone a sua voz em 12 segundos ou invente uma nova.</small>
         </button>
       )}
       {published.length > 0 && <><h2 className="voice-h">Publicadas <span className="muted">{published.length}</span></h2><VoiceList list={published} onEdit={setEditing} reload={load} /></>}
@@ -173,12 +173,12 @@ function VoiceTune({ voice, noPublish }: { voice: Voice; noPublish?: boolean }) 
   )
 }
 
-// Frase para ler na gravação: ~20 s em ritmo natural, com sons variados do português (dá uma cópia mais fiel).
-const READ_TEXT = 'Olá! Esta é a minha voz. Hoje eu vou contar uma história curiosa, com calma e clareza. Cada vídeo começa com uma boa ideia, um pouco de café e muita vontade de explicar as coisas de um jeito simples.'
-const MIN_S = 10, MAX_S = 30
+// Frase para ler na gravação: ~10 s em ritmo natural, com sons variados do português (dá uma cópia mais fiel).
+const READ_TEXT = 'Olá! Esta é a minha voz. Hoje eu vou contar uma história curiosa, com calma, clareza e muita vontade de explicar.'
+const MIN_S = 8, MAX_S = 12 // referência curta: o VoiceStudio precisa de menos memória para usar a voz
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
-// Gravador: tempo na tela, medidor de volume, para sozinho em 30 s e deixa ouvir antes de salvar.
+// Gravador: tempo na tela, medidor de volume, para sozinho em 12 s e deixa ouvir antes de salvar.
 function Recorder({ audio, onAudio, onError }: { audio: Blob | null; onAudio: (b: Blob | null, seconds: number) => void; onError: (m: string) => void }) {
   const [recording, setRecording] = useState(false)
   const [seconds, setSeconds] = useState(0)
@@ -229,7 +229,7 @@ function Recorder({ audio, onAudio, onError }: { audio: Blob | null; onAudio: (b
         </button>
         <div className="rec-meta">
           <div className="rec-time"><b>{clock(shown)}</b><span className="muted"> / {clock(MAX_S)}</span>
-            <span className={`rec-hint ${shown >= MIN_S ? 'ok' : ''}`}>{recording ? (seconds < MIN_S ? `fale mais ${Math.ceil(MIN_S - seconds)} s` : 'ótimo, pode parar quando terminar') : audio ? (length && length < MIN_S ? 'curto demais: grave pelo menos 10 s' : 'gravação pronta') : 'mínimo 10 s · para sozinho em 30 s'}</span>
+            <span className={`rec-hint ${shown >= MIN_S ? 'ok' : ''}`}>{recording ? (seconds < MIN_S ? `fale mais ${Math.ceil(MIN_S - seconds)} s` : 'ótimo, pode parar quando terminar') : audio ? (length && length < MIN_S ? 'curto demais: grave pelo menos 8 s' : 'gravação pronta') : 'mínimo 8 s · para sozinho em 12 s'}</span>
           </div>
           <div className="rec-bar" aria-hidden="true">
             <span className="rec-fill" style={{ width: `${(shown / MAX_S) * 100}%` }} />
@@ -292,7 +292,7 @@ function VoiceForm({ voice, status, onClose }: { voice: Voice | null; status: St
         <label className="field"><span className="field-label">Nome da voz</span><input value={name} maxLength={60} placeholder="Ex.: Minha voz, Narradora calma" onChange={(e) => setName(e.target.value)} autoFocus /></label>
         <div className="kind-cards" role="radiogroup" aria-label="Como criar a voz">
           <button type="button" role="radio" aria-checked={kind === 'clone'} className="kind-card" onClick={() => setKind('clone')}>
-            <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Clonar minha voz</b><small>Grave 10 a 30 s lendo a frase. A voz fica igual à sua.</small>
+            <span className="kind-icon"><Icon name="microfone" size={24} /></span><b>Clonar minha voz</b><small>Grave 8 a 12 s lendo a frase. A voz fica igual à sua.</small>
           </button>
           <button type="button" role="radio" aria-checked={kind === 'design'} className="kind-card" onClick={() => setKind('design')}>
             <span className="kind-icon"><Icon name="brilho" size={24} /></span><b>Criar uma voz</b><small>Escolha gênero, idade e tom. O sistema inventa a voz.</small>

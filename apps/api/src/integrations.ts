@@ -2,36 +2,34 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { decryptSecret, encryptSecret, maskSecret, prisma } from '@corte/db'
 import { testIntegration } from '@corte/providers'
 import { IntegrationUpdate, PROVIDERS } from '@corte/shared'
-import { requireAdmin, requireAuth } from './auth.js'
+import { requireAuth } from './auth.js'
 
 const find = (provider: string) => PROVIDERS.find((p) => p.provider === provider)
 
-// Duas camadas: o padrão do sistema (admin, ownerId = null) e a preferência de cada usuário (ownerId = ele).
-// O usuário vê se o padrão do admin está ligado, mas nunca a chave do admin (nem mascarada).
-function routes(app: FastifyInstance, base: string, scope: 'system' | 'me') {
-  const guard = { preHandler: scope === 'system' ? requireAdmin : requireAuth }
-  const ownerOf = (req: FastifyRequest) => (scope === 'system' ? null : req.user!.id)
+// Cada usuário tem as suas integrações. O que ele nunca mexeu segue o catálogo: as gratuitas sem chave (builtIn) vêm ligadas.
+// Linhas antigas do "padrão para todos" (ownerId = null) são ignoradas.
+export async function integrationRoutes(app: FastifyInstance) {
+  const base = '/api/integrations'
+  const guard = { preHandler: requireAuth }
+  const ownerOf = (req: FastifyRequest) => req.user!.id
   const findRow = (provider: string, ownerId: string | null) => prisma.integration.findFirst({ where: { provider, ownerId }, include: { secrets: true } })
 
   app.get(base, guard, async (req) => {
     const ownerId = ownerOf(req)
-    const rows = await prisma.integration.findMany({ where: { OR: [{ ownerId }, { ownerId: null }] }, include: { secrets: true } })
+    const rows = await prisma.integration.findMany({ where: { ownerId }, include: { secrets: true } })
     return PROVIDERS.map((p) => {
-      const row = rows.find((r) => r.provider === p.provider && r.ownerId === ownerId)
-      const system = rows.find((r) => r.provider === p.provider && r.ownerId === null)
-      const systemOn = system ? system.enabled && p.secrets.every((n) => system.secrets.some((s) => s.name === n)) : !!p.builtIn
+      const row = rows.find((r) => r.provider === p.provider)
       return {
         provider: p.provider, label: p.label, category: p.category, tier: p.tier, help: p.help, signup: p.signup ?? null, tutorial: p.tutorial,
         secrets: p.secrets, choices: p.choices ?? {}, builtIn: !!p.builtIn,
         configured: !!row,
-        enabled: row ? row.enabled : scope === 'system' ? !!p.builtIn : systemOn,
-        priority: row?.priority ?? system?.priority ?? p.priority,
-        config: { ...p.config, ...(system ? JSON.parse(system.config) : {}), ...(row ? JSON.parse(row.config) : {}) },
+        enabled: row ? row.enabled : !!p.builtIn,
+        priority: row?.priority ?? p.priority,
+        config: { ...p.config, ...(row ? JSON.parse(row.config) : {}) },
         secretsSet: Object.fromEntries(p.secrets.map((name) => {
           const s = row?.secrets.find((x) => x.name === name)
           return [name, s ? maskSecret(s.last4) : null]
         })),
-        systemDefault: scope === 'me' ? { enabled: systemOn } : null,
         lastTestAt: row?.lastTestAt ?? null,
         lastTestOk: row?.lastTestOk ?? null,
       }
@@ -59,20 +57,18 @@ function routes(app: FastifyInstance, base: string, scope: 'system' | 'me') {
     // Audita o que mudou, nunca o valor da chave.
     await prisma.auditLog.create({
       data: {
-        actorId: req.user!.id, action: scope === 'system' ? 'integration.update' : 'integration.update_own', targetType: 'integration', targetId: row.id, ip: req.ip,
+        actorId: req.user!.id, action: 'integration.update_own', targetType: 'integration', targetId: row.id, ip: req.ip,
         details: JSON.stringify({ provider: p.provider, enabled: input.enabled, priority: input.priority, secretsChanged: changed }),
       },
     })
     return { ok: true }
   })
 
-  // Volta a usar o padrão do sistema (apaga a preferência do usuário, com as chaves dele).
-  if (scope === 'me') {
-    app.delete<{ Params: { provider: string } }>(`${base}/:provider`, guard, async (req, reply) => {
-      const { count } = await prisma.integration.deleteMany({ where: { provider: req.params.provider, ownerId: req.user!.id } })
-      return count ? { ok: true } : reply.code(404).send({ error: 'Você não tem preferência salva para esta integração' })
-    })
-  }
+  // Volta ao padrão (apaga a preferência do usuário, com as chaves dele).
+  app.delete<{ Params: { provider: string } }>(`${base}/:provider`, guard, async (req, reply) => {
+    const { count } = await prisma.integration.deleteMany({ where: { provider: req.params.provider, ownerId: req.user!.id } })
+    return count ? { ok: true } : reply.code(404).send({ error: 'Você não tem preferência salva para esta integração' })
+  })
 
   app.post<{ Params: { provider: string } }>(`${base}/:provider/test`, guard, async (req, reply: FastifyReply) => {
     const p = find(req.params.provider)
@@ -87,9 +83,4 @@ function routes(app: FastifyInstance, base: string, scope: 'system' | 'me') {
     if (row) await prisma.integration.update({ where: { id: row.id }, data: { lastTestAt: new Date(), lastTestOk: ok } })
     return { ok }
   })
-}
-
-export async function integrationRoutes(app: FastifyInstance) {
-  routes(app, '/api/admin/integrations', 'system')
-  routes(app, '/api/integrations', 'me')
 }

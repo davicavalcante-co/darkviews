@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DURATION_S, VIDEO_MAX_BYTES, VIDEO_TYPES, type ProjectStatus } from '@corte/shared'
 
-type Voices = { voices: { id: string; label: string; provider: string; freeText: boolean }[]; current: string | null; tones: readonly { id: string; label: string }[] }
+type Voices = { voices: { id: string; label: string; provider: string }[]; current: string | null; tones: readonly { id: string; label: string }[] }
 import { api } from './api'
 import { Modal } from './ui'
 import { Icon } from './icons'
@@ -247,9 +247,6 @@ function VoicePicker({ preset, setPreset, tone, setTone }: { preset: string; set
         {!chosen && <option value="">{preset ? `Personalizada: ${preset.split(':').slice(1).join(':')}` : 'Escolha uma voz'}</option>}
         {v.voices.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}
       </select>
-      {(chosen?.freeText || (!chosen && preset.startsWith('omnivoice:'))) && (
-        <input value={preset.slice('omnivoice:'.length)} maxLength={50} onChange={(e) => setPreset('omnivoice:' + e.target.value)} placeholder="Ou descreva: mulher jovem, animada…" aria-label="Descrição da voz" />
-      )}
       <div className="choice-row" role="radiogroup" aria-label="Tom">
         {v.tones.map((t) => <button key={t.id} type="button" role="radio" aria-checked={tone === t.id} className="choice small-choice" onClick={() => setTone(t.id)}>{t.label}</button>)}
       </div>
