@@ -178,7 +178,7 @@ export async function voice(job: Job) {
   }
 
   // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que a voz própria já narrou é reaproveitado.
-  await step('Gerando áudio da locução', 60)
+  await step('Narração com a voz escolhida', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
@@ -220,7 +220,7 @@ export async function voice(job: Job) {
   const cardRow = await prisma.setting.findUnique({ where: { key: `card_duration:${project.ownerId}` } })
   const cardDefault = cardRow ? Number(cardRow.value) : null
   for (const [i, s] of scenes.entries()) {
-    await step('Gerando áudio da locução', 60 + Math.round((i / scenes.length) * 35))
+    await step('Narração com a voz escolhida', 60 + Math.round((i / scenes.length) * 35))
     const next = scenes[i + 1]
     // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
     const lead = i > 0 && isNewContext(s) ? 0.25 : 0.05

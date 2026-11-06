@@ -319,7 +319,7 @@ export async function render(job: Job) {
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
     })),
     music, musicVolume: opts.musicVolume, sfxVolume: opts.sfxVolume, ass: toAss([], timed, style, undefined, true, opts.titleStyle), fontsDir: FONTS_DIR, out: base, cleanOut,
-    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Criando vídeo: cenas' : 'Criando vídeo: textos e áudio', progress: p } }),
+    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros', progress: p } }),
   })
   let out = base
   if (opts.captionsOn) {

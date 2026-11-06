@@ -298,7 +298,7 @@ function ImageReview({ id }: { id: string }) {
 }
 
 type Timing = { stages: { type: string; status: string; elapsedS: number; estimateS: number }[]; elapsedS: number; estimateS: number }
-const STAGE_NAME: Record<string, string> = { ingest: 'Referência', analyze: 'Análise', script: 'Roteiro', media: 'Imagens', voice: 'Áudio', render: 'Vídeo' }
+const STAGE_NAME: Record<string, string> = { ingest: 'Referência', analyze: 'Análise', script: 'Roteiro', media: 'Imagens', voice: 'Narração', render: 'Vídeo e áudio final' }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
 // Cronômetro da criação: tempo de cada etapa e estimativa total. Passou do previsto: pergunta se continua.
