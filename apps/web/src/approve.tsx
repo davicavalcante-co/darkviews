@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { CUT_LABELS, CUT_LIMITS, planCuts, type CutPlatform } from '@corte/shared'
 import { api } from './api'
-import { PageHead, Section } from './ui'
+import { PageHead, Player, Section } from './ui'
 
 type Cut = { id: string; platform: CutPlatform; partIndex: number; startS: number; endS: number; background: 'blur' | 'color'; status: string }
 type CutsData = { status: string; approvedAt: string | null; job: { stage: string | null; progress: number } | null; cuts: Cut[] }
@@ -57,7 +57,7 @@ export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }
       <Section idx={1} title={data.approvedAt ? 'Gerar mais cortes' : 'Trecho e enquadramento'}>
         <div className="cards">
           <div className="panel wide">
-            <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />
+            <Player videoRef={ref} src={`/api/projects/${id}/video?v=${detail.video.version}`} />
             <div className="grid">
               <label>Início do trecho (s)
                 <input type="number" min={0} max={dur} step={0.1} value={startS} onChange={(e) => setStart(Number(e.target.value))} />
@@ -124,7 +124,7 @@ function CutCard({ id, cut, disabled, onRedo }: { id: string; cut: Cut; disabled
     <article className="cut">
       <strong>{CUT_LABELS[cut.platform]} · parte {cut.partIndex + 1}</strong>
       <small className="muted">{fmt(cut.startS)}–{fmt(cut.endS)} · {STATUS[cut.status] ?? cut.status}</small>
-      {cut.status === 'done' && <video controls preload="metadata" src={file} />}
+      {cut.status === 'done' && <Player className="cut-video" src={file} />}
       {cut.status === 'done' && <a className="btn" href={`${file}?download=1`}>Baixar</a>}
       <button type="button" className="link" disabled={disabled} onClick={() => onRedo(other)}>Refazer com {BG_LABEL[other]}</button>
     </article>

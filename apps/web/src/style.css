@@ -1109,3 +1109,18 @@ select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not
 }
 button:not([class]), button.ghost-btn, button.ghost, button.danger, button.link, .btn, label.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); white-space: nowrap; }
 input[type="color"] { box-sizing: border-box; height: var(--control-h); }
+
+/* Controles do player na identidade do Darkviews */
+.dv-player { display: flex; flex-direction: column; gap: 0; min-width: 0; }
+.dv-player .player, .dv-player .cut-video { border-radius: var(--radius) var(--radius) 0 0; }
+.cut-video { width: 100%; aspect-ratio: 9 / 16; background: #000; display: block; }
+.dv-video { cursor: pointer; }
+.dv-controls { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); min-width: 0; }
+.monitor .dv-controls { width: min(100%, 860px); margin: -10px auto 10px; box-sizing: border-box; }
+.dv-controls .icon-btn { color: var(--fg); flex: none; }
+.dv-controls .dv-mute { font-size: 12px; color: var(--muted); width: auto; padding: 0 6px; }
+.dv-time { font: 500 12px/1 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.dv-seek { flex: 1; min-width: 60px; margin: 0; height: 4px; padding: 0; border: 0; appearance: none; -webkit-appearance: none; border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--border) var(--p, 0%)); cursor: pointer; }
+.dv-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }
+.dv-seek::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }

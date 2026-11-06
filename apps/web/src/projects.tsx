@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ProgressEvent, ProjectStatus } from '@corte/shared'
 import { api } from './api'
-import { clock, Modal, PageHead, Section, useNow } from './ui'
+import { clock, Modal, PageHead, Player, Section, useNow } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
@@ -437,10 +437,10 @@ export function Progress({ id }: { id: string }) {
               {/* Criando outra versão: deixa claro que este é o vídeo anterior, não o novo. */}
               {['queued', 'running', 'paused'].includes(ev.job?.status ?? '') ? (
                 <div className="old-video">
-                  <video className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />
+                  <Player src={`/api/projects/${id}/video?v=${detail.video.version}`} />
                   <div className="making" role="status"><span className="making-dot" />Nova versão em andamento · este é o vídeo anterior</div>
                 </div>
-              ) : <video className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${detail.video.version}`} />}
+              ) : <Player src={`/api/projects/${id}/video?v=${detail.video.version}`} />}
               <p className="muted">Versão {detail.video.version}{['queued', 'running', 'paused'].includes(ev.job?.status ?? '') ? ' (anterior)' : ''} · {fmtDuration(detail.video.durationS)}</p>
             </div>
           )}

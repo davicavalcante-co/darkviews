@@ -3,7 +3,7 @@ import { DEFAULT_IDENTITY, detectPlatform, IMAGE_MAX_BYTES, IMAGE_TYPES, MAX_DUR
 
 type Voices = { voices: { id: string; label: string; provider: string }[]; current: string | null; tones: readonly { id: string; label: string }[] }
 import { api } from './api'
-import { Modal } from './ui'
+import { Modal, Player } from './ui'
 import { Icon } from './icons'
 import { compact } from './dashboard'
 
@@ -375,7 +375,7 @@ function CreationRow({ r, onPick, picked, reload }: { r: Creation; onPick: (v?: 
       </div>
       {open != null && (
         <Modal open onClose={() => setOpen(null)} kicker={`Versão ${open}`} title={r.name} wide>
-          <video className="player" src={`/api/projects/${r.id}/video?v=${open}`} controls autoPlay />
+          <Player src={`/api/projects/${r.id}/video?v=${open}`} autoPlay />
           <footer className="modal-actions">
             <a className="btn ghost" href={`/api/projects/${r.id}/video?v=${open}&download=1`}>Baixar</a>
             <button type="button" className="ghost-btn" onClick={() => { const v = r.versions.find((x) => x.version === open); if (v) fav(v) }}><Icon name="coracao" size={16} filled={r.versions.find((x) => x.version === open)?.favorite} /> {r.versions.find((x) => x.version === open)?.favorite ? 'Favorita' : 'Favoritar'}</button>

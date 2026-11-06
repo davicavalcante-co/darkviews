@@ -6,7 +6,7 @@ import { prisma, STORAGE_DIR, type Job } from '@corte/db'
 import { DEFAULT_IDENTITY, MAX_DURATION_S, MUSIC_STYLES, type Identity } from '@corte/shared'
 import { pickMusic } from '@corte/providers'
 import { randomUUID } from 'node:crypto'
-import { buildSegments, toAss, type CaptionStyle, type Segment, type TimedScene, type TitleStyle } from './captions.js'
+import { buildSegments, retimeSegments, toAss, type CaptionStyle, type Segment, type TimedScene, type TitleStyle } from './captions.js'
 import { assertLibass, durationOf, FFMPEG, run } from './ffmpeg.js'
 import { ensureFont, FONTS_DIR } from './fonts.js'
 import { subjectMask } from './subject.js'
@@ -256,6 +256,14 @@ export async function render(job: Job) {
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
 
   const timed = timedScenes(scenes, voices)
+  // Onde a fala de cada cena começa e termina de verdade (a pausa de entrada e de saída não leva legenda).
+  for (const [i, s] of scenes.entries()) {
+    const file = voices.get(s.index)?.filePath
+    if (!file || !existsSync(file)) continue
+    const [on, off] = await speechBounds(file)
+    timed[i].speechStartS = Math.min(s.startS + on, s.endS)
+    timed[i].speechEndS = Math.min(s.startS + off, s.endS)
+  }
   const identityRow = await prisma.setting.findUnique({ where: { key: `identity:${project.ownerId}` } })
   const identity: Identity = identityRow ? { ...DEFAULT_IDENTITY, ...JSON.parse(identityRow.value) } : DEFAULT_IDENTITY
   opts.titleStyle ??= identity.title
@@ -281,7 +289,10 @@ export async function render(job: Job) {
   await ensureFont(track.fontFamily, track.fontWeight)
   const style = trackStyle(track)
   if (opts.titleStyle) await ensureFont(opts.titleStyle.fontFamily, 700)
-  const segments: Segment[] = track.segments.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) }))
+  // A legenda acompanha sempre a fala atual: refaz os tempos (o texto fica) e guarda, para o editor mostrar igual.
+  const segments: Segment[] = retimeSegments(track.segments.map((s) => ({ startS: s.startS, endS: s.endS, text: s.text, highlights: JSON.parse(s.highlights) })), timed)
+  const moved = track.segments.map((row, i) => ({ id: row.id, ...segments[i] })).filter((x, i) => x.startS !== track!.segments[i].startS || x.endS !== track!.segments[i].endS)
+  if (moved.length) await prisma.$transaction(moved.map((x) => prisma.captionSegment.update({ where: { id: x.id }, data: { startS: x.startS, endS: x.endS } })))
 
   const version = ((await prisma.videoVersion.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1
   const dir = join(STORAGE_DIR, 'renders', project.id)
@@ -311,9 +322,11 @@ export async function render(job: Job) {
     await prisma.job.update({ where: { id: job.id }, data: { stage: 'Trilha sonora', progress: 4 } })
     music = await syncMusic(project.id, project.ownerId, opts, music, timed.at(-1)?.endS ?? 0)
   }
+  const onFrame = (t: number) => Math.round(t * FPS) / FPS
   if (!reuse && !retitle) await renderVideo({
     scenes: scenes.map((s) => ({
-      durationS: s.endS - s.startS,
+      // Começo e fim de cada cena no quadro exato: com 100+ cenas, arredondar cada duração separado somava atraso entre imagem e fala.
+      durationS: onFrame(s.endS) - onFrame(s.startS),
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
       path: s.asset?.filePath ?? nearPhoto(s.index), transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor,
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
@@ -408,4 +421,15 @@ async function syncMusic(projectId: string, ownerId: string, opts: { musicStyle?
   const p = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { options: true } })
   await prisma.project.update({ where: { id: projectId }, data: { options: JSON.stringify({ ...JSON.parse(p.options), musicPicked: want.id }) } })
   return m?.path ?? null
+}
+
+// Início e fim da fala num áudio (s), ignorando o silêncio das pontas.
+export async function speechBounds(file: string): Promise<[number, number]> {
+  const { stderr } = await run(FFMPEG, ['-hide_banner', '-i', file, '-af', 'silencedetect=noise=-40dB:d=0.08', '-f', 'null', '-'], { maxBuffer: 8 * 1024 * 1024 })
+  const total = await durationOf(file)
+  const starts = [...stderr.matchAll(/silence_start: (-?[\d.]+)/g)].map((m) => Math.max(0, Number(m[1])))
+  const ends = [...stderr.matchAll(/silence_end: ([\d.]+)/g)].map((m) => Number(m[1]))
+  const on = starts.length && starts[0] < 0.02 && ends.length ? ends[0] : 0
+  const off = starts.length && starts.at(-1)! > on && (ends.length < starts.length || ends.at(-1)! >= total - 0.05) ? starts.at(-1)! : total
+  return [on, Math.max(on, off)]
 }
