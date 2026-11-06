@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Icon } from './icons'
 
 // Cabeçalho de página: rótulo pequeno, título grande e ações à direita, com régua grossa embaixo.
 export function PageHead({ kicker, title, children, back }: { kicker?: string; title: ReactNode; children?: ReactNode; back?: { href: string; label: string } }) {
@@ -96,4 +97,66 @@ export function useNow(on: boolean | undefined) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => { if (!on) return; const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i) }, [on])
   return now
+}
+
+// ---------- Player com os controles na identidade do Darkviews ----------
+// Espaço pausa ou continua o vídeo em foco: o último que a pessoa usou ou, se nenhum, o primeiro visível na tela.
+let lastVideo: HTMLVideoElement | null = null
+if (typeof window !== 'undefined') window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space' || e.repeat) return
+  const t = e.target as HTMLElement
+  if (t.closest('input, textarea, select, [contenteditable="true"]')) return
+  const visible = [...document.querySelectorAll<HTMLVideoElement>('video.dv-video')].find((v) => { const r = v.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight && r.width > 0 })
+  const v = lastVideo?.isConnected ? lastVideo : visible
+  if (!v) return
+  e.preventDefault()
+  if (v.paused) v.play().catch(() => {}); else v.pause()
+})
+
+const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+
+// Barra de controles de um <video> (sem os controles nativos). Fica fora do quadro, para não cobrir legenda e enunciados.
+export function VideoControls({ videoRef }: { videoRef: React.RefObject<HTMLVideoElement> }) {
+  const [, redraw] = useState(0)
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.classList.add('dv-video')
+    const up = () => redraw((n) => n + 1)
+    const mine = () => { lastVideo = v }
+    const toggle = () => { lastVideo = v; if (v.paused) v.play().catch(() => {}); else v.pause() }
+    const evs = ['play', 'pause', 'timeupdate', 'durationchange', 'volumechange', 'ended'] as const
+    evs.forEach((n) => v.addEventListener(n, up)); v.addEventListener('play', mine); v.addEventListener('click', toggle)
+    return () => { evs.forEach((n) => v.removeEventListener(n, up)); v.removeEventListener('play', mine); v.removeEventListener('click', toggle) }
+  }, [videoRef.current])
+  const v = videoRef.current
+  const dur = v && Number.isFinite(v.duration) ? v.duration : 0
+  const t = v?.currentTime ?? 0
+  const act = (fn: (v: HTMLVideoElement) => void) => () => { if (v) { lastVideo = v; fn(v) } }
+  return (
+    <div className="dv-controls">
+      <button type="button" className="icon-btn" aria-label={v?.paused === false ? 'Pausar (espaço)' : 'Tocar (espaço)'} onClick={act((x) => (x.paused ? x.play().catch(() => {}) : x.pause()))}>
+        <Icon name={v?.paused === false ? 'pausar' : 'tocar'} size={16} filled />
+      </button>
+      <span className="dv-time">{fmtTime(t)} / {fmtTime(dur)}</span>
+      <input type="range" className="dv-seek" aria-label="Posição do vídeo" min={0} max={dur || 0} step={0.1} value={t}
+        style={{ ['--p' as string]: `${dur ? (t / dur) * 100 : 0}%` }} onChange={(e) => { if (v) { lastVideo = v; v.currentTime = Number(e.target.value) } }} />
+      <button type="button" className="icon-btn dv-mute" aria-label={v?.muted ? 'Ligar o som' : 'Tirar o som'} onClick={act((x) => { x.muted = !x.muted })}>{v?.muted ? 'Sem som' : 'Som'}</button>
+      <button type="button" className="icon-btn" aria-label="Tela cheia" onClick={act((x) => { const el = x.parentElement ?? x; document.fullscreenElement ? document.exitFullscreen() : el.requestFullscreen?.() })}>
+        <Icon name="expandir" size={16} />
+      </button>
+    </div>
+  )
+}
+
+// Vídeo com os controles do Darkviews embaixo.
+export function Player({ src, className = 'player', autoPlay, videoRef, onTimeUpdate }: { src: string; className?: string; autoPlay?: boolean; videoRef?: React.RefObject<HTMLVideoElement>; onTimeUpdate?: (t: number) => void }) {
+  const own = useRef<HTMLVideoElement>(null)
+  const ref = videoRef ?? own
+  return (
+    <div className="dv-player">
+      <video ref={ref} className={className} preload="metadata" src={src} autoPlay={autoPlay} playsInline onTimeUpdate={onTimeUpdate && ((e) => onTimeUpdate(e.currentTarget.currentTime))} />
+      <VideoControls videoRef={ref} />
+    </div>
+  )
 }

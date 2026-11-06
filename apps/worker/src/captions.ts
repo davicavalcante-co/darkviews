@@ -1,6 +1,7 @@
 export type Segment = { startS: number; endS: number; text: string; highlights: number[] }
 export type CaptionStyle = { fontFamily: string; fontWeight: number; size: number; color: string; highlightColor: string; highlightMode: string; position: string; outline?: boolean }
-export type TimedScene = { startS: number; endS: number; speechS: number; narration: string; onScreenText: string | null; isCard: boolean }
+// speechStartS/speechEndS: onde a fala realmente começa e termina (medido no áudio), sem a pausa de entrada e de saída.
+export type TimedScene = { startS: number; endS: number; speechS: number; narration: string; onScreenText: string | null; isCard: boolean; speechStartS?: number; speechEndS?: number }
 
 // Cor da faixa de destaque no formato do ASS (&HAABBGGRR, opaca).
 const hlBox = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.slice(1, 3)}`
@@ -8,21 +9,34 @@ const hlBox = (hex: string) => `&H00${hex.slice(5, 7)}${hex.slice(3, 5)}${hex.sl
 const WORDS_PER_LINE = 6
 const norm = (w: string) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\p{L}\p{N}]/gu, '')
 
-// Quebra a narração de cada cena em legendas curtas, com tempo proporcional ao tamanho das palavras.
+const wordsOf = (t: string) => t.split(/\s+/).filter(Boolean)
+// Janela da fala na cena: medida no áudio quando há; senão a cena toda.
+const speechWindow = (s: TimedScene) => {
+  const start = s.speechStartS ?? s.startS
+  const end = s.speechEndS ?? s.startS + Math.min(s.speechS || s.endS - s.startS, s.endS - s.startS)
+  return [start, Math.max(start + 0.1, end)] as const
+}
+// Espalha as linhas de uma cena pela janela da fala, proporcional ao tamanho das palavras.
+function place(lines: { text: string; highlights: number[] }[], s: TimedScene): Segment[] {
+  const [start, end] = speechWindow(s)
+  const size = (t: string) => wordsOf(t).reduce((n, w) => n + w.length + 1, 0)
+  const total = lines.reduce((n, l) => n + size(l.text), 0) || 1
+  let t = start
+  return lines.map((l) => { const len = (size(l.text) / total) * (end - start); const seg = { ...l, startS: round(t), endS: round(t + len) }; t += len; return seg })
+}
+
+// Quebra a narração de cada cena em legendas curtas, presas ao tempo da fala.
 export function buildSegments(scenes: TimedScene[], mode: string, keywords: string[]): Segment[] {
   const keys = new Set(keywords.flatMap((k) => k.split(/\s+/)).map(norm).filter((k) => k.length > 2))
   const out: Segment[] = []
   for (const s of scenes) {
-    const words = s.narration.split(/\s+/).filter(Boolean)
+    const words = wordsOf(s.narration)
     if (!words.length) continue
-    const speech = Math.min(s.speechS || s.endS - s.startS, s.endS - s.startS)
-    const total = words.reduce((n, w) => n + w.length + 1, 0)
     // Linhas equilibradas (13 palavras viram 5+5+3, não 6+6+1).
     const per = Math.ceil(words.length / Math.ceil(words.length / WORDS_PER_LINE))
-    let t = s.startS
+    const lines: { text: string; highlights: number[] }[] = []
     for (let i = 0; i < words.length; i += per) {
       const chunk = words.slice(i, i + per)
-      const len = (chunk.reduce((n, w) => n + w.length + 1, 0) / total) * speech
       let highlights: number[] = []
       if (mode === 'karaokê') highlights = chunk.map((_, j) => j)
       else if (mode === 'palavra-chave') {
@@ -32,9 +46,28 @@ export function buildSegments(scenes: TimedScene[], mode: string, keywords: stri
           if (norm(chunk[longest]).length > 5) highlights = [longest]
         }
       }
-      out.push({ startS: round(t), endS: round(t + len), text: chunk.join(' '), highlights })
-      t += len
+      lines.push({ text: chunk.join(' '), highlights })
     }
+    out.push(...place(lines, s))
+  }
+  return out
+}
+
+// Legenda já existente (talvez editada): mantém o texto e refaz os tempos pela fala atual de cada cena,
+// para nunca ficar adiantada ou atrasada (ex.: depois de mudar a duração das cartelas). As linhas são ligadas às cenas
+// pela ordem das palavras; se o texto mudou demais para isso (outro número de palavras), mantém os tempos.
+export function retimeSegments(segments: Segment[], scenes: TimedScene[]): Segment[] {
+  const spoken = scenes.filter((s) => wordsOf(s.narration).length)
+  const need = spoken.map((s) => wordsOf(s.narration).length)
+  if (need.reduce((a, b) => a + b, 0) !== segments.reduce((n, g) => n + wordsOf(g.text).length, 0)) return segments
+  const out: Segment[] = []
+  let k = 0
+  for (const [i, s] of spoken.entries()) {
+    const lines: Segment[] = []
+    let left = need[i]
+    while (left > 0 && k < segments.length) { lines.push(segments[k]); left -= wordsOf(segments[k].text).length; k++ }
+    if (left !== 0) return segments // uma linha atravessa duas cenas: não dá para ligar com certeza
+    out.push(...place(lines, s))
   }
   return out
 }

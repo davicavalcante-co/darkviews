@@ -39,3 +39,37 @@ describe('legendas', () => {
     expect(ass).not.toMatch(/Dialogue: 0,.*Default/)
   })
 })
+
+describe('legenda presa à fala', () => {
+  const scene = (startS: number, endS: number, narration: string, speech?: [number, number]) =>
+    ({ startS, endS, speechS: endS - startS, narration, onScreenText: null, isCard: false, ...(speech && { speechStartS: speech[0], speechEndS: speech[1] }) })
+
+  it('começa e termina onde a fala realmente acontece', async () => {
+    const { buildSegments } = await import('./captions')
+    const segs = buildSegments([scene(0, 6, 'Em Assis tudo começou', [3, 5])], 'manual', [])
+    expect(segs[0].startS).toBe(3)
+    expect(segs.at(-1)!.endS).toBe(5)
+  })
+
+  it('refaz os tempos da legenda editada quando as cenas mudam de lugar, mantendo o texto', async () => {
+    const { retimeSegments } = await import('./captions')
+    const old = [{ startS: 0, endS: 2, text: 'Primeira fala aqui', highlights: [] }, { startS: 2, endS: 4, text: 'Segunda fala', highlights: [1] }]
+    const moved = retimeSegments(old, [scene(10, 13, 'primeira fala aqui'), scene(13, 15, 'segunda fala')])
+    expect(moved.map((s) => [s.text, s.startS, s.endS])).toEqual([['Primeira fala aqui', 10, 13], ['Segunda fala', 13, 15]])
+    expect(moved[1].highlights).toEqual([1])
+    // Texto com outro número de palavras: não dá para ligar às cenas, mantém os tempos
+    expect(retimeSegments(old, [scene(10, 15, 'outra coisa')])).toBe(old)
+  })
+
+  it('mede onde a fala começa e termina no áudio', async () => {
+    const { speechBounds } = await import('./render')
+    const { FFMPEG, run } = await import('./ffmpeg')
+    const { mkdtemp } = await import('node:fs/promises')
+    const dir = await mkdtemp((await import('node:os')).tmpdir() + '/fala-')
+    const f = dir + '/f.wav'
+    await run(FFMPEG, ['-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-af', 'adelay=1000:all=1,apad=pad_dur=0.5', f])
+    const [on, off] = await speechBounds(f)
+    expect(on).toBeCloseTo(1, 1)
+    expect(off).toBeCloseTo(3, 1)
+  })
+})

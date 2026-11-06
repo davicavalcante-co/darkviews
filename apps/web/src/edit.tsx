@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import { DEFAULT_IDENTITY, MUSIC_STYLES, type Part } from '@corte/shared'
 import { api, uploadFont, useFonts } from './api'
 import { ApprovePage } from './approve'
-import { FontSelect, Modal, PageHead } from './ui'
+import { FontSelect, Modal, PageHead, VideoControls } from './ui'
 import { ThumbnailTab } from './thumbnail'
 import { Icon } from './icons'
 
@@ -210,7 +210,7 @@ function VideoEditor(props: Props) {
           <header className="nle-head"><span>Programa · v{video.version}</span><span className="tc">{tc(time)} / {tc(dur)}</span></header>
           <div className="stage">
             {/* Vídeo limpo por baixo; legenda e enunciado desenhados por cima, para a prévia mudar na hora. */}
-            <video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}&clean=1`}
+            <video ref={ref} className="player" preload="metadata" playsInline src={`/api/projects/${id}/video?v=${video.version}&clean=1`}
               onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} />
             {scene?.onScreenText && (scene.kind === 'card'
               ? <div className={`title-card ${(title.cardAlign ?? 'middle-center').replace('-', ' ')}`} style={{ fontFamily: title.fontFamily, color: title.color, fontSize: `${(title.size / 1920) * 100}cqw` }}>{title.upper === false ? scene.onScreenText : scene.onScreenText.toUpperCase()}</div>
@@ -223,6 +223,7 @@ function VideoEditor(props: Props) {
             )}
             <span className="stage-tag">Prévia · legenda {data.captionsOn ? 'ligada' : 'desligada'} no vídeo final</span>
           </div>
+          <VideoControls videoRef={ref} />
         </section>
 
         <aside className="nle-panel">
@@ -621,7 +622,8 @@ function ContextTab({ id, data, reload, busy }: Props) {
     <div className="ctx-grid">
       <section className="nle-panel monitor">
         <header className="nle-head"><span>Prévia</span><span className="tc">{tc(time)} / {tc(dur)}</span></header>
-        <div className="stage"><video ref={ref} className="player" controls preload="metadata" src={`/api/projects/${id}/video?v=${video.version}`} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} /></div>
+        <div className="stage"><video ref={ref} className="player" preload="metadata" playsInline src={`/api/projects/${id}/video?v=${video.version}`} onTimeUpdate={(e) => setTime(e.currentTarget.currentTime)} /></div>
+        <VideoControls videoRef={ref} />
       </section>
       <section className="nle-panel ctx-card">
         <header className="nle-head"><span>O que mudar?</span><span className="tc">{tc(time)}</span></header>
