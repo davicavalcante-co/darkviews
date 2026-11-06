@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prisma, STORAGE_DIR, type Job } from '@corte/db'
+import { prisma, projectDir, type Job } from '@corte/db'
 import { DEFAULT_IDENTITY, MAX_DURATION_S, MUSIC_STYLES, type Identity } from '@corte/shared'
 import { pickMusic } from '@corte/providers'
 import { randomUUID } from 'node:crypto'
@@ -296,7 +296,7 @@ export async function render(job: Job) {
   if (moved.length) await prisma.$transaction(moved.map((x) => prisma.captionSegment.update({ where: { id: x.id }, data: { startS: x.startS, endS: x.endS } })))
 
   const version = ((await prisma.videoVersion.aggregate({ where: { projectId: project.id }, _max: { version: true } }))._max.version ?? 0) + 1
-  const dir = join(STORAGE_DIR, 'renders', project.id)
+  const dir = await projectDir(project.id, 'videos')
   // base: vídeo com cartelas e destaques, sem a legenda da fala. clean: sem nada escrito (cortes verticais).
   let base = join(dir, `v${version}-base.mp4`), cleanOut = join(dir, `v${version}-sem-legenda.mp4`)
   const prev = await prisma.videoVersion.findFirst({ where: { projectId: project.id, isCurrent: true } })
@@ -433,8 +433,7 @@ async function syncMusic(projectId: string, ownerId: string, opts: { musicStyle?
     current = null
   }
   if (!want || current) return current
-  const dir = join(STORAGE_DIR, 'media', projectId)
-  await mkdir(dir, { recursive: true })
+  const dir = await projectDir(projectId, 'midia')
   const m = await pickMusic(ownerId, want.tags, durationS, join(dir, `trilha-${randomUUID().slice(0, 8)}`))
   if (m) await prisma.asset.create({ data: { projectId, kind: 'music', filePath: m.path, mime: 'audio/mpeg', sourceProvider: m.provider, license: m.license, attribution: m.attribution || null } })
   const p = await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { options: true } })

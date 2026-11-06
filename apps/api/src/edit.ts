@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
-import { prisma, STORAGE_DIR } from '@corte/db'
+import { prisma, projectDir, STORAGE_DIR } from '@corte/db'
 import { CaptionTrackInput, ChangeRequestInput, DEFAULT_IDENTITY, Identity, MetadataInput, MetaField, MUSIC_STYLES, RegenInput, RestoreInput, voiceKey } from '@corte/shared'
 import { requireAuth } from './auth.js'
 import { enabledFonts } from './settings.js'
@@ -90,7 +90,7 @@ export async function editRoutes(app: FastifyInstance) {
     const v = p && await prisma.videoVersion.findFirst({ where: { projectId: p.id, isCurrent: true } })
     if (!v) return reply.code(404).send({ error: 'Vídeo não encontrado' })
     const t = Math.max(0, Math.min(Number(req.query.t) || 0, v.durationS - 0.05))
-    const dir = join(STORAGE_DIR, 'thumbs', p!.id, `v${v.version}`)
+    const dir = join(await projectDir(p!.id, 'quadros'), `v${v.version}`)
     const file = join(dir, `${t.toFixed(1)}.jpg`)
     if (!existsSync(file)) {
       await mkdir(dir, { recursive: true })

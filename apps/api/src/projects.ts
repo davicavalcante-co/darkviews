@@ -1,11 +1,11 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, rm, stat } from 'node:fs/promises'
+import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
-import { estimateSeconds, prisma, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
+import { estimateSeconds, prisma, projectDir, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
 import { afterScript, detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
@@ -17,6 +17,14 @@ const httpError = (statusCode: number, message: string) => Object.assign(new Err
 type Saved = Sniffed & { field: string; path: string; size: number }
 
 // Salva com nome UUID, depois confere o tipo real e o tamanho; se não servir, apaga.
+// Leva o arquivo recebido para a pasta do projeto (storage/projetos/<nome>-<id>/<sub>), com a extensão certa.
+async function keep(f: Saved, projectId: string, sub: string, name?: string) {
+  const to = join(await projectDir(projectId, sub, name), `${f.field === 'images' ? 'foto' : 'video'}-${randomUUID().slice(0, 8)}.${f.ext}`)
+  await rename(f.path, to)
+  f.path = to
+  return f
+}
+
 async function saveUpload(part: MultipartFile): Promise<Saved> {
   const dir = join(STORAGE_DIR, 'uploads')
   await mkdir(dir, { recursive: true })
@@ -90,8 +98,12 @@ export async function projectRoutes(app: FastifyInstance) {
       if (input.analysisId && !analysis) throw httpError(400, 'Análise não encontrada ou ainda não terminou')
       if (analysis && (input.link || video.length)) throw httpError(400, 'Use a análise ou outra referência, não as duas')
 
+      // Tudo o que foi enviado vai para a pasta do projeto.
+      const id = randomUUID()
+      for (const f of files) await keep(f, id, f.field === 'video' ? 'referencia' : 'envios', input.name)
       const project = await prisma.project.create({
         data: {
+          id,
           ownerId: req.user!.id,
           name: input.name,
           prompt: input.prompt,
@@ -131,7 +143,7 @@ export async function projectRoutes(app: FastifyInstance) {
     try {
       for await (const part of req.parts()) {
         if (part.type === 'field') fields[part.fieldname] = String(part.value)
-        else if (part.fieldname === 'images') files.push(await saveUpload(part))
+        else if (part.fieldname === 'images') files.push(await keep(await saveUpload(part), p.id, 'envios'))
         else throw httpError(400, 'Nesta tela só dá para enviar imagens')
       }
       const input = NewProjectInput.parse({ ...fields, link: undefined })
@@ -301,7 +313,7 @@ export async function projectRoutes(app: FastifyInstance) {
     if (req.isMultipart()) {
       const part = await req.file()
       if (!part || part.fieldname !== 'video') return reply.code(400).send({ error: 'Envie o vídeo da pessoa falando' })
-      const saved = await saveUpload(part)
+      const saved = await keep(await saveUpload(part), p.id, 'envios')
       await prisma.asset.create({ data: { projectId: p.id, kind: 'user_video', filePath: saved.path, mime: saved.mime, sortOrder: 0 } })
       choice = 'upload'
     } else if ((req.body as { choice?: string } | null)?.choice !== 'stock') return reply.code(400).send({ error: 'Escolha inválida' })
@@ -414,7 +426,7 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!scene) return reply.code(404).send({ error: 'Cena não encontrada' })
     const part = await req.file()
     if (!part || part.fieldname !== 'images') return reply.code(400).send({ error: 'Envie a foto' })
-    const saved = await saveUpload(part) // mesma checagem de tipo real e tamanho das outras imagens
+    const saved = await keep(await saveUpload(part), p.id, 'envios') // mesma checagem de tipo real e tamanho das outras imagens
     const asset = await prisma.asset.create({ data: { projectId: p.id, kind: 'review_image', filePath: saved.path, mime: saved.mime, sortOrder: scene.index } })
     await prisma.scene.update({ where: { id: scene.id }, data: { assetId: asset.id, searchQuery: JSON.stringify({ ...(scene.searchQuery ? JSON.parse(scene.searchQuery) : {}), approved: true }) } })
     return reply.code(201).send({ ok: true })
@@ -432,7 +444,7 @@ export async function projectRoutes(app: FastifyInstance) {
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const part = await req.file()
     if (!part || part.fieldname !== 'images') return reply.code(400).send({ error: 'Envie a imagem da thumbnail' })
-    const saved = await saveUpload(part) // mesma checagem de tipo real e tamanho das imagens enviadas
+    const saved = await keep(await saveUpload(part), p.id, 'miniaturas') // mesma checagem de tipo real e tamanho das imagens enviadas
     if (saved.size > 2 * 1024 * 1024) { await rm(saved.path, { force: true }); return reply.code(413).send({ error: 'O YouTube aceita thumbnails de até 2 MB' }) }
     const a = await prisma.asset.create({ data: { projectId: p.id, kind: 'thumbnail', filePath: saved.path, mime: saved.mime, width: 1280, height: 720 } })
     return reply.code(201).send({ id: a.id })
@@ -537,7 +549,7 @@ export async function projectRoutes(app: FastifyInstance) {
     // Apaga tudo o que o vídeo usou: envios, referência, imagens, narração, renders, cortes e miniaturas.
     // A biblioteca de músicas locais é compartilhada: nunca apaga de lá.
     const paths = [p.reference?.filePath, ...p.assets.filter((a) => !a.filePath.startsWith(join(STORAGE_DIR, 'music'))).map((a) => a.filePath)].filter((x): x is string => !!x)
-    const dirs = ['media', 'renders', 'cuts', 'thumbs'].map((d) => join(STORAGE_DIR, d, p.id))
+    const dirs = [await projectDir(p.id), ...['media', 'renders', 'cuts', 'thumbs', 'montage'].map((d) => join(STORAGE_DIR, d, p.id))] // pasta do projeto + pastas antigas
     await Promise.all([...paths, ...paths.map((f) => `${f}.mask.png`), ...dirs].map((f) => rm(f, { force: true, recursive: true }))) // .mask.png: recorte do parallax
     return { ok: true }
   })
