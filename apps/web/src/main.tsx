@@ -139,7 +139,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
       </div>
       <div className="user-card">
         <span className="avatar" aria-hidden="true" title={`${user.name} · ${user.email}`}>{initials}</span>
-        <div className="who nav-text"><strong>{user.name}</strong><small>{user.role === 'admin' ? 'Admin' : 'Usuário'} · {user.email}</small></div>
+        <div className="who nav-text"><strong>{user.name.split(" ")[0]}</strong><small>{user.role === 'admin' ? 'Admin' : 'Usuário'} · {user.email}</small></div>
         <button type="button" className="logout" onClick={onLogout} aria-label="Sair" data-tip="Sair"><Icon name="sair" /></button>
       </div>
     </aside>
