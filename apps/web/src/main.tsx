@@ -152,6 +152,10 @@ function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const accept = (s: Session | null) => { setCsrf(s?.csrfToken ?? ''); setSession(s) }
   useEffect(() => { api<Session>('/auth/me').then(accept, () => accept(null)) }, [])
+  useEffect(() => {
+    const f = (e: Event) => setSession((cur) => cur && { ...cur, user: (e as CustomEvent<PublicUser>).detail })
+    addEventListener('profile-changed', f); return () => removeEventListener('profile-changed', f)
+  }, [])
 
   if (session === undefined) return null
   if (!session) return <Login onLogin={accept} />

@@ -1018,3 +1018,5 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .setup-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgb(5 12 22 / .78); backdrop-filter: blur(4px); }
 .setup-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 12px; }
 .setup-card .kicker { font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-text); }
+.profile { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
+.profile label { display: flex; flex-direction: column; gap: 4px; }

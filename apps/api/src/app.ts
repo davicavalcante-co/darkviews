@@ -4,9 +4,9 @@ import rateLimit from '@fastify/rate-limit'
 import { hash, verify } from '@node-rs/argon2'
 import { ZodError } from 'zod'
 import { logEvent, prisma, type User } from '@corte/db'
-import { CompleteSetupInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
+import { CompleteSetupInput, LoginInput, ProfileInput, SetupInput, type PublicUser } from '@corte/shared'
 import { csrfFor, newToken, sha256 } from './security.js'
-import { requireAdmin, requireAuth } from './auth.js'
+import { requireAuth } from './auth.js'
 import { projectRoutes } from './projects.js'
 import { integrationRoutes } from './integrations.js'
 import { editRoutes } from './edit.js'
@@ -151,27 +151,21 @@ export async function buildApp() {
   }))
 
   // ---------- Admin: usuários ----------
-  app.get('/api/admin/users', { preHandler: requireAdmin }, async () =>
-    prisma.user.findMany({
-      orderBy: { createdAt: 'asc' },
-      select: { id: true, email: true, name: true, role: true, status: true, lastLoginAt: true, createdAt: true },
-    }))
-
-  // Uma conta por computador: não existe criar outro usuário (a conta nasce no primeiro acesso).
-  app.patch<{ Params: { id: string } }>('/api/admin/users/:id', { preHandler: requireAdmin }, async (req, reply) => {
-    const input = UpdateUserInput.parse(req.body)
-    const target = await prisma.user.findUnique({ where: { id: req.params.id } })
-    if (!target) return reply.code(404).send({ error: 'Usuário não encontrado' })
-    const losesAdmin = target.role === 'admin' && target.status === 'active' &&
-      (input.role === 'user' || input.status === 'disabled')
-    if (losesAdmin) {
-      const activeAdmins = await prisma.user.count({ where: { role: 'admin', status: 'active' } })
-      if (activeAdmins <= 1) return reply.code(409).send({ error: 'O sistema precisa de pelo menos um admin ativo' })
-    }
-    const user = await prisma.user.update({ where: { id: target.id }, data: input })
-    if (input.status === 'disabled') await prisma.session.deleteMany({ where: { userId: user.id } })
-    await audit(req, 'user.update', 'user', user.id, { from: { role: target.role, status: target.status }, to: input })
-    return { ...toPublic(user), status: user.status }
+  // Perfil: nome, sobrenome, e-mail e senha da conta deste computador (a senha atual confirma).
+  app.put('/api/me', { preHandler: requireAuth }, async (req, reply) => {
+    const input = ProfileInput.parse(req.body)
+    const me = req.user!
+    if (!me.passwordHash || !(await verify(me.passwordHash, input.currentPassword))) return reply.code(401).send({ error: 'Senha atual incorreta' })
+    const email = input.email.toLowerCase()
+    if (await prisma.user.findFirst({ where: { email, id: { not: me.id } } })) return reply.code(409).send({ error: 'E-mail já usado' })
+    const user = await prisma.user.update({
+      where: { id: me.id },
+      data: { name: `${input.firstName} ${input.lastName}`.trim(), email, ...(input.newPassword && { passwordHash: await hash(input.newPassword) }) },
+    })
+    // Senha nova: encerra as outras sessões (fica só esta).
+    if (input.newPassword) await prisma.session.deleteMany({ where: { userId: me.id, tokenHash: { not: sha256(req.sessionToken!) } } })
+    await audit(req, 'user.profile', 'user', user.id, { email, senhaNova: !!input.newPassword })
+    return { user: toPublic(user) }
   })
 
   await app.register(projectRoutes)
