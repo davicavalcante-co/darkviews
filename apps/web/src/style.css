@@ -1096,3 +1096,4 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: var(--card); color: var(--fg); border: 1px solid var(--border); min-width: 0; }
 .pick-row:hover { border-color: var(--accent); }
 .pick-row > * { max-width: 100%; }
+.modal:has(.pick-list) { margin-top: 80px; max-height: calc(100vh - 128px); }
