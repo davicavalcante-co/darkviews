@@ -48,6 +48,11 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
+// Aba do método "Vídeo por cortes" (em teste; depois entra na mesma aba de criação).
+export function CutsVideo() {
+  return <div className="studio"><Composer base={null} onCancel={() => {}} analysisId={null} cortes /></div>
+}
+
 export function NewVideo() {
   const [base, setBase] = useState<Base | null>(null)
   // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
@@ -60,7 +65,9 @@ export function NewVideo() {
   )
 }
 
-function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel: () => void; analysisId: string | null }) {
+function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; onCancel: () => void; analysisId: string | null; cortes?: boolean }) {
+  // Método "Vídeo por cortes": vídeos longos que o sistema corta e monta em ordem aleatória.
+  const [footage, setFootage] = useState<File[]>([])
   const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
   useEffect(() => { if (analysisId) api<{ id: string; title: string | null; status: string }>(`/analyses/${analysisId}`).then((a) => a.status === 'done' && setStyle(a)).catch(() => {}) }, [analysisId])
   const o = (base?.options ?? {}) as { voicePreset?: string; voiceTone?: string; bgColor?: string; useStock?: boolean; editStyle?: string }
@@ -113,9 +120,10 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const seconds = Math.round(minutes * 60)
-    if (!(seconds >= 15 && seconds <= MAX_DURATION_S)) return setError('Duração entre 15 segundos e 18 minutos')
+    if (!(seconds >= 15 && seconds <= MAX_DURATION_S)) return setError(`Duração entre 15 segundos e ${maxMin} minutos`)
     if (link && !platform) return setError('Link precisa ser de YouTube, Instagram, Kwai ou TikTok')
     if (link && video) return setError('Use link ou vídeo de referência, não os dois')
+    if (cortes && !footage.length) return setError('Envie pelo menos um vídeo para cortar')
 
     const body = new FormData()
     body.append('name', name)
@@ -134,6 +142,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
       if (video) body.append('video', video)
     }
     images.forEach((i) => i.file && body.append('images', i.file))
+    if (cortes) { body.append('method', 'cortes'); footage.forEach((f) => body.append('footage', f)) }
 
     setBusy(true); setError('')
     try {
@@ -145,15 +154,25 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">Estúdio</span><h1>Novo vídeo</h1></div>
-        <span className="muted">até 18 min</span>
+        <div><span className="kicker">{cortes ? 'Novo método' : 'Estúdio'}</span><h1>{cortes ? 'Vídeo por cortes' : 'Novo vídeo'}</h1></div>
+        <span className="muted">até {maxMin} min</span>
       </div>
 
       <div className="composer-body">
         {base && <div className="notice">Nova versão de <b>{base.name}</b>{base.fromVersion ? <> a partir da <b>versão {base.fromVersion}</b></> : null}: ajuste o que quiser; o vídeo novo entra no mesmo card, em primeiro. <button type="button" className="link" onClick={onCancel}>Começar do zero</button></div>}
         <label className="field-label">Nome<input name="name" required maxLength={120} placeholder="Ex.: Lançamento do café especial" value={name} onChange={(e) => setName(e.target.value)} /></label>
 
-        {base ? (
+        {cortes ? (
+          <div className="field">
+            <div className="field-label">Vídeos para cortar <span className="muted">{footage.length}</span></div>
+            <label className="drop">
+              <input type="file" multiple accept="video/mp4,video/quicktime,video/webm" onChange={(e) => { setFootage([...footage, ...(e.target.files ?? [])]); e.target.value = '' }} />
+              <Icon name="tocar" size={14} /><span className="ellipsis">{footage.length ? footage.map((f) => f.name).join(', ') : 'Enviar vídeos longos'}</span>
+            </label>
+            {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
+            <small className="muted">O sistema corta trechos aleatórios desses vídeos e monta a imagem (só com transição). Depois entra a narração e a legenda por cima.</small>
+          </div>
+        ) : base ? (
           <div className="field">
             <div className="field-label">Referência <span className="muted">mantida</span></div>
             <p className="muted ellipsis">{base.reference ? (base.reference.url ?? 'Vídeo enviado') : 'Sem referência'}</p>
@@ -191,7 +210,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
           </div>
         )}
 
-        <div className="field">
+        {!cortes && <div className="field">
           <div className="field-label">Imagens <span className="muted">{images.length}</span></div>
           <div className={`tiles-sm${dragging ? ' dragging' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
@@ -214,7 +233,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
           {imgError && <p className="error small" role="alert">{imgError}</p>}
           <ImagesNeeded seconds={Math.round(minutes * 60)} count={images.length} useStock={useStock} setUseStock={setUseStock} />
           <small className="muted">Selecione várias de uma vez (ou arraste para cá). Uma legenda curta ("fachada da loja") ajuda o Claude a pôr cada foto na cena certa.</small>
-        </div>
+        </div>}
 
         <VoicePicker preset={voicePreset} setPreset={setVoicePreset} tone={voiceTone} setTone={setVoiceTone} />
 
@@ -222,13 +241,13 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
           <textarea name="prompt" required maxLength={5000} rows={7} placeholder="Sobre o que é o vídeo, público, tom, chamada para ação…" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
 
-        <div className="field">
+        {!cortes && <div className="field">
           <div className="field-label">Estilo de edição</div>
           <div className="choice-grid" role="radiogroup" aria-label="Estilo de edição">
             {EDIT_STYLES.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={editStyle === id} className="choice small-choice" onClick={() => setEditStyle(id)}>{label}</button>)}
           </div>
           <small className="muted">{EDIT_STYLES.find(([id]) => id === editStyle)?.[2]}</small>
-        </div>
+        </div>}
 
         <div className="field">
           <div className="field-label">Cor do fundo</div>

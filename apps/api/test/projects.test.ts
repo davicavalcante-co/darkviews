@@ -53,8 +53,18 @@ describe('novo vídeo', () => {
     expect(p!.jobs.map((j) => j.type)).toEqual(['ingest'])
   })
 
-  it('recusa duração acima de 18 minutos', async () => {
-    expect((await create(ana, { targetDurationS: '1081' })).statusCode).toBe(400)
+  it('aceita até 60 minutos e recusa acima', async () => {
+    expect((await create(ana, { targetDurationS: '3601' })).statusCode).toBe(400)
+  })
+
+  it('vídeo por cortes: guarda os vídeos para cortar e vai direto ao roteiro', async () => {
+    expect((await create(ana, { method: 'cortes' })).statusCode).toBe(400) // sem vídeo para cortar
+    const res = await create(ana, { method: 'cortes' }, [['footage', MP4, 'longo.mp4'], ['footage', MP4, 'outro.mp4']])
+    expect(res.statusCode).toBe(201)
+    const p = await prisma.project.findUnique({ where: { id: res.json().id }, include: { assets: true, jobs: true } })
+    expect(p!.assets.filter((a) => a.kind === 'user_video')).toHaveLength(2)
+    expect(JSON.parse(p!.options).method).toBe('cortes')
+    expect(p!.jobs.map((j) => j.type)).toEqual(['script'])
   })
 
   it('recusa link fora da lista de plataformas', async () => {

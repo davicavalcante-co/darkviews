@@ -18,7 +18,7 @@ function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
     b.result?.audience ? `Público: ${b.result.audience}` : '',
     b.notes ? `Observações do nicho: ${b.notes}` : '',
   ].filter(Boolean).join('\n\n').slice(0, 5000)
-  const q = new URLSearchParams({ nome: i.title.slice(0, 120), prompt, minutos: String(Math.min(18, Math.max(0.5, i.durationMin))) })
+  const q = new URLSearchParams({ nome: i.title.slice(0, 120), prompt, minutos: String(Math.min(60, Math.max(0.5, i.durationMin))) })
   return `#/novo?${q}`
 }
 

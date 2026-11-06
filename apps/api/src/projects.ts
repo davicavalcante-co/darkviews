@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
 import { estimateSeconds, prisma, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
-import { detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
+import { afterScript, detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
 import { requireAuth } from './auth.js'
@@ -26,7 +26,7 @@ async function saveUpload(part: MultipartFile): Promise<Saved> {
     if (part.file.truncated) throw httpError(413, 'Arquivo maior que 2 GB')
     const type = await sniffFile(tmp)
     const size = (await stat(tmp)).size
-    const want = part.fieldname === 'images' ? 'image' : part.fieldname === 'video' ? 'video' : null
+    const want = part.fieldname === 'images' ? 'image' : part.fieldname === 'video' || part.fieldname === 'footage' ? 'video' : null
     if (!want) throw httpError(400, `Campo de arquivo inesperado: ${part.fieldname}`)
     if (!type || type.kind !== want) {
       throw httpError(415, want === 'image' ? 'Imagens precisam ser JPG, PNG ou WebP' : 'Vídeo precisa ser MP4, MOV ou WebM')
@@ -78,6 +78,9 @@ export async function projectRoutes(app: FastifyInstance) {
       }
       const video = files.filter((f) => f.field === 'video')
       const images = files.filter((f) => f.field === 'images')
+      // Método "Vídeo por cortes": os vídeos longos que vão ser cortados e montados.
+      const footage = files.filter((f) => f.field === 'footage')
+      if (input.method === 'cortes' && !footage.length) throw httpError(400, 'Envie pelo menos um vídeo para cortar')
       if (video.length > 1) throw httpError(400, 'Envie só um vídeo de referência')
       if (video.length && input.link) throw httpError(400, 'Use link ou vídeo de referência, não os dois')
       // Estilo de uma análise pronta: a referência já vem analisada; pula baixar e analisar e vai direto ao roteiro.
@@ -98,12 +101,14 @@ export async function projectRoutes(app: FastifyInstance) {
             ? { create: { sourceType: 'link', url: input.link, platform: detectPlatform(input.link) } }
             : video[0] ? { create: { sourceType: 'upload', filePath: video[0].path } } : undefined,
           assets: {
-            create: images.map((f, i) => ({
-              kind: 'user_image', filePath: f.path, mime: f.mime, sortOrder: i, userCaption: input.captions[i] || null,
-            })),
+            create: [
+              ...images.map((f, i) => ({ kind: 'user_image', filePath: f.path, mime: f.mime, sortOrder: i, userCaption: input.captions[i] || null })),
+              ...footage.map((f, i) => ({ kind: 'user_video', filePath: f.path, mime: f.mime, sortOrder: i })),
+            ],
           },
-          ...(analysis && { status: 'scripting' }),
-          jobs: { create: analysis ? { type: 'script', stage: 'Na fila' } : { type: 'ingest', stage: 'Na fila' } },
+          // Com análise pronta ou no método por cortes (sem referência), vai direto ao roteiro.
+          ...((analysis || (input.method === 'cortes' && !input.link && !video.length)) && { status: 'scripting' }),
+          jobs: { create: analysis || (input.method === 'cortes' && !input.link && !video.length) ? { type: 'script', stage: 'Na fila' } : { type: 'ingest', stage: 'Na fila' } },
         },
       })
       return reply.code(201).send({ id: project.id })
@@ -306,7 +311,7 @@ export async function projectRoutes(app: FastifyInstance) {
   // ---------- Aprovação do roteiro ----------
   // approve: segue para as imagens. redo: o Claude reescreve com as dicas. scenes: fala e texto da tela editados à mão (salva antes de aprovar).
   app.post<{ Params: { id: string } }>('/api/projects/:id/script-review', { preHandler: requireAuth }, async (req, reply) => {
-    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     if (p.status !== 'script_review') return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
     const input = ScriptReviewInput.parse(req.body)
@@ -315,7 +320,7 @@ export async function projectRoutes(app: FastifyInstance) {
     }
     if (input.action === 'save') return { ok: true }
     const ok = input.action === 'approve'
-      ? await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, 'media')
+      ? await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, afterScript(p.options))
       : await advance(p.id, 'script_review', { status: 'scripting' }, 'script', undefined, JSON.stringify({ hint: input.hint }))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
     return reply.code(202).send({ next: input.action === 'approve' ? 'imagens' : 'novo_roteiro' })
@@ -425,8 +430,9 @@ export async function projectRoutes(app: FastifyInstance) {
     const run = jobs.slice(start)
     const ownVoice = String(JSON.parse(p.options).voicePreset ?? '').startsWith('studio:')
     const now = Date.now()
-    const from = Math.max(0, PIPELINE.indexOf((run[0]?.type ?? 'ingest') as (typeof PIPELINE)[number]))
-    const stages = await Promise.all(PIPELINE.slice(from).map(async (type) => {
+    const pipeline: readonly string[] = JSON.parse(p.options).method === 'cortes' ? PIPELINE_CORTES : PIPELINE
+    const from = Math.max(0, pipeline.indexOf(run[0]?.type ?? 'ingest'))
+    const stages = await Promise.all(pipeline.slice(from).map(async (type) => {
       const done = run.filter((j) => j.type === type)
       const elapsedS = done.reduce((n, j) => n + (j.startedAt ? ((j.finishedAt?.getTime() ?? now) - j.startedAt.getTime()) / 1000 : 0), 0)
       const last = done.at(-1)
@@ -534,7 +540,7 @@ async function tokensByProject(ids: string[]) {
 function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
   return JSON.stringify({
     ...prev, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
-    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, ...(input.analysisId && { analysisId: input.analysisId }),
+    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, method: input.method, ...(input.analysisId && { analysisId: input.analysisId }),
   })
 }
 
@@ -542,9 +548,11 @@ const RegenOrder = z.array(z.union([z.object({ id: z.string().uuid(), caption: z
 
 export const CANCELED = 'Parado por você'
 const PIPELINE = ['ingest', 'analyze', 'script', 'media', 'voice', 'render'] as const
+// Vídeo por cortes: a montagem vem antes da narração.
+const PIPELINE_CORTES = ['ingest', 'analyze', 'script', 'montage', 'voice', 'render'] as const
 // Estimativa de cada etapa: o histórico real desta máquina, mas nunca menos que a conta conservadora
 // (segundos fixos + segundos por minuto de vídeo). Vídeo longo demora mais, e a estimativa diz isso.
-const BASE: Record<string, [number, number]> = { ingest: [30, 15], analyze: [90, 40], script: [120, 60], media: [90, 75], voice: [40, 70], render: [60, 100] }
+const BASE: Record<string, [number, number]> = { ingest: [30, 15], analyze: [90, 40], script: [120, 60], media: [90, 75], montage: [30, 40], voice: [40, 70], render: [60, 100] }
 async function stageEstimate(type: string, durationS: number, ownVoice: boolean) {
   const [fixed, perMin] = type === 'voice' && ownVoice ? [60, 200] : BASE[type]
   const floor = fixed + perMin * (durationS / 60)

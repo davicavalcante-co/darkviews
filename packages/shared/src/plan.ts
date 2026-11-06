@@ -89,7 +89,7 @@ export type ScriptOutput = z.infer<typeof ScriptOutput>
 export function checkPlan(plan: ScriptOutput, targetDurationS: number, imageCount: number): string[] {
   const errors: string[] = []
   const end = plan.scenes.at(-1)!.endS
-  if (end > MAX_DURATION_S) errors.push(`O vídeo passa de 18 minutos (${end}s)`)
+  if (end > MAX_DURATION_S) errors.push(`O vídeo passa de 60 minutos (${end}s)`)
   // Tempo aproximado: qualidade vem antes; só recusa muito curto ou acima do máximo.
   if (end < targetDurationS * 0.7) {
     errors.push(`Duração total ${end}s longe da duração pedida (${targetDurationS}s; pode passar, mas não ficar muito abaixo)`)

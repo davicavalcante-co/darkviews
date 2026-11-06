@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, type Job } from '@corte/db'
 import { researchKit } from '@corte/providers'
-import { checkPlan, ScriptOutput } from '@corte/shared'
+import { checkPlan, MAX_DURATION_S, ScriptOutput } from '@corte/shared'
 import { askClaude } from './claude.js'
 import { imageSheet } from './media.js'
 
@@ -26,7 +26,7 @@ export async function script(job: Job) {
   })
   const images = project.assets.filter((a) => a.kind === 'user_image')
   const talkingVideo = project.assets.find((a) => a.kind === 'user_video')
-  const options = JSON.parse(project.options) as { analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
+  const options = JSON.parse(project.options) as { method?: string; analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
   // Vídeo da aba Análise escolhido como referência: a análise completa (roteiro, gancho, técnicas, ritmo...) guia o roteiro.
   const analysis = options.analysisId ? await prisma.videoAnalysis.findFirst({ where: { id: options.analysisId, ownerId: project.ownerId, status: 'done' }, select: { title: true, channel: true, details: true } }) : null
   // Pasta temporária só com as imagens do usuário, para o Claude abrir (Read) sem ver o resto do disco.
@@ -64,7 +64,7 @@ export async function script(job: Job) {
       analysis?.details ? `Análise completa do vídeo de referência escolhido ("${analysis.title ?? 'sem título'}"${analysis.channel ? `, canal ${analysis.channel}` : ''}). Reproduza no roteiro novo a mesma estrutura, o tipo de gancho, as técnicas de roteiro, o tom, o ritmo e as pausas, as ênfases, a dinâmica para prender a atenção e a chamada para ação descritos aqui, com o conteúdo do pedido (não copie as falas):\n${analysis.details}` : '',
       // Refazer o roteiro pela tela de aprovação: a orientação do cliente manda.
       hint ? `O cliente leu o roteiro anterior e pediu para refazer assim:\n"""\n${hint}\n"""` : '',
-      `Duração aproximada: ${project.targetDurationS} s. Pode passar alguns segundos ou minutos se isso deixar o vídeo melhor; qualidade vem antes do tempo exato (nunca acima de 1080 s). As cenas devem ser contínuas: cada uma começa onde a anterior termina, a primeira em 0.`,
+      `Duração aproximada: ${project.targetDurationS} s. Pode passar alguns segundos ou minutos se isso deixar o vídeo melhor; qualidade vem antes do tempo exato (nunca acima de ${MAX_DURATION_S} s). As cenas devem ser contínuas: cada uma começa onde a anterior termina, a primeira em 0.`,
       `Troque de imagem a cada 3 a 6 segundos, ou no ritmo do perfil de estilo abaixo.`,
       'Toda cena tem narração, sem silêncio. A única exceção são as cartelas de capítulo: media.type "text_card" com o título curto (2 a 5 palavras, caixa alta), narração vazia e 3 s. Use 2 ou 3 cartelas por vídeo, nas viradas de assunto.',
       'onScreenText (faixa de destaque sobre a imagem) só em 1 a cada 4 cenas, com 2 a 4 palavras de impacto. Nas outras, deixe vazio.',
@@ -72,7 +72,9 @@ export async function script(job: Job) {
       'Edição dinâmica, como um editor profissional: varie transição e movimento a cada cena, sem repetir o mesmo par duas vezes seguidas.',
       'Transições: cortes secos (cut) na maior parte; punch_in/punch_out para ênfase; whip e slide_* para ritmo; zoom_through e fade só em viradas de assunto.',
       'Movimento das fotos: ken_burns como base, com easing variado; parallax quando a foto tem um objeto ou pessoa em destaque; snap_zoom em frases de impacto; cutout em trechos explicativos ou listas.',
-      EDIT_STYLE[options.editStyle ?? 'auto'],
+      options.method === 'cortes'
+        ? 'MÉTODO VÍDEO POR CORTES: a imagem será uma montagem de cortes aleatórios dos vídeos do cliente, sem relação cena a cena com a fala. Use media.type "user_video" em TODAS as cenas, sem cartelas (text_card) e com onScreenText vazio. Capriche só na narração; transição "cut" e sem movimento.'
+        : EDIT_STYLE[options.editStyle ?? 'auto'],
       project.reference?.styleProfile ? `Perfil de estilo da referência (imite o estilo, não copie o conteúdo):\n${project.reference.styleProfile}` : 'Sem vídeo de referência: escolha um estilo adequado ao pedido.',
       images.length
         ? `Imagens do cliente (prefira usá-las). Para ver o que mostram, abra com Read só estas folhas, que juntam as imagens em grade de 6 colunas, da esquerda para a direita e de cima para baixo, 24 por folha: ${sheets.join(', ')}. A posição na grade é o índice (a 1ª imagem da folha-2 é o índice 24).\n${names.map((n, i) => `- índice ${i}: legenda: ${images[i].userCaption || 'sem legenda'}`).join('\n')}`
