@@ -911,7 +911,7 @@ button.link.danger { background: none; color: var(--danger); }
 .switch-row { display: flex; align-items: center; gap: 8px; font-size: .88rem; } .switch-row input { width: auto; margin: 0; accent-color: var(--ok); }
 /* Cronômetro da criação */
 .timer { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
-.timer-total { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.timer-total { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .timer-total span { display: flex; flex-direction: column; padding: 8px 10px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); }
 .timer-total b { font: 500 1.15rem/1.2 ui-monospace, Menlo, monospace; font-variant-numeric: tabular-nums; } .timer-total small { color: var(--muted); font-size: .72rem; }
 .timer-stages { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; align-items: stretch; }
