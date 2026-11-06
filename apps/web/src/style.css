@@ -1100,3 +1100,12 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .review-clock b { color: var(--fg); }
 .review-clock.late b { color: var(--danger); }
 .cap-colors { gap: 12px; } .cap-colors label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+/* Padrão do sistema: botões, campos de texto e selects com a mesma altura. */
+:root { --control-h: 40px; }
+button:not([class]), button.ghost-btn, button.ghost, button.danger, button.link, .btn, label.btn,
+select, input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]) {
+  box-sizing: border-box; height: var(--control-h); min-height: var(--control-h); padding-top: 0; padding-bottom: 0;
+}
+button:not([class]), button.ghost-btn, button.ghost, button.danger, button.link, .btn, label.btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--s2); white-space: nowrap; }
+input[type="color"] { box-sizing: border-box; height: var(--control-h); }
