@@ -27,6 +27,7 @@ model User {
   integrations   Integration[]
   studioVoices   StudioVoice[]
   analyses       VideoAnalysis[]
+  brainstorms    Brainstorm[]
   @@map("users")
 }
 
@@ -413,6 +414,7 @@ model VideoAnalysis {
   url       String
   platform  String?
   title     String?
+  channel   String?
   thumbPath String?
   durationS Float?
   status    String   @default("queued") // queued | running | done | failed
@@ -425,4 +427,24 @@ model VideoAnalysis {
   @@index([ownerId])
   @@index([status])
   @@map("video_analyses")
+}
+
+// Aba Brainstorm: ideias de vídeo para um nicho (pesquisadas pelo Claude).
+model Brainstorm {
+  id        String   @id @default(uuid())
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  niche     String
+  notes     String?
+  status    String   @default("queued") // queued | running | done | failed
+  error     String?
+  ideas     String?  // BrainstormResult
+  startedAt  DateTime?
+  finishedAt DateTime?
+  tokens     Int?     // tokens do Claude gastos nesta pesquisa
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerId])
+  @@index([status])
+  @@map("brainstorms")
 }

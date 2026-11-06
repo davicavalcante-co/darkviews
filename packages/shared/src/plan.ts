@@ -102,3 +102,18 @@ export function checkPlan(plan: ScriptOutput, targetDurationS: number, imageCoun
   })
   return errors
 }
+
+// Brainstorm: ideias de vídeo para um nicho.
+export const BrainstormResult = z.object({
+  audience: z.string().describe('Quem assiste esse nicho e o que essa pessoa procura'),
+  trends: z.array(z.string()).describe('Assuntos e formatos em alta nesse nicho agora'),
+  ideas: z.array(z.object({
+    title: z.string().describe('Título forte para YouTube'),
+    hook: z.string().describe('Primeira frase do vídeo, que prende nos primeiros 5 s'),
+    angle: z.string().describe('O ângulo ou a história do vídeo, em 1 a 2 frases'),
+    why: z.string().describe('Por que esse vídeo tende a funcionar'),
+    durationMin: z.number().describe('Duração sugerida em minutos'),
+    outline: z.array(z.string()).describe('Tópicos do roteiro na ordem'),
+  })).min(5).max(15),
+})
+export type BrainstormResult = z.infer<typeof BrainstormResult>

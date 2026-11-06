@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { prisma, STORAGE_DIR } from '@corte/db'
-import { CaptionTrackInput, ChangeRequestInput, MetadataInput, MetaField, MUSIC_STYLES, RegenInput, RestoreInput, voiceKey } from '@corte/shared'
+import { CaptionTrackInput, ChangeRequestInput, DEFAULT_IDENTITY, Identity, MetadataInput, MetaField, MUSIC_STYLES, RegenInput, RestoreInput, voiceKey } from '@corte/shared'
 import { requireAuth } from './auth.js'
 import { enabledFonts } from './settings.js'
 import { z } from 'zod'
@@ -17,7 +17,7 @@ type Req = FastifyRequest<{ Params: { id: string; field?: string } }>
 // Mesmo escopo das outras rotas: usuário comum só os próprios projetos (o resto vira 404).
 async function project(req: Req) {
   const where = req.user!.role === 'admin' ? { id: req.params.id } : { id: req.params.id, ownerId: req.user!.id }
-  return prisma.project.findFirst({ where, select: { id: true, name: true, status: true, options: true } })
+  return prisma.project.findFirst({ where, select: { id: true, name: true, status: true, options: true, ownerId: true } })
 }
 const EDITABLE = ['editing', 'in_approval', 'failed']
 
@@ -56,6 +56,7 @@ export async function editRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/projects/:id/edit', guard, async (req, reply) => {
     const p = await project(req)
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const identity = await identityOf(p.ownerId)
     const [videos, tracks, meta, requests, job, script, audio] = await Promise.all([
       prisma.videoVersion.findMany({ where: { projectId: p.id }, orderBy: { version: 'desc' }, select: { version: true, durationS: true, isCurrent: true, createdAt: true, renderSettings: true } }),
       prisma.captionTrack.findMany({
@@ -74,7 +75,7 @@ export async function editRoutes(app: FastifyInstance) {
       // Camadas do editor: cada cena com enunciado, movimento, transição e a narração dela; trilha e opções gerais.
       scenes: (script?.scenes ?? []).map(({ asset, assetId: _a, searchQuery, ...s }) => ({ ...s, onScreenText: s.onScreenText ?? (!asset && searchQuery ? (JSON.parse(searchQuery) as { text?: string }).text ?? null : null), kind: !asset ? 'card' : asset.kind.endsWith('video') ? 'video' : 'image', voiceId: audio.find((a) => a.kind === 'voice' && a.sortOrder === s.index)?.id ?? null })),
       music: audio.find((a) => a.kind === 'music') ?? null,
-      options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = null, bgColor = '#111418', musicStyle = 'none', voicePreset = '', voiceTone = 'natural' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle, voicePreset, voiceTone }))(JSON.parse(p.options)),
+      options: (({ musicVolume = 35, sfxVolume = 55, titleStyle = identity.title, bgColor = identity.bgColor, musicStyle = 'none', voicePreset = '', voiceTone = 'natural' }) => ({ musicVolume, sfxVolume, titleStyle, bgColor, musicStyle, voicePreset, voiceTone }))(JSON.parse(p.options)),
       videos: videos.map(({ renderSettings, ...v }) => ({ ...v, changes: (JSON.parse(renderSettings).changes ?? null) as string[] | null })),
       caption: current && { ...current, segments: current.segments.map((s) => ({ ...s, highlights: JSON.parse(s.highlights) })) },
       captionVersions: tracks.map((t) => ({ version: t.version, isCurrent: t.isCurrent, createdAt: t.createdAt, fontFamily: t.fontFamily, segments: t.segments.length })),
@@ -299,6 +300,17 @@ export async function editRoutes(app: FastifyInstance) {
     return reply.code(202).send({ ok: true })
   })
 
+  // Identidade visual da pessoa (aba Admin → Identidade). Sem nada salvo, vale a do sistema.
+  app.get('/api/me/identity', guard, async (req) => ({ identity: await identityOf(req.user!.id), system: DEFAULT_IDENTITY }))
+  app.put('/api/me/identity', guard, async (req, reply) => {
+    const identity = Identity.parse(req.body)
+    const fonts = await enabledFonts()
+    if (![identity.caption.fontFamily, identity.title.fontFamily].every((f) => fonts.includes(f))) return reply.code(400).send({ error: 'Fonte não liberada' })
+    const key = `identity:${req.user!.id}`
+    await prisma.setting.upsert({ where: { key }, create: { key, value: JSON.stringify(identity) }, update: { value: JSON.stringify(identity) } })
+    return { identity }
+  })
+
   // Duração padrão das cartelas nos próximos vídeos desta pessoa (opcional, ao aplicar a todas).
   app.put('/api/me/card-duration', guard, async (req) => {
     const { durationS } = z.object({ durationS: z.number().min(0.5).max(15).nullable() }).parse(req.body)
@@ -363,3 +375,8 @@ const OptionsPatch = z.object({
     bandSize: z.number().int().min(24).max(140).optional(), cardAlign: z.string().regex(ALIGN).optional(), bandAlign: z.string().regex(ALIGN).optional(), upper: z.boolean().optional(),
   }).optional(),
 }).strict()
+
+export async function identityOf(userId: string): Promise<Identity> {
+  const row = await prisma.setting.findUnique({ where: { key: `identity:${userId}` } })
+  return row ? { ...DEFAULT_IDENTITY, ...JSON.parse(row.value) } : DEFAULT_IDENTITY
+}

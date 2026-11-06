@@ -2,6 +2,7 @@ import { mkdtemp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, type Job } from '@corte/db'
+import { researchKit } from '@corte/providers'
 import { checkPlan, ScriptOutput } from '@corte/shared'
 import { askClaude } from './claude.js'
 import { imageSheet } from './media.js'
@@ -95,10 +96,11 @@ export async function script(job: Job) {
       'Escreva título, descrição (para YouTube) e palavras-chave em português do Brasil.',
     ].join('\n\n')
 
+    const web = (await researchKit(project.ownerId)).web
     let plan: ScriptOutput | null = null
     let feedback = ''
     for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
-      const out = await askClaude({ jobId: job.id, cwd: dir, canReadFiles: images.length > 0, research: true, maxTurns: 40, schema: ScriptOutput, prompt: base + feedback })
+      const out = await askClaude({ jobId: job.id, cwd: dir, canReadFiles: images.length > 0, research: web, maxTurns: 40, schema: ScriptOutput, prompt: base + feedback })
       const problems = checkPlan(out, project.targetDurationS, images.length)
       if (!problems.length) plan = out
       else feedback = `\n\nSua resposta anterior tinha estes problemas; corrija todos:\n- ${problems.join('\n- ')}`

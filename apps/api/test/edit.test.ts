@@ -231,3 +231,26 @@ describe('aba Análise', () => {
     expect([p.status, p.jobs.map((j) => j.type), p.reference?.sourceType, p.reference?.styleProfile]).toEqual(['scripting', ['script'], 'analysis', JSON.stringify({ pacing: 'rápido' })])
   })
 })
+
+describe('identidade e brainstorm', () => {
+  it('identidade começa no padrão do sistema, salva a da pessoa e vira o padrão do editor', async () => {
+    const first = (await app.inject({ url: '/api/me/identity', headers: dono })).json()
+    expect(first.identity).toEqual(first.system)
+    const mine = { ...first.system, bgColor: '#15273D', title: { ...first.system.title, color: '#FFD43B', cardAlign: 'bottom-left' } }
+    expect((await app.inject({ method: 'PUT', url: '/api/me/identity', headers: dono, payload: { ...mine, caption: { ...mine.caption, fontFamily: 'Fonte Que Não Existe' } } })).statusCode).toBe(400)
+    expect((await app.inject({ method: 'PUT', url: '/api/me/identity', headers: dono, payload: mine })).statusCode).toBe(200)
+    expect((await app.inject({ url: '/api/me/identity', headers: outro })).json().identity.bgColor).toBe(first.system.bgColor) // cada um com a sua
+    const p = await prisma.project.create({ data: { ownerId: (await prisma.user.findFirstOrThrow({ where: { email: 'dono@e.com' } })).id, name: 'Id', prompt: 'x', targetDurationS: 60, status: 'editing' } })
+    const opts = (await app.inject({ url: `/api/projects/${p.id}/edit`, headers: dono })).json().options
+    expect(opts).toMatchObject({ bgColor: '#15273D', titleStyle: { color: '#FFD43B', cardAlign: 'bottom-left' } })
+  })
+
+  it('brainstorm entra na fila e só a dona vê', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/brainstorms', headers: dono, payload: { niche: 'x' } })).statusCode).toBe(400)
+    const b = (await app.inject({ method: 'POST', url: '/api/brainstorms', headers: dono, payload: { niche: 'história do futebol' } })).json()
+    expect(b).toMatchObject({ status: 'queued', niche: 'história do futebol' })
+    expect(b).toMatchObject({ status: 'queued', startedAt: null, finishedAt: null, tokens: null })
+    expect((await app.inject({ url: '/api/brainstorms', headers: outro })).json()).toEqual([])
+    expect((await app.inject({ method: 'DELETE', url: `/api/brainstorms/${b.id}`, headers: outro })).statusCode).toBe(404)
+  })
+})

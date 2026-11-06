@@ -879,7 +879,7 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .rec-done { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .rec-done audio { flex: 1; min-width: 220px; }
 .upload-link { align-self: flex-start; cursor: pointer; font-size: .85rem; }
 .voice-foot { flex-wrap: wrap; } .voice-foot button { white-space: nowrap; }
-.voice-foot button.link.danger { background: none; color: var(--danger); }
+.voice-foot button.link.danger, .brainstorm-row button.link.danger { background: none; color: var(--danger); }
 
 /* Barra lateral: mais espaço entre a logo e o menu, e entre os itens */
 .sidebar-top { gap: calc(var(--s5) + 8px); }
@@ -1064,3 +1064,36 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .style-pick { display: grid; grid-template-columns: 72px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; margin-bottom: 8px; background: var(--soft); border: 1px solid var(--accent); border-radius: var(--radius); }
 .style-pick img { width: 72px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 2px; } .style-pick div { display: flex; flex-direction: column; min-width: 0; }
 @media (max-width: 700px) { .an-top { grid-template-columns: 1fr; } .analysis-form { grid-template-columns: 1fr; } }
+/* Admin → Identidade */
+.identity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--s3); align-items: start; }
+.identity-preview { position: sticky; top: 80px; display: flex; flex-direction: column; gap: 8px; }
+.identity-form { display: flex; flex-direction: column; gap: var(--s3); }
+.identity-form .panel { display: flex; flex-direction: column; gap: 10px; }
+.id-screen { position: relative; container-type: inline-size; aspect-ratio: 16 / 9; display: flex; padding: 6%; border-radius: var(--radius); overflow: hidden; }
+.id-screen.photo { background: linear-gradient(135deg, #4a5a6a, #1c2430); }
+.id-card { display: flex; width: 100%; height: 100%; font-weight: 800; line-height: 1; text-shadow: 0 .04em .12em rgb(0 0 0 / .6); }
+.id-card.top { align-items: flex-start; } .id-card.middle { align-items: center; } .id-card.bottom { align-items: flex-end; }
+.id-card.left { justify-content: flex-start; } .id-card.center { justify-content: center; text-align: center; } .id-card.right { justify-content: flex-end; }
+.id-band { position: absolute; padding: .25em .5em; color: #111; font-weight: 800; }
+.id-band.top { top: 7%; } .id-band.middle { top: 45%; } .id-band.bottom { bottom: 22%; }
+.id-band.left { left: 6%; } .id-band.center { left: 50%; transform: translateX(-50%); } .id-band.right { right: 6%; }
+.id-cap { position: absolute; left: 6%; right: 6%; line-height: 1.2; }
+.id-cap.bottom { bottom: 8%; } .id-cap.middle { top: 50%; transform: translateY(-50%); } .id-cap.top { top: 8%; }
+.id-cap.left { text-align: left; } .id-cap.center { text-align: center; } .id-cap.right { text-align: right; }
+.id-cap.outlined { -webkit-text-stroke: .04em #000; paint-order: stroke fill; }
+.identity-form label.check { flex-direction: row; align-items: center; gap: 6px; } .identity-form label.check input { width: auto; height: auto; }
+@media (max-width: 1000px) { .identity { grid-template-columns: 1fr; } .identity-preview { position: static; } }
+/* Brainstorm */
+.brainstorm-form { display: flex; flex-direction: column; gap: 10px; } .brainstorm-form label { display: flex; flex-direction: column; gap: 6px; } .brainstorm-form input, .brainstorm-form textarea { margin: 0; }
+.brainstorm-list { display: flex; flex-direction: column; gap: 8px; }
+.brainstorm-row { display: flex; flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; } .brainstorm-row > div { display: flex; flex-direction: column; } .brainstorm-row .spacer { flex: 1; }
+.idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.idea { gap: 8px; } .idea-title { font-size: 1rem; } .idea-hook { font-style: italic; color: var(--accent-text); }
+.idea .btn { align-self: flex-start; margin-top: auto; }
+
+/* Novo vídeo: escolher um vídeo analisado como referência */
+.pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: var(--card); color: var(--fg); border: 1px solid var(--border); min-width: 0; }
+.pick-row:hover { border-color: var(--accent); }
+.pick-row > * { max-width: 100%; }
+.modal:has(.pick-list) { margin-top: 80px; max-height: calc(100vh - 128px); }

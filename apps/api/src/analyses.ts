@@ -7,8 +7,8 @@ import { detectPlatform } from '@corte/shared'
 import { requireAuth } from './auth.js'
 
 const Url = z.object({ url: z.string().trim().max(500).refine((v) => !!detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok') })
-const card = (a: { id: string; url: string; platform: string | null; title: string | null; durationS: number | null; status: string; stage: string | null; error: string | null; createdAt: Date; thumbPath: string | null }) =>
-  ({ id: a.id, url: a.url, platform: a.platform, title: a.title, durationS: a.durationS, status: a.status, stage: a.stage, error: a.error, createdAt: a.createdAt, hasThumb: !!a.thumbPath })
+const card = (a: { id: string; url: string; platform: string | null; title: string | null; channel: string | null; durationS: number | null; status: string; stage: string | null; error: string | null; createdAt: Date; thumbPath: string | null }) =>
+  ({ id: a.id, url: a.url, platform: a.platform, title: a.title, channel: a.channel, durationS: a.durationS, status: a.status, stage: a.stage, error: a.error, createdAt: a.createdAt, hasThumb: !!a.thumbPath })
 
 // Aba Análise: envia um link, o worker analisa e o card guarda tudo para usar o estilo num vídeo novo.
 export async function analysisRoutes(app: FastifyInstance) {
