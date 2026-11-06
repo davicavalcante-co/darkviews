@@ -193,3 +193,23 @@ describe('aprovação das imagens em rodadas', () => {
     expect((await app.inject({ url: `/api/projects/${projectId}/review`, headers: dono })).json().scenes).toEqual([])
   })
 })
+
+describe('aprovação do roteiro', () => {
+  it('edita falas, refaz com dicas e aprova para seguir às imagens', async () => {
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.project.update({ where: { id: projectId }, data: { status: 'script_review' } })
+    const sc = await prisma.script.create({ data: { projectId, version: 40, body: '{}', scenePlan: '[]', createdBy: 'claude', scenes: { create: [{ index: 0, startS: 0, endS: 3, narration: 'Fala antiga' }] } } })
+    const send = (body: object) => app.inject({ method: 'POST', url: `/api/projects/${projectId}/script-review`, headers: dono, payload: body })
+    expect((await send({ action: 'redo' })).statusCode).toBe(400) // refazer pede a dica
+    expect((await send({ action: 'save', scenes: [{ index: 0, narration: 'Fala nova', onScreenText: 'Título' }] })).statusCode).toBe(200)
+    expect(await prisma.scene.findFirst({ where: { scriptId: sc.id }, select: { narration: true, onScreenText: true } })).toEqual({ narration: 'Fala nova', onScreenText: 'Título' })
+    expect((await send({ action: 'redo', hint: 'mais curto' })).statusCode).toBe(202)
+    const redo = await prisma.job.findFirstOrThrow({ where: { projectId, status: 'queued' } })
+    expect([redo.type, JSON.parse(redo.payload!).hint]).toEqual(['script', 'mais curto'])
+    expect((await send({ action: 'approve' })).statusCode).toBe(409) // já não está esperando aprovação
+    await prisma.job.updateMany({ where: { projectId }, data: { status: 'done' } })
+    await prisma.project.update({ where: { id: projectId }, data: { status: 'script_review' } })
+    expect((await send({ action: 'approve' })).statusCode).toBe(202)
+    expect((await prisma.job.findFirstOrThrow({ where: { projectId, status: 'queued' } })).type).toBe('media')
+  })
+})

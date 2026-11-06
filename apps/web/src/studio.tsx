@@ -23,7 +23,7 @@ type Base = {
 }
 
 const STATUS: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', rendering: 'Criando vídeo',
+  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', rendering: 'Criando vídeo',
   editing: 'Pronto · em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 // Estilo de edição: puxa o roteiro para um tipo de movimento e transição.

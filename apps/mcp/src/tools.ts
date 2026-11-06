@@ -19,7 +19,7 @@ async function project(u: User, id: string) {
   return p
 }
 const STATUS: Record<string, string> = {
-  queued: 'na fila', analyzing: 'analisando a referência', scripting: 'escrevendo o roteiro', media: 'buscando mídia e gravando a voz', image_review: 'aguardando a aprovação das imagens (no site)',
+  queued: 'na fila', analyzing: 'analisando a referência', scripting: 'escrevendo o roteiro', script_review: 'aguardando a aprovação do roteiro (no site)', media: 'buscando mídia e gravando a voz', image_review: 'aguardando a aprovação das imagens (no site)',
   rendering: 'criando o vídeo', editing: 'pronto, em edição', in_approval: 'aguardando aprovação', approved: 'aprovado', failed: 'falhou',
 }
 const WEB = process.env.WEB_ORIGIN ?? 'http://localhost:5173'

@@ -79,7 +79,7 @@ export const NewProjectInput = z.object({
   }),
 })
 
-export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'talking_head', 'media', 'image_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
 export const ReviewInput = z.object({ rejected: z.array(z.number().int().min(0)).max(2000) })
 export type ProjectStatus = z.infer<typeof ProjectStatus>
 

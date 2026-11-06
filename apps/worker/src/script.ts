@@ -18,6 +18,7 @@ const EDIT_STYLE: Record<string, string> = {
 const EXT: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 
 export async function script(job: Job) {
+  const { hint } = JSON.parse(job.payload ?? '{}') as { hint?: string }
   const project = await prisma.project.update({
     where: { id: job.projectId }, data: { status: 'scripting' },
     include: { reference: true, assets: { where: { kind: { in: ['user_image', 'user_video'] } }, orderBy: { sortOrder: 'asc' } } },
@@ -41,6 +42,8 @@ export async function script(job: Job) {
     const base = [
       'Você é roteirista e editor de vídeos. Escreva o roteiro e o plano de cenas de um vídeo horizontal 16:9.',
       `Pedido do cliente:\n"""\n${project.prompt}\n"""`,
+      // Refazer o roteiro pela tela de aprovação: a orientação do cliente manda.
+      hint ? `O cliente leu o roteiro anterior e pediu para refazer assim:\n"""\n${hint}\n"""` : '',
       `Duração alvo: ${project.targetDurationS} s (nunca acima de 1080 s). As cenas devem ser contínuas: cada uma começa onde a anterior termina, a primeira em 0 e a última termina na duração alvo.`,
       `Troque de imagem a cada 3 a 6 segundos, ou no ritmo do perfil de estilo abaixo.`,
       'Toda cena tem narração, sem silêncio. A única exceção são as cartelas de capítulo: media.type "text_card" com o título curto (2 a 5 palavras, caixa alta), narração vazia e 1,2 a 1,6 s. Use 2 ou 3 cartelas por vídeo, nas viradas de assunto.',
@@ -89,9 +92,8 @@ export async function script(job: Job) {
     await save(project.id, plan, images.map((a) => a.id), talkingVideo?.id)
   } finally { await rm(dir, { recursive: true, force: true }) }
 
-  await prisma.project.update({ where: { id: project.id }, data: { status: 'media' } })
-  // Próxima etapa: mídia e render (Fase 4). Fica na fila até lá.
-  await prisma.job.create({ data: { projectId: project.id, type: 'media', stage: 'Aguardando busca de imagens' } })
+  // Para aqui: a pessoa lê o roteiro e aprova, edita ou pede para refazer (tela de Andamento).
+  await prisma.project.update({ where: { id: project.id }, data: { status: 'script_review' } })
 }
 
 async function save(projectId: string, plan: ScriptOutput, imageIds: string[], talkingVideoId?: string) {

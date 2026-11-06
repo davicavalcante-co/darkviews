@@ -296,6 +296,24 @@ export async function projectRoutes(app: FastifyInstance) {
     return reply.code(202).send({ choice })
   })
 
+  // ---------- Aprovação do roteiro ----------
+  // approve: segue para as imagens. redo: o Claude reescreve com as dicas. scenes: fala e texto da tela editados à mão (salva antes de aprovar).
+  app.post<{ Params: { id: string } }>('/api/projects/:id/script-review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'script_review') return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
+    const input = ScriptReviewInput.parse(req.body)
+    if (input.scenes?.length) {
+      await prisma.$transaction(input.scenes.map((s) => prisma.scene.updateMany({ where: { scriptId: p.scripts[0]?.id ?? '', index: s.index }, data: { narration: s.narration, onScreenText: s.onScreenText || null } })))
+    }
+    if (input.action === 'save') return { ok: true }
+    const ok = input.action === 'approve'
+      ? await advance(p.id, 'script_review', { status: 'media' }, 'media')
+      : await advance(p.id, 'script_review', { status: 'scripting' }, 'script', undefined, JSON.stringify({ hint: input.hint }))
+    if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
+    return reply.code(202).send({ next: input.action === 'approve' ? 'imagens' : 'novo_roteiro' })
+  })
+
   app.get<{ Params: { id: string } }>('/api/projects/:id/review', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
@@ -528,3 +546,9 @@ async function stageEstimate(type: string, durationS: number, ownVoice: boolean)
 
 // Imagem já aprovada numa rodada anterior da aprovação (fica guardada na busca da cena).
 export const approvedScene = (searchQuery: string | null) => !!searchQuery && (JSON.parse(searchQuery) as { approved?: boolean }).approved === true
+
+const ScriptReviewInput = z.object({
+  action: z.enum(['approve', 'redo', 'save']),
+  hint: z.string().trim().max(2000).optional(),
+  scenes: z.array(z.object({ index: z.number().int().min(0), narration: z.string().trim().max(2000), onScreenText: z.string().trim().max(120).default('') })).max(500).optional(),
+}).refine((v) => v.action !== 'redo' || !!v.hint, { message: 'Diga como quer o roteiro novo', path: ['hint'] })
