@@ -57,14 +57,29 @@ describe('novo vídeo', () => {
     expect((await create(ana, { targetDurationS: '3601' })).statusCode).toBe(400)
   })
 
-  it('vídeo por cortes: guarda os vídeos para cortar e vai direto ao roteiro', async () => {
-    expect((await create(ana, { method: 'cortes' })).statusCode).toBe(400) // sem vídeo para cortar
-    const res = await create(ana, { method: 'cortes' }, [['footage', MP4, 'longo.mp4'], ['footage', MP4, 'outro.mp4']])
+  it('só vídeos com vídeos enviados: corta, aprova, apaga os reprovados e repõe ou repete', async () => {
+    expect((await create(ana, {}, [['footage', MP4, 'longo.mp4']])).statusCode).toBe(400) // vídeo para cortar só em "Só vídeos"
+    const res = await create(ana, { mediaMode: 'videos' }, [['footage', MP4, 'longo.mp4'], ['footage', MP4, 'outro.mp4']])
     expect(res.statusCode).toBe(201)
-    const p = await prisma.project.findUnique({ where: { id: res.json().id }, include: { assets: true, jobs: true } })
+    const id = res.json().id
+    const p = await prisma.project.findUnique({ where: { id }, include: { assets: true, jobs: true } })
     expect(p!.assets.filter((a) => a.kind === 'user_video')).toHaveLength(2)
-    expect(JSON.parse(p!.options).method).toBe('cortes')
+    expect(JSON.parse(p!.options)).toMatchObject({ method: 'cortes', mediaMode: 'videos' })
     expect(p!.jobs.map((j) => j.type)).toEqual(['script'])
+
+    // Simula o worker: 3 cortes esperando aprovação
+    const cuts = await Promise.all([0, 1, 2].map((i) => prisma.asset.create({ data: { projectId: id, kind: 'footage_cut', filePath: `/tmp/nao-existe-${i}.mp4`, mime: 'video/mp4', durationS: 4, sourceId: JSON.stringify({ path: 'x', startS: i * 10, lenS: 4 }) } })))
+    await prisma.project.update({ where: { id }, data: { status: 'cut_review' } })
+    expect((await app.inject({ url: `/api/projects/${id}/cut-review`, headers: ana.headers })).json().pending).toHaveLength(3)
+    expect((await app.inject({ url: `/api/projects/${id}/cut-review`, headers: beto.headers })).statusCode).toBe(404)
+    const r = await app.inject({ method: 'POST', url: `/api/projects/${id}/cut-review`, headers: ana.headers, payload: { rejected: [cuts[0].id], refill: 'new' } })
+    expect(r.json()).toMatchObject({ removed: 1, next: 'novos_cortes' })
+    const after = await prisma.project.findUnique({ where: { id }, include: { assets: true, jobs: { orderBy: { createdAt: 'desc' }, take: 1 } } })
+    expect(after!.assets.some((a) => a.id === cuts[0].id)).toBe(false) // reprovado apagado
+    expect(after!.assets.filter((a) => a.kind === 'footage_clip')).toHaveLength(2)
+    expect(JSON.parse(after!.jobs[0].payload!)).toEqual({ count: 1 })
+    expect(JSON.parse(after!.options).cutRanges).toHaveLength(1) // o trecho reprovado não é cortado de novo
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/cut-review`, headers: ana.headers, payload: {} })).statusCode).toBe(409)
   })
 
   it('recusa link fora da lista de plataformas', async () => {

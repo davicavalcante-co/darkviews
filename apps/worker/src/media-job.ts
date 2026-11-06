@@ -45,6 +45,8 @@ export async function media(job: Job) {
   })
   const script = project.scripts[0]
   if (!script) throw new Error('Projeto sem roteiro')
+  // Só imagens / só vídeos: o banco busca só esse tipo, seja o que o roteiro pediu.
+  const mediaMode = (JSON.parse(project.options) as { mediaMode?: string }).mediaMode
   const dir = join(STORAGE_DIR, 'media', project.id)
   await mkdir(dir, { recursive: true })
   const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
@@ -56,7 +58,7 @@ export async function media(job: Job) {
   for (const [i, s] of wanted.entries()) {
     const q = JSON.parse(s.searchQuery!) as { queries: string[]; levels?: number[]; kind: 'image' | 'video'; orientation: string; rejected?: string[] }
     const rejected = new Set(q.rejected ?? [])
-    found.set(s.index, (await searchStock(q.queries, q.kind, q.orientation, project.ownerId, q.levels)).filter((c) => !rejected.has(`${c.provider}:${c.sourceId}`)))
+    found.set(s.index, (await searchStock(q.queries, mediaMode === 'images' ? 'image' : mediaMode === 'videos' ? 'video' : q.kind, q.orientation, project.ownerId, q.levels)).filter((c) => !rejected.has(`${c.provider}:${c.sourceId}`)))
     await step('Buscando imagens', 5 + Math.round((i / Math.max(wanted.length, 1)) * 25))
   }
 

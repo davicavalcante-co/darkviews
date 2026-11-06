@@ -80,7 +80,9 @@ export async function projectRoutes(app: FastifyInstance) {
       const images = files.filter((f) => f.field === 'images')
       // Método "Vídeo por cortes": os vídeos longos que vão ser cortados e montados.
       const footage = files.filter((f) => f.field === 'footage')
-      if (input.method === 'cortes' && !footage.length) throw httpError(400, 'Envie pelo menos um vídeo para cortar')
+      // Só vídeos com vídeos enviados: os enviados são cortados e passam por aprovação (método por cortes).
+      const cortes = input.mediaMode === 'videos' && footage.length > 0
+      if (footage.length && input.mediaMode !== 'videos') throw httpError(400, 'Vídeos para cortar só no modo "Só vídeos"')
       if (video.length > 1) throw httpError(400, 'Envie só um vídeo de referência')
       if (video.length && input.link) throw httpError(400, 'Use link ou vídeo de referência, não os dois')
       // Estilo de uma análise pronta: a referência já vem analisada; pula baixar e analisar e vai direto ao roteiro.
@@ -94,7 +96,7 @@ export async function projectRoutes(app: FastifyInstance) {
           name: input.name,
           prompt: input.prompt,
           targetDurationS: input.targetDurationS,
-          options: optionsJson(input),
+          options: optionsJson(input, cortes ? { method: 'cortes' } : {}),
           reference: analysis
             ? { create: { sourceType: 'analysis', url: analysis.url, platform: analysis.platform, durationS: analysis.durationS, styleProfile: analysis.profile } }
             : input.link
@@ -107,8 +109,8 @@ export async function projectRoutes(app: FastifyInstance) {
             ],
           },
           // Com análise pronta ou no método por cortes (sem referência), vai direto ao roteiro.
-          ...((analysis || (input.method === 'cortes' && !input.link && !video.length)) && { status: 'scripting' }),
-          jobs: { create: analysis || (input.method === 'cortes' && !input.link && !video.length) ? { type: 'script', stage: 'Na fila' } : { type: 'ingest', stage: 'Na fila' } },
+          ...((analysis || (cortes && !input.link && !video.length)) && { status: 'scripting' }),
+          jobs: { create: analysis || (cortes && !input.link && !video.length) ? { type: 'script', stage: 'Na fila' } : { type: 'ingest', stage: 'Na fila' } },
         },
       })
       return reply.code(201).send({ id: project.id })
@@ -373,6 +375,36 @@ export async function projectRoutes(app: FastifyInstance) {
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
   })
 
+  // ---------- Aprovação dos cortes (Só vídeos com vídeos enviados) ----------
+  app.get<{ Params: { id: string } }>('/api/projects/:id/cut-review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, reviewUntil: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const clips = await prisma.asset.findMany({ where: { projectId: p.id, kind: { in: ['footage_cut', 'footage_clip'] } }, orderBy: [{ createdAt: 'asc' }, { sortOrder: 'asc' }], select: { id: true, kind: true, durationS: true } })
+    return { status: p.status, reviewUntil: p.reviewUntil, pending: clips.filter((c) => c.kind === 'footage_cut').map(({ id, durationS }) => ({ id, durationS })), approved: clips.filter((c) => c.kind === 'footage_clip').length }
+  })
+
+  // Reprovados são apagados do sistema. Com reprovados, refill diz: 'new' faz cortes novos no lugar; 'loop' repete os aprovados.
+  app.post<{ Params: { id: string } }>('/api/projects/:id/cut-review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'cut_review') return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação dos cortes' })
+    const { rejected, refill } = z.object({ rejected: z.array(z.string().uuid()).max(2000).default([]), refill: z.enum(['new', 'loop']).default('loop') }).parse(req.body)
+    const gone = await prisma.asset.findMany({ where: { projectId: p.id, kind: 'footage_cut', id: { in: rejected } }, select: { id: true, filePath: true, sourceId: true } })
+    const opts = JSON.parse(p.options)
+    const ranges = [...(opts.cutRanges ?? []), ...gone.flatMap((g) => (g.sourceId ? [JSON.parse(g.sourceId)] : []))]
+    const ok = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'cut_review' }, data: { status: 'media', reviewUntil: null, options: JSON.stringify({ ...opts, cutRanges: ranges }) } })
+      if (!count) return false
+      await tx.asset.deleteMany({ where: { id: { in: gone.map((g) => g.id) } } })
+      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'footage_clip' } })
+      await tx.job.create({ data: { projectId: p.id, type: 'montage', stage: 'Na fila', payload: JSON.stringify(gone.length && refill === 'new' ? { count: gone.length } : { assemble: true }) } })
+      return true
+    })
+    if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação dos cortes' })
+    await Promise.all(gone.map((g) => rm(g.filePath, { force: true })))
+    return reply.code(202).send({ removed: gone.length, next: gone.length && refill === 'new' ? 'novos_cortes' : 'montagem' })
+  })
+
   // Na aprovação: troca a imagem de uma cena por uma foto enviada pela pessoa. Ela já fica aprovada.
   app.post<{ Params: { id: string; index: string } }>('/api/projects/:id/review/:index/upload', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
@@ -540,7 +572,7 @@ async function tokensByProject(ids: string[]) {
 function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
   return JSON.stringify({
     ...prev, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
-    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, method: input.method, ...(input.analysisId && { analysisId: input.analysisId }),
+    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, mediaMode: input.mediaMode, ...(input.analysisId && { analysisId: input.analysisId }),
   })
 }
 

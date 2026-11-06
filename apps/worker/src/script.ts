@@ -26,7 +26,7 @@ export async function script(job: Job) {
   })
   const images = project.assets.filter((a) => a.kind === 'user_image')
   const talkingVideo = project.assets.find((a) => a.kind === 'user_video')
-  const options = JSON.parse(project.options) as { method?: string; analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
+  const options = JSON.parse(project.options) as { mediaMode?: string; method?: string; analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
   // Vídeo da aba Análise escolhido como referência: a análise completa (roteiro, gancho, técnicas, ritmo...) guia o roteiro.
   const analysis = options.analysisId ? await prisma.videoAnalysis.findFirst({ where: { id: options.analysisId, ownerId: project.ownerId, status: 'done' }, select: { title: true, channel: true, details: true } }) : null
   // Pasta temporária só com as imagens do usuário, para o Claude abrir (Read) sem ver o resto do disco.
@@ -75,6 +75,7 @@ export async function script(job: Job) {
       options.method === 'cortes'
         ? 'MÉTODO VÍDEO POR CORTES: a imagem será uma montagem de cortes aleatórios dos vídeos do cliente, sem relação cena a cena com a fala. Use media.type "user_video" em TODAS as cenas, sem cartelas (text_card) e com onScreenText vazio. Capriche só na narração; transição "cut" e sem movimento.'
         : EDIT_STYLE[options.editStyle ?? 'auto'],
+      options.mediaMode === 'images' ? 'Use só fotos (kind "image"), nunca vídeo de banco.' : options.mediaMode === 'videos' ? 'Use só vídeos de banco (kind "video"), nunca foto parada.' : '',
       project.reference?.styleProfile ? `Perfil de estilo da referência (imite o estilo, não copie o conteúdo):\n${project.reference.styleProfile}` : 'Sem vídeo de referência: escolha um estilo adequado ao pedido.',
       images.length
         ? `Imagens do cliente (prefira usá-las). Para ver o que mostram, abra com Read só estas folhas, que juntam as imagens em grade de 6 colunas, da esquerda para a direita e de cima para baixo, 24 por folha: ${sheets.join(', ')}. A posição na grade é o índice (a 1ª imagem da folha-2 é o índice 24).\n${names.map((n, i) => `- índice ${i}: legenda: ${images[i].userCaption || 'sem legenda'}`).join('\n')}`
