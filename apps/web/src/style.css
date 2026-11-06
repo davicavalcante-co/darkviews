@@ -879,7 +879,7 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .rec-done { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .rec-done audio { flex: 1; min-width: 220px; }
 .upload-link { align-self: flex-start; cursor: pointer; font-size: .85rem; }
 .voice-foot { flex-wrap: wrap; } .voice-foot button { white-space: nowrap; }
-.voice-foot button.link.danger { background: none; color: var(--danger); }
+.voice-foot button.link.danger, .brainstorm-row button.link.danger { background: none; color: var(--danger); }
 
 /* Barra lateral: mais espaço entre a logo e o menu, e entre os itens */
 .sidebar-top { gap: calc(var(--s5) + 8px); }
@@ -1086,7 +1086,7 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 /* Brainstorm */
 .brainstorm-form { display: flex; flex-direction: column; gap: 10px; } .brainstorm-form label { display: flex; flex-direction: column; gap: 6px; } .brainstorm-form input, .brainstorm-form textarea { margin: 0; }
 .brainstorm-list { display: flex; flex-direction: column; gap: 8px; }
-.brainstorm-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .brainstorm-row > div { display: flex; flex-direction: column; } .brainstorm-row .spacer { flex: 1; }
+.brainstorm-row { display: flex; flex-direction: row; align-items: center; gap: 10px; flex-wrap: wrap; } .brainstorm-row > div { display: flex; flex-direction: column; } .brainstorm-row .spacer { flex: 1; }
 .idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
 .idea { gap: 8px; } .idea-title { font-size: 1rem; } .idea-hook { font-style: italic; color: var(--accent-text); }
 .idea .btn { align-self: flex-start; margin-top: auto; }

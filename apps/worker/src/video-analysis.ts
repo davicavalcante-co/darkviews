@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import { logEvent, prisma, STORAGE_DIR } from '@corte/db'
 import { AnalysisDetails, StyleProfile } from '@corte/shared'
+import { researchKit, youtubeStats } from '@corte/providers'
 import { askClaude } from './claude.js'
 import { FFMPEG, run } from './ffmpeg.js'
 import { download, probeDuration } from './ingest.js'
@@ -38,6 +39,7 @@ export async function runNextAnalysis(workerJobId: string | null) {
     const sheet = await contactSheet(video, durationS, dir, count)
     await stage('Transcrevendo as falas')
     const transcript = await transcribe(video, dir)
+    const yt = await researchKit(next.ownerId).then((k) => (k.youtube ? youtubeStats(k.youtube, next.url) : null)).catch(() => null)
     await stage('Claude analisando tudo')
     const out = await askClaude({
       jobId: workerJobId ?? '', cwd: dir, canReadFiles: true, effort: 'high', schema: Result, maxTurns: 6, // sem tarefa de vídeo: o uso do Claude fica sem vínculo
@@ -48,9 +50,10 @@ export async function runNextAnalysis(workerJobId: string | null) {
         `Título: ${got.title ?? 'desconhecido'}. Duração: ${durationS.toFixed(1)} s. Plataforma: ${next.platform ?? 'link'}.`,
         `Trocas de cena detectadas (${cuts.length}, em segundos): ${cuts.map((c) => c.toFixed(1)).join(', ') || 'nenhuma'}. Cortes por minuto: ${((cuts.length / Math.max(durationS, 1)) * 60).toFixed(1)}.`,
         `Abra com Read o arquivo ${sheet.file.split('/').pop()}: ${sheet.times.length} quadros em grade de ${sheet.cols} colunas, da esquerda para a direita e de cima para baixo. Tempo de cada quadro, em segundos: ${sheet.times.join(', ')}.`,
+        yt ? `Números no YouTube: canal ${yt.channel}, publicado em ${yt.published}, ${yt.views} visualizações, ${yt.likes} curtidas, ${yt.comments} comentários. Comente o desempenho no resumo.` : '',
         transcript ? `Transcrição da fala:\n"""\n${transcript.slice(0, 20_000)}\n"""` : 'Sem transcrição: deduza o que puder pelos quadros.',
         'Responda em português do Brasil.',
-      ].join('\n\n'),
+      ].filter(Boolean).join('\n\n'),
     })
     await prisma.videoAnalysis.update({ where: { id: next.id }, data: { status: 'done', stage: null, profile: JSON.stringify({ ...out.profile, transcriptAvailable: !!transcript }), details: JSON.stringify(out.details) } })
   } catch (e) {

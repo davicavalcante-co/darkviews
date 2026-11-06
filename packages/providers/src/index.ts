@@ -348,7 +348,10 @@ export async function pickMusic(userId: string | null | undefined, tags: string 
 export async function testIntegration(provider: string, secrets: Record<string, string>, config: Record<string, string>) {
   const a: Active = { provider, secrets, config }
   try {
-    if (provider === 'pixabay') await pixabay(a, 'coffee', 'image', 'landscape')
+    if (provider === 'youtube_data') await youtubeTop(secrets.api_key, 'café')
+    else if (provider === 'serper_search') await googleSearch(secrets.api_key, 'café')
+    else if (provider === 'claude_web') return true
+    else if (provider === 'pixabay') await pixabay(a, 'coffee', 'image', 'landscape')
     else if (provider === 'serper') { if (!(await serper(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'openverse') { if (!(await openverse(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'elevenlabs') await getJson('https://api.elevenlabs.io/v1/user', { 'xi-api-key': secrets.api_key })
@@ -433,4 +436,39 @@ export const studioDeleteProfile = (id: string) => studioFetch(`/profiles/${enco
 export async function toStudioWav(input: string, out: string) {
   try { await run(STUDIO_FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-t', '12', '-vn', '-ac', '1', '-ar', '24000', out]) }
   catch { throw new StudioError('Não consegui ler esse áudio. Envie MP3, WAV, M4A ou grave de novo.') }
+}
+
+// ---------- Pesquisa e análise (Brainstorm, aba Análise) ----------
+/* eslint-disable @typescript-eslint/no-explicit-any */
+// Vídeos com mais visualizações do nicho no último ano.
+export async function youtubeTop(apiKey: string, query: string) {
+  const since = new Date(Date.now() - 365 * 86400_000).toISOString()
+  const s = await getJson(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&order=viewCount&maxResults=15&relevanceLanguage=pt&publishedAfter=${since}&q=${encodeURIComponent(query)}&key=${encodeURIComponent(apiKey)}`)
+  const ids = (s.items ?? []).map((i: any) => i.id.videoId).join(',')
+  if (!ids) return []
+  const v = await getJson(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${ids}&key=${encodeURIComponent(apiKey)}`)
+  return (v.items ?? []).map((i: any) => ({ title: i.snippet.title as string, channel: i.snippet.channelTitle as string, views: Number(i.statistics.viewCount ?? 0), published: String(i.snippet.publishedAt).slice(0, 10) }))
+}
+// Números de um vídeo do YouTube (pelo link).
+export async function youtubeStats(apiKey: string, url: string) {
+  const id = /(?:v=|youtu\.be\/|shorts\/)([\w-]{11})/.exec(url)?.[1]
+  if (!id) return null
+  const v = await getJson(`https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${id}&key=${encodeURIComponent(apiKey)}`)
+  const i = v.items?.[0]
+  return i ? { channel: i.snippet.channelTitle as string, published: String(i.snippet.publishedAt).slice(0, 10), views: Number(i.statistics.viewCount ?? 0), likes: Number(i.statistics.likeCount ?? 0), comments: Number(i.statistics.commentCount ?? 0) } : null
+}
+// Resultados do Google (título e trecho) sobre um assunto.
+export async function googleSearch(apiKey: string, query: string) {
+  const res = await fetch('https://google.serper.dev/search', { method: 'POST', headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ q: query, gl: 'br', hl: 'pt-br', num: 10 }), signal: AbortSignal.timeout(20_000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const d = (await res.json()) as any
+  return [...(d.organic ?? []).map((o: any) => `${o.title}: ${o.snippet ?? ''}`), ...(d.peopleAlsoAsk ?? []).map((q: any) => `Pergunta frequente: ${q.question}`)].slice(0, 14) as string[]
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+// O que está ligado na aba Integrações → Pesquisa e Análise.
+export async function researchKit(userId?: string | null) {
+  const on = await activeProviders('pesquisa', userId)
+  const key = (p: string) => on.find((a) => a.provider === p)?.secrets.api_key
+  return { web: on.some((a) => a.provider === 'claude_web'), youtube: key('youtube_data'), google: key('serper_search') }
 }

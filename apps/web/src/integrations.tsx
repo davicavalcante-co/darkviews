@@ -15,6 +15,7 @@ const CATEGORIES: [string, string, string][] = [
   ['voz', 'Vozes', 'Quem narra o vídeo'],
   ['banco_de_imagens', 'Fotos e Vídeos', 'De onde vêm as imagens reais das cenas'],
   ['música', 'Música', 'Trilha de fundo'],
+  ['pesquisa', 'Pesquisa e Análise', 'De onde vêm os dados do Brainstorm, da Análise e do roteiro'],
 ]
 const TIER: Record<Tier, [string, string]> = { gratis: ['Grátis', 'free'], gratis_chave: ['Grátis com cadastro', 'freekey'], pago: ['Pago', 'paid'] }
 const FIELD_LABEL: Record<string, string> = { voice: 'Voz', voice_id: 'ID da voz', speed: 'Velocidade da fala', steps: 'Qualidade', api_key: 'Chave da API' }
@@ -129,7 +130,7 @@ function Setup({ item, isAdmin, base, inUse, onClose, reload, makePrimary }: {
   }
 
   return (
-    <Modal open onClose={onClose} kicker={item.category === 'voz' ? 'Voz' : item.category === 'música' ? 'Música' : 'Fotos e vídeos'} title={item.label}>
+    <Modal open onClose={onClose} kicker={item.category === 'voz' ? 'Voz' : item.category === 'música' ? 'Música' : item.category === 'pesquisa' ? 'Pesquisa e Análise' : 'Fotos e vídeos'} title={item.label}>
       <div className="int-name"><span className={`badge ${tierClass}`}>{tierLabel}</span>{inUse && <span className="badge st-on">Em uso</span>}</div>
       <p className="muted">{item.help}</p>
 
@@ -181,7 +182,7 @@ function Setup({ item, isAdmin, base, inUse, onClose, reload, makePrimary }: {
 export function MyIntegrations({ isAdmin }: { isAdmin?: boolean }) {
   return (
     <div className="page">
-      <PageHead kicker="Voz, fotos e música" title="Integrações" />
+      <PageHead kicker="Voz, fotos, música e pesquisa" title="Integrações" />
       <Integrations isAdmin={isAdmin} />
     </div>
   )

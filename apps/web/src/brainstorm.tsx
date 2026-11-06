@@ -3,7 +3,9 @@ import type { BrainstormResult } from '@corte/shared'
 import { api } from './api'
 import { Modal, PageHead } from './ui'
 
-type Row = { id: string; niche: string; notes: string | null; status: 'queued' | 'running' | 'done' | 'failed'; error: string | null; createdAt: string; result: BrainstormResult | null }
+type Row = { id: string; niche: string; notes: string | null; status: 'queued' | 'running' | 'done' | 'failed'; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; tokens: number | null; result: BrainstormResult | null }
+
+const clock = (ms: number) => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}` }
 
 // Ideia → Novo vídeo já preenchido (nome, prompt com gancho e tópicos, duração).
 function toNewVideo(niche: string, i: BrainstormResult['ideas'][number]) {
@@ -18,6 +20,10 @@ export function BrainstormPage() {
   const [open, setOpen] = useState<Row | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const [now, setNow] = useState(Date.now())
+  const running = rows?.some((r) => r.status === 'running')
+  useEffect(() => { if (!running) return; const i = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(i) }, [running])
   const load = () => api<Row[]>('/brainstorms').then(setRows).catch(() => setRows([]))
   useEffect(() => { load() }, [])
   useEffect(() => {
@@ -30,18 +36,25 @@ export function BrainstormPage() {
     const form = e.currentTarget
     const f = Object.fromEntries(new FormData(form)) as Record<string, string>
     setBusy(true); setError('')
-    try { await api('/brainstorms', { method: 'POST', body: { niche: f.niche, notes: f.notes } }); form.reset(); await load() }
+    try { await api('/brainstorms', { method: 'POST', body: { niche: f.niche, notes: f.notes } }); form.reset(); setCreating(false); await load() }
     catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
   return (
     <div className="page">
-      <PageHead kicker="Ideias de vídeo para o seu nicho" title="Brainstorm" />
-      <form className="panel brainstorm-form" onSubmit={send}>
-        <label>Seu nicho<input name="niche" required minLength={2} maxLength={200} placeholder="Ex.: história do futebol brasileiro, finanças para iniciantes, santos católicos" /></label>
-        <label>Detalhes <small className="muted">opcional</small><textarea name="notes" rows={2} maxLength={2000} placeholder="Ex.: público jovem, vídeos de 8 a 12 minutos, tom divertido, evitar política" /></label>
-        <div className="row wrap"><span className="muted small">O Claude pesquisa o que está em alta e o que esse público procura. Leva alguns minutos.</span><span className="spacer" /><button disabled={busy}>{busy ? 'Enviando…' : 'Trazer ideias'}</button></div>
-      </form>
-      {error && <p className="notice alert" role="alert">✕ {error}</p>}
+      <PageHead kicker="Ideias de vídeo para o seu nicho" title="Brainstorm">
+        <button type="button" onClick={() => { setError(''); setCreating(true) }}>+ Nova ideia</button>
+      </PageHead>
+      {creating && (
+        <Modal open onClose={() => setCreating(false)} kicker="Brainstorm" title="Nova ideia">
+          <form className="brainstorm-form" onSubmit={send}>
+            <label>Seu nicho<input name="niche" required minLength={2} maxLength={200} autoFocus placeholder="Ex.: história do futebol brasileiro, finanças para iniciantes, santos católicos" /></label>
+            <label>Detalhes <small className="muted">opcional</small><textarea name="notes" rows={3} maxLength={2000} placeholder="Ex.: público jovem, vídeos de 8 a 12 minutos, tom divertido, evitar política" /></label>
+            <p className="muted small">O Claude pesquisa o que está em alta e o que esse público procura. Leva alguns minutos.</p>
+            {error && <p className="notice alert" role="alert">✕ {error}</p>}
+            <div className="row"><span className="spacer" /><button disabled={busy}>{busy ? 'Enviando…' : 'Gerar ideias'}</button></div>
+          </form>
+        </Modal>
+      )}
       {rows && !rows.length && <p className="panel muted">Nenhum brainstorm ainda.</p>}
       <div className="brainstorm-list">{(rows ?? []).map((r) => (
         <article key={r.id} className={`panel brainstorm-row ${r.status}`}>
@@ -50,6 +63,8 @@ export function BrainstormPage() {
             <small className="muted">{new Date(r.createdAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}{r.result ? ` · ${r.result.ideas.length} ideias` : ''}</small>
           </div>
           <span className="spacer" />
+          {r.startedAt && <span className="muted small" title="Tempo da pesquisa">{clock((r.finishedAt ? Date.parse(r.finishedAt) : now) - Date.parse(r.startedAt))}</span>}
+          {r.tokens != null && <span className="muted small" title="Tokens do Claude gastos nesta pesquisa">{r.tokens.toLocaleString('pt-BR')} tokens</span>}
           {(r.status === 'queued' || r.status === 'running') && <span className="pill"><span className="making-dot" /> Pesquisando…</span>}
           {r.status === 'failed' && <><span className="error small" title={r.error ?? ''}>Falhou</span><button type="button" className="link" onClick={() => api(`/brainstorms/${r.id}/retry`, { method: 'POST' }).then(load)}>Tentar de novo</button></>}
           {r.status === 'done' && <button type="button" onClick={() => setOpen(r)}>Ver ideias</button>}

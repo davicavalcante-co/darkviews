@@ -249,6 +249,7 @@ describe('identidade e brainstorm', () => {
     expect((await app.inject({ method: 'POST', url: '/api/brainstorms', headers: dono, payload: { niche: 'x' } })).statusCode).toBe(400)
     const b = (await app.inject({ method: 'POST', url: '/api/brainstorms', headers: dono, payload: { niche: 'história do futebol' } })).json()
     expect(b).toMatchObject({ status: 'queued', niche: 'história do futebol' })
+    expect(b).toMatchObject({ status: 'queued', startedAt: null, finishedAt: null, tokens: null })
     expect((await app.inject({ url: '/api/brainstorms', headers: outro })).json()).toEqual([])
     expect((await app.inject({ method: 'DELETE', url: `/api/brainstorms/${b.id}`, headers: outro })).statusCode).toBe(404)
   })

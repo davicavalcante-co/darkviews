@@ -91,7 +91,7 @@ export type ProgressEvent = {
 export * from './plan'
 
 // ---------- Fase 4: integrações ----------
-export const IntegrationCategory = z.enum(['roteiro', 'voz', 'música', 'imagem', 'vídeo', 'banco_de_imagens', 'transcrição'])
+export const IntegrationCategory = z.enum(['roteiro', 'voz', 'música', 'imagem', 'vídeo', 'banco_de_imagens', 'transcrição', 'pesquisa'])
 export type IntegrationCategory = z.infer<typeof IntegrationCategory>
 
 // tier: gratis = funciona sem chave (já conectada) · gratis_chave = gratuita, mas pede conta/chave · pago = cobra por uso.
@@ -137,6 +137,16 @@ export const PROVIDERS: CatalogItem[] = [
   { provider: 'openverse', label: 'Openverse', category: 'banco_de_imagens', tier: 'gratis', secrets: [], builtIn: true, priority: 60, config: {},
     help: 'Fotos com licença Creative Commons para uso comercial. Já vem conectado.',
     tutorial: ['Já vem pronto, sem cadastro.', 'Só usa fotos liberadas para uso comercial.', 'O crédito de cada foto entra sozinho na descrição do vídeo.'] },
+  // Pesquisa e análise: alimentam o Brainstorm, a aba Análise e o roteiro.
+  { provider: 'claude_web', label: 'Pesquisa na web (Claude)', category: 'pesquisa', tier: 'gratis', secrets: [], builtIn: true, priority: 10, config: {},
+    help: 'O Claude pesquisa na web antes de escrever roteiros e trazer ideias. Já vem ligada; usa o seu plano do Claude.',
+    tutorial: ['Já vem pronta.', 'Desligue se quiser roteiros e ideias mais rápidos, sem pesquisa (gastam menos tokens).'] },
+  { provider: 'youtube_data', label: 'YouTube Data API', category: 'pesquisa', tier: 'gratis_chave', secrets: ['api_key'], priority: 20, config: {},
+    help: 'Traz os vídeos com mais visualizações do seu nicho para o Brainstorm, e visualizações, curtidas e comentários do vídeo na aba Análise.', signup: 'https://console.cloud.google.com/apis/library/youtube.googleapis.com',
+    tutorial: ['Entre em console.cloud.google.com com a sua conta Google e crie um projeto.', 'Em "APIs e serviços", ative a "YouTube Data API v3".', 'Em "Credenciais", clique em "Criar credenciais" → "Chave de API" e copie a chave.', 'Cole aqui, ligue o card e clique em Testar.'] },
+  { provider: 'serper_search', label: 'Google Pesquisa (Serper)', category: 'pesquisa', tier: 'gratis_chave', secrets: ['api_key'], priority: 30, config: {},
+    help: 'Resultados do Google sobre o nicho entram no Brainstorm (o que as pessoas procuram e as notícias recentes). A mesma chave do Google Imagens serve.', signup: 'https://serper.dev/',
+    tutorial: ['Entre em serper.dev e clique em "Sign up" com a sua conta Google.', 'No painel, copie a "API Key".', 'Cole aqui, ligue o card e clique em Testar.'] },
   { provider: 'serper', label: 'Google Imagens (Serper)', category: 'banco_de_imagens', tier: 'gratis_chave', secrets: ['api_key'], priority: 90, config: {},
     help: 'Busca no Google Imagens. Reserva: só entra quando os bancos gratuitos não acham nada. Atenção: imagens do Google têm dono, use por sua conta.', signup: 'https://serper.dev/',
     tutorial: ['Entre em serper.dev e clique em "Sign up" com a sua conta Google.', 'No painel, copie a "API Key".', 'Cole aqui, ligue o card e clique em Testar.'] },

@@ -4,8 +4,8 @@ import { prisma } from '@corte/db'
 import { requireAuth } from './auth.js'
 
 const Input = z.object({ niche: z.string().trim().min(2).max(200), notes: z.string().trim().max(2000).optional() })
-const view = (b: { id: string; niche: string; notes: string | null; status: string; error: string | null; ideas: string | null; createdAt: Date }) =>
-  ({ id: b.id, niche: b.niche, notes: b.notes, status: b.status, error: b.error, createdAt: b.createdAt, result: b.ideas ? JSON.parse(b.ideas) : null })
+const view = (b: { id: string; niche: string; notes: string | null; status: string; error: string | null; ideas: string | null; createdAt: Date; startedAt: Date | null; finishedAt: Date | null; tokens: number | null }) =>
+  ({ id: b.id, niche: b.niche, notes: b.notes, status: b.status, error: b.error, createdAt: b.createdAt, startedAt: b.startedAt, finishedAt: b.finishedAt, tokens: b.tokens, result: b.ideas ? JSON.parse(b.ideas) : null })
 
 // Aba Brainstorm: a pessoa escreve o nicho; o worker pesquisa e traz ideias de vídeo.
 export async function brainstormRoutes(app: FastifyInstance) {

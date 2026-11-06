@@ -438,6 +438,9 @@ model Brainstorm {
   status    String   @default("queued") // queued | running | done | failed
   error     String?
   ideas     String?  // BrainstormResult
+  startedAt  DateTime?
+  finishedAt DateTime?
+  tokens     Int?     // tokens do Claude gastos nesta pesquisa
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@index([ownerId])
