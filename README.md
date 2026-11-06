@@ -21,6 +21,7 @@ Tudo roda na sua máquina, em `http://localhost:5173`. O roteiro e as escolhas d
 - **Versões:** o que foi pedido de uma versão para a outra.
 - **Publicação:** título, descrição, palavras-chave e thumbnail numa tela só.
 - **Aprovar:** escolhe o trecho e o enquadramento e gera os cortes 9:16.
+- **Dark Vídeos** (aba em teste): envie vídeos longos; o sistema monta a imagem com cortes aleatórios deles (só transição) e depois coloca a narração e a legenda. Aceita ideia do Brainstorm e estilo de vídeo analisado. Vídeos de até 60 minutos.
 - **Vozes:** crie uma voz por características ou **clone a sua própria voz** (gravando ou enviando um áudio). Depois de publicada, ela aparece como opção no Novo vídeo.
 - **Integrações:** bancos de imagem, vozes e músicas, gratuitos ou com a sua chave.
 - **Admin:** usuários, fontes, auditoria e logs.

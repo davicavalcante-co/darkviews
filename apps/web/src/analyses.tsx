@@ -95,7 +95,7 @@ function AnalysisModal({ id, onClose }: { id: string; onClose: () => void }) {
               <p>{d.summary}</p>
               <p className="muted small"><b>Público:</b> {d.audience}</p>
               <div className="row wrap">
-                <a className="btn" href={`#/novo?analise=${a.id}`} onClick={onClose}>Utilizar este estilo</a>
+                <a className="btn" href={`#/novo?analise=${a.id}`} onClick={onClose}>Utilizar este estilo</a><a className="btn ghost" href={`#/cortes?analise=${a.id}`} onClick={onClose}>Usar no Dark Vídeos</a>
                 <a className="link" href={a.url} target="_blank" rel="noreferrer">Ver o vídeo original</a>
               </div>
             </div>
@@ -119,7 +119,7 @@ function AnalysisModal({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
           <Block title="Linha do tempo"><Moments items={d.timeline} /></Block>
           <Block title="Como recriar este estilo"><ol className="an-list">{d.howToRecreate.map((t, i) => <li key={i}>{t}</li>)}</ol></Block>
-          <div className="row"><span /><a className="btn" href={`#/novo?analise=${a.id}`} onClick={onClose}><Icon name="novo" size={16} /> Utilizar este estilo</a></div>
+          <div className="row"><span /><a className="btn ghost" href={`#/cortes?analise=${a.id}`} onClick={onClose}>Usar no Dark Vídeos</a><a className="btn" href={`#/novo?analise=${a.id}`} onClick={onClose}><Icon name="novo" size={16} /> Utilizar este estilo</a></div>
         </div>
       )}
     </Modal>

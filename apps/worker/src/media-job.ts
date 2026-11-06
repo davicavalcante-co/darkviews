@@ -254,7 +254,7 @@ export async function voice(job: Job) {
     await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
     t += dur
   }
-  if (t > MAX_DURATION_S) throw new Error(`Com a locução o vídeo ficou com ${Math.round(t)}s, acima de 18 minutos. Encurte o roteiro.`)
+  if (t > MAX_DURATION_S) throw new Error(`Com a locução o vídeo ficou com ${Math.round(t)}s, acima de 60 minutos. Encurte o roteiro.`)
 
   // A trilha não entra na criação: é escolhida no editor e buscada no render.
 

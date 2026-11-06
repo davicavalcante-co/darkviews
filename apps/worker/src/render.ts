@@ -14,7 +14,7 @@ import { subjectMask } from './subject.js'
 const FPS = 30
 const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
-export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string }
+export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string; offsetS?: number }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
 export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
 
@@ -86,7 +86,7 @@ function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] 
     const zp = `zoompan=z='if(lt(${n},${half}),${a},${b})':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=${s.kind === 'image' ? frames : 1}:s=1920x1080:fps=${FPS}`
     return s.kind === 'image'
       ? ['-i', s.path!, '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,${zp}`, '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
-      : ['-stream_loop', '-1', '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS},${zp}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
+      : ['-stream_loop', '-1', '-ss', (s.offsetS ?? 0).toFixed(3), '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS},${zp}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   if (s.kind === 'image') {
     const fx = imageEffect(s, i, len, frames, out)
@@ -106,7 +106,8 @@ function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] 
       '-frames:v', String(frames), ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   if (s.kind === 'video') {
-    return ['-stream_loop', '-1', '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
+    // offsetS: de onde o trecho começa no vídeo (o vídeo enviado é distribuído pelas cenas sem voltar ao início).
+    return ['-stream_loop', '-1', '-ss', (s.offsetS ?? 0).toFixed(3), '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
       `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS}${fade}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   // Cartela: a foto da cena vizinha desfocada e tingida com a cor de fundo (como as cartelas de capítulo das referências).
@@ -121,7 +122,7 @@ function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] 
 export async function renderVideo(input: RenderInput) {
   await assertLibass()
   const total = input.scenes.reduce((n, s) => n + s.durationS, 0)
-  if (total > MAX_DURATION_S) throw new Error('Vídeo acima de 18 minutos')
+  if (total > MAX_DURATION_S) throw new Error('Vídeo acima de 60 minutos')
   const work = await mkdtemp(join(tmpdir(), 'corte-render-'))
   const ff = (args: string[]) => run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { cwd: work, maxBuffer: 16 * 1024 * 1024 })
   try {
@@ -249,7 +250,7 @@ export async function render(job: Job) {
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
   // captionsOn: a pessoa aplicou a legenda na aba Legendas. Até lá o vídeo sai sem a legenda da fala.
-  const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
+  const opts = JSON.parse(project.options) as { method?: string; montage?: string; captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
   const { captionsOnly, titlesOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean; titlesOnly?: boolean }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   let music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
@@ -323,10 +324,28 @@ export async function render(job: Job) {
     music = await syncMusic(project.id, project.ownerId, opts, music, timed.at(-1)?.endS ?? 0)
   }
   const onFrame = (t: number) => Math.round(t * FPS) / FPS
-  if (!reuse && !retitle) await renderVideo({
+  // Vídeo usado em várias cenas: cada cena continua de onde a anterior parou (volta ao começo só quando o vídeo acaba).
+  const cursor = new Map<string, number>(), lengthOf = new Map<string, number>()
+  const offsets = new Map<number, number>()
+  if (!reuse && !retitle) for (const s of scenes) {
+    const path = s.asset?.kind.endsWith('video') ? s.asset.filePath : null
+    if (!path) continue
+    if (!lengthOf.has(path)) lengthOf.set(path, await durationOf(path).catch(() => 0))
+    const at = cursor.get(path) ?? 0, total = lengthOf.get(path)!
+    offsets.set(s.index, total > 1 ? at % total : 0)
+    cursor.set(path, at + (s.endS - s.startS))
+  }
+  // Método por cortes: a imagem é a montagem já pronta, lida em sequência pelo tempo da fala (sem cartelas, efeitos nem sons).
+  const montage = opts.method === 'cortes' && opts.montage && existsSync(opts.montage) ? opts.montage : null
+  if (!reuse && !retitle && montage) await renderVideo({
+    scenes: scenes.map((s) => ({ durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: onFrame(s.startS), kind: 'video' as const, path: montage, transition: 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor })),
+    music, musicVolume: opts.musicVolume, sfxVolume: 0, ass: toAss([], [], style), fontsDir: FONTS_DIR, out: base, cleanOut,
+    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Vídeo: encaixando a montagem na fala' : 'Áudio final: narração e trilha', progress: p } }),
+  })
+  else if (!reuse && !retitle) await renderVideo({
     scenes: scenes.map((s) => ({
       // Começo e fim de cada cena no quadro exato: com 100+ cenas, arredondar cada duração separado somava atraso entre imagem e fala.
-      durationS: onFrame(s.endS) - onFrame(s.startS),
+      durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: offsets.get(s.index),
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
       path: s.asset?.filePath ?? nearPhoto(s.index), transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor,
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),

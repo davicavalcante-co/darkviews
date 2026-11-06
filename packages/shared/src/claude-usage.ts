@@ -38,11 +38,11 @@ export function claudeWarnings(s: ClaudeSnapshot | null, isAdmin: boolean): Warn
 export const SettingsInput = z.object({
   plan_name: z.string().trim().max(60).default(''),
   plan_renews_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal('')).default(''),
-  max_duration_s: z.coerce.number().int().min(15).max(1080),
+  max_duration_s: z.coerce.number().int().min(15).max(3600),
   daily_video_limit: z.coerce.number().int().min(0).max(1000), // 0 = sem limite
 })
 export type Settings = z.infer<typeof SettingsInput>
-export const DEFAULT_SETTINGS: Settings = { plan_name: '', plan_renews_at: '', max_duration_s: 1080, daily_video_limit: 0 }
+export const DEFAULT_SETTINGS: Settings = { plan_name: '', plan_renews_at: '', max_duration_s: 3600, daily_video_limit: 0 }
 
 export const FontInput = z.object({ family: z.string().trim().min(2).max(60).regex(/^[A-Za-z0-9 ]+$/, 'Nome de fonte inválido') })
 export const FontToggle = z.object({ enabled: z.boolean() })

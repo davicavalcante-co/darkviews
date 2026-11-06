@@ -58,8 +58,8 @@ describe('plano e limites', () => {
     expect((await create(user)).statusCode).toBe(429) // segundo do dia
     await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { plan_name: 'Max', plan_renews_at: '2026-12-01', max_duration_s: 1080, daily_video_limit: 0 } })
   })
-  it('não aceita duração máxima acima de 18 minutos', async () => {
-    expect((await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { max_duration_s: 1081, daily_video_limit: 0 } })).statusCode).toBe(400)
+  it('não aceita duração máxima acima de 60 minutos', async () => {
+    expect((await app.inject({ method: 'PUT', url: '/api/admin/settings', headers: admin, payload: { max_duration_s: 3601, daily_video_limit: 0 } })).statusCode).toBe(400)
   })
 })
 

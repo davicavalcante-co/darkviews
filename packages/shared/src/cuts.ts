@@ -5,7 +5,7 @@ export type CutPlatform = z.infer<typeof CutPlatform>
 // Duração máxima de cada corte (s). Stories são divididos em partes de 15 s.
 export const CUT_LIMITS: Record<CutPlatform, number> = { shorts: 60, reels: 90, tiktok: 180, stories: 15 }
 export const CUT_LABELS: Record<CutPlatform, string> = { shorts: 'YouTube Shorts', reels: 'Instagram Reels', tiktok: 'TikTok', stories: 'Stories' }
-const MAX_PARTS = 40 // por plataforma (18 min em cortes de 30 s)
+const MAX_PARTS = 120 // por plataforma (60 min em cortes de 30 s)
 
 export const CutBackground = z.enum(['blur', 'color']) // vídeo embaçado atrás ou a cor de fundo do vídeo
 export const ApproveInput = z.object({

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const MAX_DURATION_S = 1080 // 18 minutos: validar no front, na API e no worker
+export const MAX_DURATION_S = 3600 // 60 minutos: validar no front, na API e no worker
 
 export const Role = z.enum(['admin', 'user'])
 export type Role = z.infer<typeof Role>
@@ -63,10 +63,11 @@ export const CAPTION_POSITION = /^(top|middle|bottom)(-(left|center|right))?$/
 export const NewProjectInput = z.object({
   name: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(5000),
+  method: z.enum(['imagens', 'cortes']).default('imagens'), // cortes: vídeo montado com cortes aleatórios dos vídeos enviados
   analysisId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)), // estilo vindo da aba Análise
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
-  targetDurationS: z.coerce.number().int().min(15).max(MAX_DURATION_S, 'Máximo de 18 minutos'),
+  targetDurationS: z.coerce.number().int().min(15).max(MAX_DURATION_S, 'Máximo de 60 minutos'),
   voiceBrief: z.string().trim().max(200).optional().transform((v) => v || undefined), // ex.: "mulher jovem, animada"
   voicePreset: z.string().trim().max(60).optional().transform((v) => v || undefined), // voz escolhida entre as opções do fornecedor em uso
   voiceTone: z.enum(['calma', 'natural', 'animada']).optional().or(z.literal('').transform(() => undefined)),
@@ -259,3 +260,6 @@ export const DEFAULT_IDENTITY: Identity = {
   caption: { fontFamily: 'Inter', fontWeight: 700, size: 64, color: '#F5F5F7', highlightColor: '#8FB4E3', highlightMode: 'palavra-chave', position: 'bottom-center', outline: true },
   title: { fontFamily: 'Space Grotesk', size: 154, color: '#F5F5F7', bandColor: '#E4E4E4', bandSize: 62, cardAlign: 'middle-center', bandAlign: 'top-left', upper: true },
 }
+
+// Depois do roteiro aprovado: imagens (método principal) ou montagem dos cortes (método "Vídeo por cortes").
+export const afterScript = (options: string) => (JSON.parse(options) as { method?: string }).method === 'cortes' ? 'montage' : 'media'

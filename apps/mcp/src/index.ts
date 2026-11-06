@@ -28,7 +28,7 @@ tool('listar_projetos', 'Lista os vídeos do usuário (até 50), com status e li
 tool('criar_video', 'Cria um vídeo a partir de um prompt. Opcional: link de referência (YouTube, Instagram, Kwai ou TikTok) e a voz desejada (ex.: "mulher jovem, animada").', {
   nome: z.string().describe('Nome do projeto'),
   prompt: z.string().describe('Sobre o que é o vídeo, público, tom e chamada para ação'),
-  duracao_minutos: z.number().min(0.25).max(18).describe('Duração em minutos (até 18)'),
+  duracao_minutos: z.number().min(0.25).max(60).describe('Duração em minutos (até 60)'),
   link_referencia: z.string().optional(),
   voz_desejada: z.string().max(200).optional(),
 }, (u, a) => createVideo(u, a))

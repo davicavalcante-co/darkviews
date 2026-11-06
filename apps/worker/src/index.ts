@@ -1,4 +1,5 @@
 import { hostname } from 'node:os'
+import { afterScript } from '@corte/shared'
 import { prisma, claimNextJob, estimateSeconds, logEvent, type Job } from '@corte/db'
 import { ingest } from './ingest.js'
 import { analyze } from './analyze.js'
@@ -7,6 +8,7 @@ import { media, voice } from './media-job.js'
 import { render } from './render.js'
 import { regenPart } from './regen-part.js'
 import { cuts } from './cuts.js'
+import { montage } from './montage.js'
 import { runNextAnalysis } from './video-analysis.js'
 import { runNextBrainstorm } from './brainstorm.js'
 import { deadline } from './deadline.js'
@@ -14,7 +16,7 @@ import { ClaudeUnavailable, recordStatus } from './claude.js'
 import { checkClaude, holdLongVideo } from './claude-check.js'
 
 const WORKER_ID = `${hostname()}:${process.pid}`
-const HANDLERS: Record<string, (job: Job) => Promise<void>> = { ingest, analyze, script, media, voice, render, regen_part: regenPart, cuts }
+const HANDLERS: Record<string, (job: Job) => Promise<void>> = { ingest, analyze, script, media, voice, render, regen_part: regenPart, cuts, montage }
 
 // Jobs "running" de um worker que caiu ficam presos; ao iniciar, devolvemos para a fila só os de processos mortos
 // (outra cópia do sistema ligada ainda está trabalhando nos dela).
@@ -30,10 +32,10 @@ await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { statu
 // Aprovações sem resposta no prazo da rodada (10 min): aprova sozinho e segue. Roteiro → imagens; imagens → narração.
 async function autoApprove() {
   // Roteiro sem resposta no prazo: aprovado como está e segue para as imagens.
-  for (const p of await prisma.project.findMany({ where: { status: 'script_review', reviewUntil: { lte: new Date() } }, select: { id: true } })) {
+  for (const p of await prisma.project.findMany({ where: { status: 'script_review', reviewUntil: { lte: new Date() } }, select: { id: true, options: true } })) {
     const moved = await prisma.$transaction(async (tx) => {
       const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: { status: 'media', reviewUntil: null } })
-      if (count) await tx.job.create({ data: { projectId: p.id, type: 'media', stage: 'Na fila' } })
+      if (count) await tx.job.create({ data: { projectId: p.id, type: afterScript(p.options), stage: 'Na fila' } })
       return count
     })
     if (moved) logEvent({ source: 'worker', kind: 'job', message: 'roteiro aprovado automaticamente (prazo de 10 min esgotado)', details: { projectId: p.id } })
@@ -74,7 +76,7 @@ async function runOne() {
   try {
     const target = await inputDuration(job.projectId)
     await prisma.job.update({ where: { id: job.id }, data: { etaS: await estimateSeconds(job.type, target) } })
-    await deadline(HANDLERS[job.type](job), 180) // 3 h: nem o vídeo mais longo com voz própria passa disso
+    await deadline(HANDLERS[job.type](job), 480) // 8 h: vídeo de 60 min com voz própria cabe com folga
     // A pessoa pediu para parar: esta etapa termina, as seguintes que ela criou são canceladas e o vídeo fica como "Falhou".
     if ((await prisma.job.findUnique({ where: { id: job.id }, select: { error: true } }))?.error === 'Parado por você') {
       await prisma.job.updateMany({ where: { projectId: job.projectId, status: 'queued' }, data: { status: 'failed', error: 'Parado por você', finishedAt: new Date() } })

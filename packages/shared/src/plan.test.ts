@@ -10,10 +10,10 @@ describe('checkPlan', () => {
   it('aceita um plano contínuo na duração certa', () => {
     expect(checkPlan(plan([scene(0, 30), scene(30, 60)]), 60, 1)).toEqual([])
   })
-  it('acusa buraco entre cenas, imagem inexistente, duração errada e passar de 18 min', () => {
+  it('acusa buraco entre cenas, imagem inexistente, duração errada e passar de 60 min', () => {
     expect(checkPlan(plan([scene(0, 30), scene(32, 60)]), 60, 1)[0]).toMatch(/Cena 2/)
     expect(checkPlan(plan([scene(0, 60, 3)]), 60, 1)[0]).toMatch(/imagem 3/)
     expect(checkPlan(plan([scene(0, 20)]), 60, 1)[0]).toMatch(/longe/)
-    expect(checkPlan(plan([scene(0, 1100)]), 1080, 1)[0]).toMatch(/18 minutos/)
+    expect(checkPlan(plan([scene(0, 3700)]), 3600, 1)[0]).toMatch(/60 minutos/)
   })
 })

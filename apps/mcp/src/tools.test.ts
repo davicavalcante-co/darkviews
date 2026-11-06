@@ -28,8 +28,8 @@ describe('MCP do Darkviews', () => {
     expect((await projectStatus(adm, r.id)).nome).toBe('Café')
   })
 
-  it('respeita 18 minutos, o limite diário e o link permitido', async () => {
-    await expect(createVideo(ana, { nome: 'x', prompt: 'x', duracao_minutos: 19 })).rejects.toThrow()
+  it('respeita 60 minutos, o limite diário e o link permitido', async () => {
+    await expect(createVideo(ana, { nome: 'x', prompt: 'x', duracao_minutos: 61 })).rejects.toThrow()
     await expect(createVideo(ana, { nome: 'x', prompt: 'x', duracao_minutos: 1, link_referencia: 'https://evil.test/v' })).rejects.toThrow()
     await prisma.setting.create({ data: { key: 'daily_video_limit', value: '1' } })
     await expect(createVideo(ana, { nome: 'x', prompt: 'x', duracao_minutos: 1 })).rejects.toThrow(/Limite de 1/)

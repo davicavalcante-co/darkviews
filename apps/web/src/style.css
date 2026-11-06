@@ -1124,3 +1124,4 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
   background: linear-gradient(to right, var(--accent) var(--p, 0%), var(--border) var(--p, 0%)); cursor: pointer; }
 .dv-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }
 .dv-seek::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }
+.composer-head > .muted { white-space: nowrap; }
