@@ -3,7 +3,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import { prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
+import { prisma, projectDir, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
 import { detectPlatform } from '@corte/shared'
 
 const run = promisify(execFile)
@@ -13,9 +13,9 @@ async function stage(job: Job, stage: string, progress: number) {
 }
 
 // Argumentos separados, nunca concatenados num shell; o link já passou pela lista de domínios.
-export async function download(url: string) {
+// dir: pasta do projeto (referência de um vídeo); sem ela, a pasta das análises (o vídeo é apagado depois).
+export async function download(url: string, dir = join(STORAGE_DIR, 'analises')) {
   if (!detectPlatform(url)) throw new Error('Link fora da lista de plataformas permitidas')
-  const dir = join(STORAGE_DIR, 'references')
   await mkdir(dir, { recursive: true })
   const id = randomUUID()
   try {
@@ -49,7 +49,7 @@ export async function ingest(job: Job) {
     let filePath = ref.filePath
     if (ref.sourceType === 'link') {
       await stage(job, 'Baixando referência', 10)
-      filePath = (await download(ref.url!)).path
+      filePath = (await download(ref.url!, await projectDir(job.projectId, 'referencia'))).path
       const type = await sniffFile(filePath)
       if (type?.kind !== 'video') { await rm(filePath, { force: true }); throw new Error('O link não devolveu um vídeo válido') }
     }

@@ -49,7 +49,7 @@ describe('novo vídeo', () => {
     const p = await prisma.project.findUnique({ where: { id: res.json().id }, include: { reference: true, assets: true, jobs: true } })
     expect(p!.reference!.platform).toBe('youtube')
     expect(p!.assets[0].userCaption).toBe('fachada')
-    expect(p!.assets[0].filePath).not.toContain('foto') // nome trocado por UUID
+    expect(p!.assets[0].filePath).toMatch(/projetos\/cafe-[0-9a-f]{8}\/envios\/foto-[0-9a-f]{8}\.png$/) // pasta do projeto; nome original trocado
     expect(p!.jobs.map((j) => j.type)).toEqual(['ingest'])
   })
 

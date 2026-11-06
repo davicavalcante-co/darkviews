@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prisma, STORAGE_DIR, type Job } from '@corte/db'
+import { prisma, projectDir, type Job } from '@corte/db'
 import { MAX_DURATION_S } from '@corte/shared'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { INTRO_S } from './media-job.js'
@@ -48,8 +48,7 @@ export async function montage(job: Job) {
   // Tamanho pela fala estimada (~14 caracteres por segundo) com folga; o render corta no tamanho exato da narração.
   const chars = (project.scripts[0]?.scenes ?? []).reduce((n, s) => n + (s.narration?.length ?? 0), 0)
   const totalS = Math.min(MAX_DURATION_S + 60, INTRO_S + (chars / 14) * 1.3 + 20)
-  const dir = join(STORAGE_DIR, 'montage', project.id)
-  await mkdir(dir, { recursive: true })
+  const dir = await projectDir(project.id, 'cortes-dos-envios')
   if (join_) return assemble(job, project.id, project.assets.filter((a) => a.kind === 'footage_clip'), totalS, dir)
 
   // Trechos já usados (aprovados, pendentes ou reprovados antes) não voltam.

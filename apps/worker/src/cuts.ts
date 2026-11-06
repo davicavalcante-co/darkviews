@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { prisma, STORAGE_DIR, type Job } from '@corte/db'
+import { prisma, projectDir, type Job } from '@corte/db'
 import { DEFAULT_IDENTITY } from '@corte/shared'
 import { toAss, type CaptionStyle, type Segment, type TimedScene } from './captions.js'
 import { assertLibass, FFMPEG, run } from './ffmpeg.js'
@@ -65,7 +65,7 @@ export async function cuts(job: Job) {
     await prisma.cut.update({ where: { id: cut.id }, data: { status: 'running' } })
     try {
       const w = shiftToWindow(segments, scenes, cut.startS, cut.endS)
-      const out = join(STORAGE_DIR, 'cuts', project.id, `${cut.platform}-${cut.partIndex + 1}-${cut.id.slice(0, 8)}.mp4`)
+      const out = join(await projectDir(project.id, 'cortes-verticais'), `${cut.platform}-${cut.partIndex + 1}-${cut.id.slice(0, 8)}.mp4`)
       await renderCut({
         clean, startS: cut.startS, endS: cut.endS, background: cut.background, bgColor, fontsDir: FONTS_DIR, out,
         ass: style ? toAss(w.segments, w.scenes, style, { w: 1080, h: 1920 }) : toAss([], w.scenes, { fontFamily: 'Inter', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', highlightMode: 'manual', position: 'bottom-center' }, { w: 1080, h: 1920 }),

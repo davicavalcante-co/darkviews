@@ -68,7 +68,8 @@ Para usar vozes próprias (aba **Vozes**): clique em **Ligar VoiceStudio** e, na
 | Pasta | O que é |
 | --- | --- |
 | `data/app.db` | Banco de dados (projetos, usuários, versões). |
-| `storage/` | Arquivos: envios, imagens, narrações, vídeos e cortes. |
+| `storage/projetos/` | **Todo o material de cada vídeo numa pasta só**, com o nome do vídeo: `envios` (suas fotos e vídeos), `referencia`, `midia` (fotos e vídeos dos bancos, trilha), `narracao`, `videos` (versões renderizadas), `quadros`, `cortes-dos-envios`, `cortes-verticais`, `miniaturas`. Excluir o vídeo no sistema apaga a pasta. |
+| `storage/` (resto) | Coisas do sistema: análises, vozes, músicas, fontes. `sem-uso/` são sobras de vídeos já excluídos: pode apagar. |
 | `.env` | Configuração e a chave que protege as senhas das integrações. **Não compartilhe.** |
 | `vendor/voicestudio/` | VoiceStudio, usado na aba Vozes. |
 

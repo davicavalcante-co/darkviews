@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
-import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
+import { logEvent, prisma, projectDir, sniffFile, type Job } from '@corte/db'
 import { activeProviders, searchStock, studioGenerate, synthesize, synthesizeMany, type StockCandidate } from '@corte/providers'
 import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
@@ -47,8 +47,7 @@ export async function media(job: Job) {
   if (!script) throw new Error('Projeto sem roteiro')
   // Só imagens / só vídeos: o banco busca só esse tipo, seja o que o roteiro pediu.
   const mediaMode = (JSON.parse(project.options) as { mediaMode?: string }).mediaMode
-  const dir = join(STORAGE_DIR, 'media', project.id)
-  await mkdir(dir, { recursive: true })
+  const dir = await projectDir(project.id, 'midia')
   const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
 
   // 1. Busca nos bancos (por prioridade) para cada cena que pede banco.
@@ -137,7 +136,7 @@ export async function voice(job: Job) {
   })
   const script = project.scripts[0]
   if (!script) throw new Error('Projeto sem roteiro')
-  const dir = join(STORAGE_DIR, 'media', project.id)
+  const dir = await projectDir(project.id, 'narracao')
   await mkdir(dir, { recursive: true })
   const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
 
