@@ -3,22 +3,21 @@ import { z } from 'zod'
 export const MAX_DURATION_S = 1080 // 18 minutos: validar no front, na API e no worker
 
 export const Role = z.enum(['admin', 'user'])
-export const UserStatus = z.enum(['active', 'disabled'])
 export type Role = z.infer<typeof Role>
 
 const password = z.string().min(10, 'A senha precisa de pelo menos 10 caracteres').max(200)
 
 export const LoginInput = z.object({ email: z.string().email(), password: z.string().min(1).max(200) })
-export const SetupInput = z.object({ token: z.string().min(10), password })
-export const CreateUserInput = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(120),
-  password,
-  role: Role.default('admin'), // um nível de acesso só: toda conta tem acesso completo
+// Primeiro acesso: só o token. Dentro do sistema, a pessoa define o e-mail e a senha (CompleteSetupInput).
+export const SetupInput = z.object({ token: z.string().min(10) })
+export const CompleteSetupInput = z.object({ email: z.string().trim().email().max(200), name: z.string().trim().min(1).max(120), password })
+// Perfil da única conta do computador. A senha atual confirma qualquer mudança.
+export const ProfileInput = z.object({
+  firstName: z.string().trim().min(1).max(60), lastName: z.string().trim().max(60).default(''),
+  email: z.string().trim().email().max(200), currentPassword: z.string().min(1).max(200), newPassword: password.optional().or(z.literal('').transform(() => undefined)),
 })
-export const UpdateUserInput = z.object({ role: Role.optional(), status: UserStatus.optional() })
 
-export type PublicUser = { id: string; email: string; name: string; role: Role }
+export type PublicUser = { id: string; email: string; name: string; role: Role; needsSetup?: boolean }
 
 // ---------- Fase 2: projetos ----------
 export const Platform = z.enum(['youtube', 'instagram', 'kwai', 'tiktok'])

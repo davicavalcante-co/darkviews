@@ -1,7 +1,6 @@
 import { StrictMode, useEffect, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { PublicUser } from '@corte/shared'
-import { DEMO_USERS } from '@corte/shared/src/demo'
 import { api, setCsrf } from './api'
 import { Progress, ProjectList } from './projects'
 import { NewVideo } from './studio'
@@ -17,6 +16,35 @@ import './style.css'
 
 type Session = { user: PublicUser; csrfToken: string }
 
+// Primeiro acesso: entrou pelo token, agora define e-mail, nome e senha. Não fecha até concluir.
+function CompleteSetup({ onDone }: { onDone: (u: PublicUser) => void }) {
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const f = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>
+    if (f.password !== f.confirm) return setError('As senhas não são iguais')
+    setBusy(true); setError('')
+    try { onDone((await api<{ user: PublicUser }>('/auth/complete-setup', { method: 'POST', body: { name: f.name, email: f.email, password: f.password } })).user) }
+    catch (err) { setError((err as Error).message) } finally { setBusy(false) }
+  }
+  return (
+    <div className="setup-overlay" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+      <form onSubmit={submit} className="card setup-card">
+        <span className="kicker">Bem-vindo ao Darkviews</span>
+        <h1 id="setup-title">Crie o seu acesso</h1>
+        <p className="muted">Defina o e-mail e a senha que você vai usar para entrar daqui para frente.</p>
+        <label>Seu nome<input name="name" required maxLength={120} autoComplete="name" /></label>
+        <label>E-mail<input name="email" type="email" required autoComplete="username" /></label>
+        <label>Nova senha (mín. 10 caracteres)<input name="password" type="password" minLength={10} required autoComplete="new-password" /></label>
+        <label>Repita a senha<input name="confirm" type="password" minLength={10} required autoComplete="new-password" /></label>
+        {error && <p className="error" role="alert">{error}</p>}
+        <button disabled={busy}>{busy ? 'Salvando…' : 'Salvar e continuar'}</button>
+      </form>
+    </div>
+  )
+}
+
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   const [mode, setMode] = useState<'login' | 'setup'>('login')
   const [error, setError] = useState('')
@@ -31,12 +59,6 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     } catch (err) { setError((err as Error).message) } finally { setBusy(false) }
   }
 
-  async function quick(email: string, password: string) {
-    setBusy(true); setError('')
-    try { onLogin(await api<Session>('/auth/login', { method: 'POST', body: { email, password } })) }
-    catch (err) { setError((err as Error).message + ' — rode: pnpm run db:demo') } finally { setBusy(false) }
-  }
-
   return (
     <main className="login">
       <form onSubmit={submit} className="card">
@@ -46,26 +68,15 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
           <button type="button" role="tab" aria-selected={mode === 'setup'} onClick={() => setMode('setup')}>Primeiro acesso</button>
         </div>
         {mode === 'login' ? (
-          <label>E-mail<input name="email" type="email" autoComplete="username" required /></label>
+          <>
+            <label>E-mail<input name="email" type="email" autoComplete="username" required /></label>
+            <label>Senha<input name="password" type="password" autoComplete="current-password" required /></label>
+          </>
         ) : (
-          <label>Token de primeiro acesso<input name="token" required autoComplete="off" /></label>
+          <label>Token de primeiro acesso<input name="token" required autoComplete="off" placeholder="Cole aqui o token que o instalador mostrou" /></label>
         )}
-        <label>{mode === 'login' ? 'Senha' : 'Nova senha (mín. 10 caracteres)'}
-          <input name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            minLength={mode === 'setup' ? 10 : 1} required />
-        </label>
         {error && <p className="error" role="alert">{error}</p>}
-        <button disabled={busy}>{busy ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Definir senha e entrar'}</button>
-        {import.meta.env.DEV && (
-          <div className="demo">
-            <p>Acesso rápido de teste (só em desenvolvimento)</p>
-            {DEMO_USERS.map((u) => (
-              <button type="button" key={u.email} disabled={busy} onClick={() => quick(u.email, u.password)}>
-                {u.role === 'admin' ? 'Entrar como Admin' : 'Entrar como Usuário'}
-              </button>
-            ))}
-          </div>
-        )}
+        <button disabled={busy}>{busy ? 'Aguarde…' : mode === 'login' ? 'Entrar' : 'Entrar com o token'}</button>
       </form>
     </main>
   )
@@ -128,7 +139,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
       </div>
       <div className="user-card">
         <span className="avatar" aria-hidden="true" title={`${user.name} · ${user.email}`}>{initials}</span>
-        <div className="who nav-text"><strong>{user.name}</strong><small>{user.role === 'admin' ? 'Admin' : 'Usuário'} · {user.email}</small></div>
+        <div className="who nav-text"><strong>{user.name.split(" ")[0]}</strong><small>{user.role === 'admin' ? 'Admin' : 'Usuário'} · {user.email}</small></div>
         <button type="button" className="logout" onClick={onLogout} aria-label="Sair" data-tip="Sair"><Icon name="sair" /></button>
       </div>
     </aside>
@@ -141,6 +152,10 @@ function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const accept = (s: Session | null) => { setCsrf(s?.csrfToken ?? ''); setSession(s) }
   useEffect(() => { api<Session>('/auth/me').then(accept, () => accept(null)) }, [])
+  useEffect(() => {
+    const f = (e: Event) => setSession((cur) => cur && { ...cur, user: (e as CustomEvent<PublicUser>).detail })
+    addEventListener('profile-changed', f); return () => removeEventListener('profile-changed', f)
+  }, [])
 
   if (session === undefined) return null
   if (!session) return <Login onLogin={accept} />
@@ -162,6 +177,8 @@ function App() {
           : hash === '#/admin' && isAdmin ? <AdminPage />
           : <Dashboard isAdmin={isAdmin} />}
       </main>
+      {/* Pop-up por cima do sistema até a pessoa definir e-mail e senha. */}
+      {session.user.needsSetup && <CompleteSetup onDone={(user) => setSession({ ...session, user })} />}
     </div>
   )
 }

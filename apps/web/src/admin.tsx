@@ -3,7 +3,7 @@ import type { PublicUser } from '@corte/shared'
 import { api, uploadFont } from './api'
 import { PageHead } from './ui'
 
-const TABS = [['users', 'Usuários'], ['fonts', 'Fontes'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
+const TABS = [['users', 'Perfil'], ['fonts', 'Fontes'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
 type Tab = (typeof TABS)[number][0]
 
 async function act(fn: () => Promise<unknown>, after: () => unknown) {
@@ -19,7 +19,7 @@ export function AdminPage() {
         <div className="tabs" role="tablist">
           {TABS.map(([t, label]) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
         </div>
-        {tab === 'users' && <Users />}
+        {tab === 'users' && <Profile />}
         {tab === 'fonts' && <Fonts />}
         {tab === 'audit' && <Audit />}
         {tab === 'logs' && <Logs />}
@@ -28,45 +28,40 @@ export function AdminPage() {
   )
 }
 
-type AdminUser = PublicUser & { status: string; lastLoginAt: string | null }
-
-function Users() {
-  const [users, setUsers] = useState<AdminUser[]>([])
-  const load = () => api<AdminUser[]>('/admin/users').then(setUsers)
-  useEffect(() => { load() }, [])
-  const patch = (id: string, body: object) => act(() => api(`/admin/users/${id}`, { method: 'PATCH', body }), load)
-
-  async function create(e: FormEvent<HTMLFormElement>) {
+// Perfil da conta deste computador: nome, sobrenome, e-mail e senha. A senha atual confirma a mudança.
+function Profile() {
+  const [me, setMe] = useState<PublicUser | null>(null)
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api<{ user: PublicUser }>('/auth/me').then((r) => setMe(r.user)) }, [])
+  if (!me) return null
+  const [first, ...rest] = me.name.split(' ')
+  async function save(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const form = e.currentTarget
-    await act(() => api('/admin/users', { method: 'POST', body: Object.fromEntries(new FormData(form)) }), () => { form.reset(); return load() })
+    const f = Object.fromEntries(new FormData(form)) as Record<string, string>
+    if (f.newPassword && f.newPassword !== f.confirm) return setMsg({ ok: false, text: 'A senha nova e a repetição não são iguais' })
+    setBusy(true); setMsg(null)
+    try {
+      const r = await api<{ user: PublicUser }>('/me', { method: 'PUT', body: { firstName: f.firstName, lastName: f.lastName, email: f.email, currentPassword: f.currentPassword, newPassword: f.newPassword } })
+      setMe(r.user); form.reset(); setMsg({ ok: true, text: 'Perfil salvo.' })
+      dispatchEvent(new CustomEvent('profile-changed', { detail: r.user }))
+    } catch (err) { setMsg({ ok: false, text: (err as Error).message }) } finally { setBusy(false) }
   }
-
   return (
-    <div className="cards">
-      <div className="panel wide"><span className="panel-title">Usuários · {users.length}</span><div className="table-wrap"><table>
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Status</th><th>Último acesso</th></tr></thead>
-        <tbody>{users.map((u) => (
-          <tr key={u.id}>
-            <td>{u.name}</td><td>{u.email}</td>
-            <td><select value={u.status} aria-label={`Status de ${u.name}`} onChange={(e) => patch(u.id, { status: e.target.value })}>
-              <option value="active">Ativo</option><option value="disabled">Desativado</option></select></td>
-            <td className="muted">{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('pt-BR') : 'nunca'}</td>
-          </tr>))}
-        </tbody>
-      </table></div></div>
-      <form onSubmit={create} className="narrow">
-        <fieldset>
-          <legend>Novo usuário</legend>
-          <div className="grid">
-            <label>Nome<input name="name" required maxLength={120} /></label>
-            <label>E-mail<input name="email" type="email" required /></label>
-            <label>Senha inicial (mín. 10)<input name="password" type="password" minLength={10} required autoComplete="new-password" /></label>
-          </div>
-          <button>Criar usuário</button>
-        </fieldset>
-      </form>
-    </div>
+    <form className="panel profile" onSubmit={save} key={me.email + me.name}>
+      <span className="panel-title">Meu perfil</span>
+      <div className="profile-grid">
+        <label>Nome<input name="firstName" required maxLength={60} defaultValue={first} autoComplete="given-name" /></label>
+        <label>Sobrenome<input name="lastName" maxLength={60} defaultValue={rest.join(' ')} autoComplete="family-name" /></label>
+        <label className="span2">E-mail<input name="email" type="email" required defaultValue={me.email} autoComplete="username" /></label>
+        <label><span>Senha nova <em>deixe vazio para manter</em></span><input name="newPassword" type="password" minLength={10} autoComplete="new-password" /></label>
+        <label><span>Repita a senha nova</span><input name="confirm" type="password" minLength={10} autoComplete="new-password" /></label>
+        <label><span>Senha atual <em>para confirmar</em></span><input name="currentPassword" type="password" required autoComplete="current-password" /></label>
+        <div className="profile-save"><button disabled={busy}>{busy ? 'Salvando…' : 'Salvar perfil'}</button></div>
+      </div>
+      {msg && <p className={msg.ok ? 'notice ok-box' : 'notice alert'} role="status">{msg.ok ? '✓' : '✕'} {msg.text}</p>}
+    </form>
   )
 }
 

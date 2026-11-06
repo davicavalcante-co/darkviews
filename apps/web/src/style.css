@@ -1014,3 +1014,20 @@ b, strong, th, summary, button, .btn { font-weight: 500; }
 .composer-foot { padding: var(--gap-block); }
 label.field-label > :is(input, textarea, select), .composer-body > label > :is(input, textarea, select) { margin-top: var(--gap-in); }
 .composer :is(.field, .control, .notice) > * { margin-top: 0; margin-bottom: 0; } .composer .control, .composer .controls.grid2 > .control { gap: var(--gap-in); }
+/* Primeiro acesso: pop-up obrigatório por cima do sistema */
+.setup-overlay { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgb(5 12 22 / .78); backdrop-filter: blur(4px); }
+.setup-card { width: min(440px, 100%); display: flex; flex-direction: column; gap: 12px; }
+.setup-card .kicker { font-size: .72rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-text); }
+.profile { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
+.profile label { display: flex; flex-direction: column; gap: 4px; }
+/* Perfil: duas colunas iguais, rótulos numa linha só e o botão alinhado com os campos */
+.profile { max-width: 880px; }
+.profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: end; }
+.profile-grid .span2 { grid-column: 1 / -1; }
+.profile-grid label { display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.profile-grid label > span { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.profile-grid em { font-style: normal; font-size: .75rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.profile-grid input { margin: 0; width: 100%; }
+.profile-save { display: flex; } .profile-save button { width: 100%; }
+.profile-grid input, .profile-save button { height: 46px; box-sizing: border-box; }
+@media (max-width: 640px) { .profile-grid { grid-template-columns: 1fr; } }

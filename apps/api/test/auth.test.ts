@@ -25,10 +25,9 @@ beforeAll(async () => {
 
 describe('permissões', () => {
   const adminRoutes = (id: string) => [
-    { method: 'GET' as const, url: '/api/admin/users' },
-    { method: 'POST' as const, url: '/api/admin/users', payload: { email: 'x@t.com', name: 'X', password: PASS } },
-    { method: 'PATCH' as const, url: `/api/admin/users/${id}`, payload: { role: 'admin' } },
-  ]
+    { method: 'GET' as const, url: '/api/admin/audit' },
+    { method: 'GET' as const, url: '/api/admin/logs' },
+  ].filter(() => id)
 
   it('usuário comum recebe 403 em todas as rotas de admin', async () => {
     const { headers } = await login('user@t.com')
@@ -44,21 +43,16 @@ describe('permissões', () => {
     }
   })
 
-  it('admin acessa e a ação vai para o audit_logs', async () => {
+  it('perfil: muda nome, e-mail e senha só com a senha atual; não há criar nem listar usuários', async () => {
     const { headers } = await login('admin@t.com')
-    expect((await app.inject({ method: 'GET', url: '/api/admin/users', headers })).statusCode).toBe(200)
-    const res = await app.inject({ method: 'POST', url: '/api/admin/users', headers, payload: { email: 'novo@t.com', name: 'N', password: PASS } })
-    expect(res.statusCode).toBe(201)
-    expect(await prisma.auditLog.count({ where: { action: 'user.create', actorId: adminId } })).toBe(1)
-  })
-
-  it('recusa rebaixar ou desativar o último admin', async () => {
-    const { headers } = await login('admin@t.com')
-    // Outros arquivos de teste criam admins no mesmo banco: deixa este como o único ativo.
-    await prisma.user.updateMany({ where: { role: 'admin', id: { not: adminId } }, data: { status: 'disabled' } })
-    for (const payload of [{ role: 'user' }, { status: 'disabled' }]) {
-      expect((await app.inject({ method: 'PATCH', url: `/api/admin/users/${adminId}`, headers, payload })).statusCode).toBe(409)
-    }
+    expect((await app.inject({ method: 'POST', url: '/api/admin/users', headers, payload: { email: 'novo@t.com', name: 'N', password: PASS } })).statusCode).toBe(404)
+    expect((await app.inject({ url: '/api/admin/users', headers })).statusCode).toBe(404)
+    const put = (body: object) => app.inject({ method: 'PUT', url: '/api/me', headers, payload: body })
+    expect((await put({ firstName: 'Davi', lastName: 'Cavalcante', email: 'admin@t.com', currentPassword: 'errada' })).statusCode).toBe(401)
+    const ok = await put({ firstName: 'Davi', lastName: 'Cavalcante', email: 'Admin2@T.com', currentPassword: PASS, newPassword: 'outra-senha-forte-1' })
+    expect(ok.json().user).toMatchObject({ name: 'Davi Cavalcante', email: 'admin2@t.com' })
+    // volta ao e-mail e à senha do teste para os outros casos
+    expect((await put({ firstName: 'A', lastName: '', email: 'admin@t.com', currentPassword: 'outra-senha-forte-1', newPassword: PASS })).statusCode).toBe(200)
   })
 })
 
@@ -81,10 +75,18 @@ describe('segurança da sessão', () => {
   it('primeiro acesso: só com o token do seed, uma vez', async () => {
     await prisma.user.create({ data: { email: 'root@t.com', name: 'R', role: 'admin' } })
     await prisma.setting.create({ data: { key: 'setup_token_hash', value: sha256('token-do-seed-123') } })
-    const send = (token: string) => app.inject({ method: 'POST', url: '/api/auth/setup', headers: { origin: ORIGIN }, payload: { token, password: PASS } })
+    const send = (token: string) => app.inject({ method: 'POST', url: '/api/auth/setup', headers: { origin: ORIGIN }, payload: { token } })
     expect((await send('token-errado-0000')).statusCode).toBe(401)
-    expect((await send('token-do-seed-123')).statusCode).toBe(200)
+    const ok = await send('token-do-seed-123')
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json().user.needsSetup).toBe(true)
     expect((await send('token-do-seed-123')).statusCode).toBe(401)
+    // Dentro do sistema: define e-mail e senha; depois entra pelo login normal.
+    const headers = { origin: ORIGIN, cookie: `sid=${ok.cookies[0].value}`, 'x-csrf-token': ok.json().csrfToken }
+    const done = await app.inject({ method: 'POST', url: '/api/auth/complete-setup', headers, payload: { name: 'Davi', email: 'Dono@T.com', password: PASS } })
+    expect(done.json().user).toMatchObject({ email: 'dono@t.com', needsSetup: false })
+    expect((await app.inject({ method: 'POST', url: '/api/auth/complete-setup', headers, payload: { name: 'X', email: 'x@t.com', password: PASS } })).statusCode).toBe(409)
+    expect((await prisma.user.findUniqueOrThrow({ where: { email: 'dono@t.com' } })).passwordHash).not.toBeNull() // daí em diante, login normal
   })
 
   it('limita tentativas de login (429 depois de 5)', async () => {
