@@ -23,7 +23,7 @@ type Base = {
 }
 
 const STATUS: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', rendering: 'Criando vídeo',
+  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', cut_review: 'Aprovar cortes', rendering: 'Criando vídeo',
   editing: 'Pronto · em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 // Estilo de edição: puxa o roteiro para um tipo de movimento e transição.
@@ -48,11 +48,6 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
-// Aba Dark Vídeos: método por cortes (em teste; depois entra na mesma aba de criação). Aceita ?analise= e a ideia do Brainstorm.
-export function CutsVideo() {
-  return <div className="studio"><Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} cortes /></div>
-}
-
 export function NewVideo() {
   const [base, setBase] = useState<Base | null>(null)
   // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
@@ -65,12 +60,12 @@ export function NewVideo() {
   )
 }
 
-function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; onCancel: () => void; analysisId: string | null; cortes?: boolean }) {
-  // Método "Vídeo por cortes": vídeos longos que o sistema corta e monta em ordem aleatória.
+function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel: () => void; analysisId: string | null }) {
+  // Só vídeos: vídeos enviados são cortados e os cortes passam por aprovação.
   const [footage, setFootage] = useState<File[]>([])
   const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
   useEffect(() => { if (analysisId) api<{ id: string; title: string | null; status: string }>(`/analyses/${analysisId}`).then((a) => a.status === 'done' && setStyle(a)).catch(() => {}) }, [analysisId])
-  const o = (base?.options ?? {}) as { voicePreset?: string; voiceTone?: string; bgColor?: string; useStock?: boolean; editStyle?: string }
+  const o = (base?.options ?? {}) as { mediaMode?: 'mixed' | 'images' | 'videos'; voicePreset?: string; voiceTone?: string; bgColor?: string; useStock?: boolean; editStyle?: string }
   const idea = base ? null : new URLSearchParams(location.hash.split('?')[1] ?? '')
   const [name, setName] = useState(base?.name ?? idea?.get('nome') ?? '')
   const [prompt, setPrompt] = useState(base?.prompt ?? idea?.get('prompt') ?? '')
@@ -79,6 +74,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
   useEffect(() => { if (!o.bgColor) api<{ identity: { bgColor: string } }>('/me/identity').then((r) => setBgColor(r.identity.bgColor)).catch(() => {}) }, [])
   const [useStock, setUseStock] = useState(o.useStock !== false)
   const [editStyle, setEditStyle] = useState(o.editStyle ?? 'auto')
+  const [mediaMode, setMediaMode] = useState<'mixed' | 'images' | 'videos'>(o.mediaMode ?? 'mixed')
   const fileRef = useRef<HTMLInputElement>(null)
   const [link, setLink] = useState('')
   const [analyses, setAnalyses] = useState<{ id: string; title: string | null; channel: string | null }[] | null>(null)
@@ -123,7 +119,6 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
     if (!(seconds >= 15 && seconds <= MAX_DURATION_S)) return setError(`Duração entre 15 segundos e ${maxMin} minutos`)
     if (link && !platform) return setError('Link precisa ser de YouTube, Instagram, Kwai ou TikTok')
     if (link && video) return setError('Use link ou vídeo de referência, não os dois')
-    if (cortes && !footage.length) return setError('Envie pelo menos um vídeo para cortar')
 
     const body = new FormData()
     body.append('name', name)
@@ -141,8 +136,9 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
       body.append('captions', JSON.stringify(images.map((i) => i.caption)))
       if (video) body.append('video', video)
     }
-    images.forEach((i) => i.file && body.append('images', i.file))
-    if (cortes) { body.append('method', 'cortes'); footage.forEach((f) => body.append('footage', f)) }
+    if (mediaMode !== 'videos') images.forEach((i) => i.file && body.append('images', i.file))
+    body.append('mediaMode', mediaMode)
+    if (mediaMode === 'videos' && !base) footage.forEach((f) => body.append('footage', f))
 
     setBusy(true); setError('')
     try {
@@ -154,7 +150,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">{cortes ? 'Novo método' : 'Estúdio'}</span><h1>{cortes ? 'Dark Vídeos' : 'Novo vídeo'}</h1></div>
+        <div><span className="kicker">Estúdio</span><h1>Novo vídeo</h1></div>
         <span className="muted">até {maxMin} min</span>
       </div>
 
@@ -162,26 +158,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
         {base && <div className="notice">Nova versão de <b>{base.name}</b>{base.fromVersion ? <> a partir da <b>versão {base.fromVersion}</b></> : null}: ajuste o que quiser; o vídeo novo entra no mesmo card, em primeiro. <button type="button" className="link" onClick={onCancel}>Começar do zero</button></div>}
         <label className="field-label">Nome<input name="name" required maxLength={120} placeholder="Ex.: Lançamento do café especial" value={name} onChange={(e) => setName(e.target.value)} /></label>
 
-        {cortes ? (
-          <div className="field">
-            <div className="field-label">Vídeos para cortar <span className="muted">{footage.length}</span></div>
-            <label className="drop">
-              <input type="file" multiple accept="video/mp4,video/quicktime,video/webm" onChange={(e) => { setFootage([...footage, ...(e.target.files ?? [])]); e.target.value = '' }} />
-              <Icon name="tocar" size={14} /><span className="ellipsis">{footage.length ? footage.map((f) => f.name).join(', ') : 'Enviar vídeos longos'}</span>
-            </label>
-            {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
-            <small className="muted">O sistema corta trechos aleatórios desses vídeos e monta a imagem (só com transição). Depois entra a narração e a legenda por cima.</small>
-            <div className="field-label">Roteiro no estilo de um vídeo analisado <span className="muted">opcional</span></div>
-            {style && (
-              <div className="style-pick">
-                <img src={`/api/analyses/${style.id}/thumb`} alt="" />
-                <div><small className="muted">Estilo da análise</small><b className="ellipsis">{style.title ?? 'Vídeo analisado'}</b></div>
-                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = cortes ? '#/cortes' : '#/novo' }}>Tirar</button>
-              </div>
-            )}
-            {!style && <button type="button" className="btn ghost" onClick={pickAnalysis}>Usar vídeo analisado</button>}
-          </div>
-        ) : base ? (
+        {base ? (
           <div className="field">
             <div className="field-label">Referência <span className="muted">mantida</span></div>
             <p className="muted ellipsis">{base.reference ? (base.reference.url ?? 'Vídeo enviado') : 'Sem referência'}</p>
@@ -193,7 +170,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
               <div className="style-pick">
                 <img src={`/api/analyses/${style.id}/thumb`} alt="" />
                 <div><small className="muted">Estilo da análise</small><b className="ellipsis">{style.title ?? 'Vídeo analisado'}</b></div>
-                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = cortes ? '#/cortes' : '#/novo' }}>Tirar</button>
+                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = '#/novo' }}>Tirar</button>
               </div>
             )}
             <input value={link} onChange={(e) => setLink(e.target.value)} disabled={!!video} aria-label="Link de referência"
@@ -219,7 +196,29 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
               </Modal>
             )}
 
-        {!cortes && <div className="field">
+        <div className="field">
+          <div className="field-label">Mídia do vídeo</div>
+          <div className="choice-grid" role="radiogroup" aria-label="Mídia do vídeo">
+            {([['mixed', 'Imagens e vídeos'], ['images', 'Só imagens'], ['videos', 'Só vídeos']] as const).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={mediaMode === id} className="choice small-choice" onClick={() => setMediaMode(id)}>{label}</button>
+            ))}
+          </div>
+          <small className="muted">{mediaMode === 'images' ? 'Só fotos (suas e dos bancos).' : mediaMode === 'videos' ? 'Só vídeos dos bancos ou, se você enviar vídeos abaixo, cortes dos seus vídeos para aprovar.' : 'Fotos e vídeos, como o sistema achar melhor.'}</small>
+        </div>
+
+        {mediaMode === 'videos' && !base && (
+          <div className="field">
+            <div className="field-label">Seus vídeos para cortar <span className="muted">{footage.length ? footage.length : 'opcional'}</span></div>
+            <label className="drop">
+              <input type="file" multiple accept="video/mp4,video/quicktime,video/webm" onChange={(e) => { setFootage([...footage, ...(e.target.files ?? [])]); e.target.value = '' }} />
+              <Icon name="tocar" size={14} /><span className="ellipsis">{footage.length ? footage.map((f) => f.name).join(', ') : 'Enviar vídeos longos'}</span>
+            </label>
+            {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
+            <small className="muted">O sistema corta trechos desses vídeos e mostra para você aprovar. Os reprovados são apagados. Os vídeos dos bancos não são cortados.</small>
+          </div>
+        )}
+
+        {mediaMode !== 'videos' && <div className="field">
           <div className="field-label">Imagens <span className="muted">{images.length}</span></div>
           <div className={`tiles-sm${dragging ? ' dragging' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
@@ -250,7 +249,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
           <textarea name="prompt" required maxLength={5000} rows={7} placeholder="Sobre o que é o vídeo, público, tom, chamada para ação…" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
 
-        {!cortes && <div className="field">
+        {!footage.length && <div className="field">
           <div className="field-label">Estilo de edição</div>
           <div className="choice-grid" role="radiogroup" aria-label="Estilo de edição">
             {EDIT_STYLES.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={editStyle === id} className="choice small-choice" onClick={() => setEditStyle(id)}>{label}</button>)}

@@ -63,7 +63,8 @@ export const CAPTION_POSITION = /^(top|middle|bottom)(-(left|center|right))?$/
 export const NewProjectInput = z.object({
   name: z.string().trim().min(1).max(120),
   prompt: z.string().trim().min(1).max(5000),
-  method: z.enum(['imagens', 'cortes']).default('imagens'), // cortes: vídeo montado com cortes aleatórios dos vídeos enviados
+  // Mídia do vídeo: imagens e vídeos (padrão), só imagens ou só vídeos. Só vídeos com vídeos enviados: o sistema corta os enviados.
+  mediaMode: z.enum(['mixed', 'images', 'videos']).default('mixed'),
   analysisId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)), // estilo vindo da aba Análise
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
@@ -81,7 +82,7 @@ export const NewProjectInput = z.object({
   }),
 })
 
-export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
 export const ReviewInput = z.object({ rejected: z.array(z.number().int().min(0)).max(2000) })
 export type ProjectStatus = z.infer<typeof ProjectStatus>
 

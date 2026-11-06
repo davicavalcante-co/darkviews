@@ -31,6 +31,17 @@ await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { statu
 
 // Aprovações sem resposta no prazo da rodada (10 min): aprova sozinho e segue. Roteiro → imagens; imagens → narração.
 async function autoApprove() {
+  // Cortes dos vídeos enviados sem resposta no prazo: todos aprovados e o vídeo é montado.
+  for (const p of await prisma.project.findMany({ where: { status: 'cut_review', reviewUntil: { lte: new Date() } }, select: { id: true } })) {
+    const moved = await prisma.$transaction(async (tx) => {
+      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'cut_review' }, data: { status: 'media', reviewUntil: null } })
+      if (!count) return 0
+      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'footage_clip' } })
+      await tx.job.create({ data: { projectId: p.id, type: 'montage', stage: 'Na fila', payload: JSON.stringify({ assemble: true }) } })
+      return count
+    })
+    if (moved) logEvent({ source: 'worker', kind: 'job', message: 'cortes aprovados automaticamente (prazo de 10 min esgotado)', details: { projectId: p.id } })
+  }
   // Roteiro sem resposta no prazo: aprovado como está e segue para as imagens.
   for (const p of await prisma.project.findMany({ where: { status: 'script_review', reviewUntil: { lte: new Date() } }, select: { id: true, options: true } })) {
     const moved = await prisma.$transaction(async (tx) => {

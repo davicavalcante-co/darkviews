@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import type { PublicUser } from '@corte/shared'
 import { api, setCsrf } from './api'
 import { Progress, ProjectList } from './projects'
-import { CutsVideo, NewVideo } from './studio'
+import { NewVideo } from './studio'
 import { AdminPage } from './admin'
 import { Dashboard } from './dashboard'
 import { ClaudePill } from './claude-pill'
@@ -115,7 +115,6 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
   const items = [
     { href: '#/', label: 'Painel', icon: 'painel', match: (h: string) => h === '' || h === '#/' },
     { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h.startsWith('#/novo') },
-    { href: '#/cortes', label: 'Dark Vídeos', icon: 'edicao', match: (h: string) => h.startsWith('#/cortes') },
     { href: '#/brainstorm', label: 'Brainstorm', icon: 'brainstorm', match: (h: string) => h === '#/brainstorm' },
     { href: '#/analises', label: 'Análise', icon: 'analise', match: (h: string) => h === '#/analises' },
     { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') || h.startsWith('#/editar/') },
@@ -172,7 +171,6 @@ function App() {
       <main>
         <div className="top-bar"><ThemeToggle /><ClaudePill isAdmin={isAdmin} /></div>
         {hash.startsWith('#/novo') ? <NewVideo key={hash} />
-          : hash.startsWith('#/cortes') ? <CutsVideo key={hash} />
           : hash === '#/analises' ? <AnalysesPage />
           : hash === '#/brainstorm' ? <BrainstormPage />
           : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />

@@ -4,7 +4,7 @@ import { api } from './api'
 import { clock, Modal, PageHead, Player, Section, useNow } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
+  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens', cut_review: 'Aguardando sua aprovação dos cortes',
   rendering: 'Criando vídeo', editing: 'Em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 const STAGES = ['Na fila', 'Analisando referência', 'Escrevendo roteiro', 'Buscando imagens', 'Gerando áudio', 'Criando vídeo', 'Pronto']
@@ -15,7 +15,7 @@ function stageIndex(e: ProgressEvent) {
     case 'analyzing': return 1
     case 'scripting': return 2
     case 'media': return e.job?.type === 'voice' ? 4 : 3
-    case 'image_review': return 3
+    case 'image_review': case 'cut_review': return 3
     case 'script_review': return 2
     case 'talking_head': return 1
     case 'rendering': return 5
@@ -226,6 +226,57 @@ function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
           </li>
         ))}
       </ol>
+    </div>
+  )
+}
+
+// Cortes dos vídeos enviados (Só vídeos): reprovados são apagados; com reprovados, a pessoa escolhe repor com cortes novos ou repetir os aprovados.
+function CutReview({ id }: { id: string }) {
+  const [data, setData] = useState<{ reviewUntil: string | null; pending: { id: string; durationS: number | null }[]; approved: number } | null>(null)
+  const [out, setOut] = useState<Set<string>>(new Set())
+  const [refill, setRefill] = useState<'new' | 'loop' | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  useEffect(() => { api<NonNullable<typeof data>>(`/projects/${id}/cut-review`).then(setData).catch((e) => setError(e.message)) }, [id])
+  if (!data) return error ? <p className="error">{error}</p> : null
+  const toggle = (c: string) => setOut((cur) => { const n = new Set(cur); n.has(c) ? n.delete(c) : n.add(c); return n })
+  async function send() {
+    if (out.size && !refill) return setError('Escolha o que fazer no lugar dos cortes reprovados')
+    setBusy(true); setError('')
+    try { await api(`/projects/${id}/cut-review`, { method: 'POST', body: { rejected: [...out], refill: refill ?? 'loop' } }) } catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  return (
+    <div className="review">
+      <div className="review-head">
+        <div>
+          <h3>Aprove os cortes dos seus vídeos</h3>
+          <p className="muted">Todos começam aprovados. Clique em <b>Reprovar</b> nos que não servem: eles são apagados do sistema.{data.approved ? ` ${data.approved} cortes já aprovados antes.` : ''}</p>
+        </div>
+        <ReviewClock until={data.reviewUntil ? Date.parse(data.reviewUntil) : null} />
+        <button type="button" disabled={busy} onClick={send}>{busy ? 'Enviando…' : out.size ? `Apagar ${out.size} e continuar` : 'Aprovar todos e continuar'}</button>
+      </div>
+      {out.size > 0 && (
+        <div className="notice" role="group" aria-label="No lugar dos reprovados">
+          <p>No lugar dos {out.size} cortes reprovados:</p>
+          <div className="row wrap">
+            <label className="check"><input type="radio" name="refill" checked={refill === 'new'} onChange={() => setRefill('new')} /><span>Fazer novos cortes para compensar</span></label>
+            <label className="check"><input type="radio" name="refill" checked={refill === 'loop'} onChange={() => setRefill('loop')} /><span>Repetir os aprovados em loop</span></label>
+          </div>
+        </div>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="review-grid">{data.pending.map((c, k) => (
+        <article key={c.id} className={`review-card${out.has(c.id) ? ' rejected' : ''}`}>
+          <div className="review-media">
+            <video src={`/api/projects/${id}/assets/${c.id}#t=0.5`} muted loop playsInline preload="metadata"
+              onMouseEnter={(e) => e.currentTarget.play().catch(() => {})} onMouseLeave={(e) => e.currentTarget.pause()} />
+            <span className="review-tag">Corte {k + 1}{c.durationS ? ` · ${c.durationS.toFixed(1)} s` : ''}</span>
+          </div>
+          <div className="row"><span className="spacer" />
+            <button type="button" className={out.has(c.id) ? 'ghost-btn on' : 'ghost-btn'} aria-pressed={out.has(c.id)} onClick={() => toggle(c.id)}>{out.has(c.id) ? 'Vai apagar' : 'Reprovar'}</button>
+          </div>
+        </article>
+      ))}</div>
     </div>
   )
 }
@@ -450,6 +501,7 @@ export function Progress({ id }: { id: string }) {
       {ev.status === 'talking_head' && <Section idx={1} title="Pessoa falando"><TalkingHead id={id} /></Section>}
       {ev.status === 'script_review' && detail?.script && <Section idx={1} title="Aprovar roteiro"><ScriptReview key={detail.script.version} id={id} detail={detail} /></Section>}
       {ev.status === 'image_review' && <Section idx={1} title="Aprovar imagens"><ImageReview key={ev.job?.type ?? ''} id={id} /></Section>}
+      {ev.status === 'cut_review' && <Section idx={1} title="Aprovar cortes"><CutReview key={ev.job?.type ?? ''} id={id} /></Section>}
 
       {(detail?.script || detail?.reference?.styleProfile) && (
         <Section idx={2} title="Roteiro">
