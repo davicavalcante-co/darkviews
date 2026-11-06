@@ -9,7 +9,9 @@ export type Role = z.infer<typeof Role>
 const password = z.string().min(10, 'A senha precisa de pelo menos 10 caracteres').max(200)
 
 export const LoginInput = z.object({ email: z.string().email(), password: z.string().min(1).max(200) })
-export const SetupInput = z.object({ token: z.string().min(10), password })
+// Primeiro acesso: só o token. Dentro do sistema, a pessoa define o e-mail e a senha (CompleteSetupInput).
+export const SetupInput = z.object({ token: z.string().min(10) })
+export const CompleteSetupInput = z.object({ email: z.string().trim().email().max(200), name: z.string().trim().min(1).max(120), password })
 export const CreateUserInput = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(120),
@@ -18,7 +20,7 @@ export const CreateUserInput = z.object({
 })
 export const UpdateUserInput = z.object({ role: Role.optional(), status: UserStatus.optional() })
 
-export type PublicUser = { id: string; email: string; name: string; role: Role }
+export type PublicUser = { id: string; email: string; name: string; role: Role; needsSetup?: boolean }
 
 // ---------- Fase 2: projetos ----------
 export const Platform = z.enum(['youtube', 'instagram', 'kwai', 'tiktok'])

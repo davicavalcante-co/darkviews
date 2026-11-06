@@ -7,7 +7,6 @@
     "test": "pnpm -r run test",
     "db:push": "cd packages/db && node --env-file=../../.env node_modules/prisma/build/index.js db push --skip-generate",
     "db:seed": "pnpm --filter @corte/api seed",
-    "db:demo": "pnpm --filter @corte/api seed:demo",
     "db:setup": "pnpm db:push && pnpm db:seed",
     "tts:setup": "python3 -m venv .venv-tts && .venv-tts/bin/pip install -q piper-tts",
     "voicestudio:start": "bash scripts/voicestudio-start.sh"

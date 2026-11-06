@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "tsx watch --env-file=../../.env src/index.ts",
     "seed": "tsx --env-file=../../.env src/seed.ts",
-    "seed:demo": "tsx --env-file=../../.env src/seed-demo.ts",
     "test": "vitest run"
   },
   "dependencies": {

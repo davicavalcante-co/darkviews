@@ -81,10 +81,18 @@ describe('segurança da sessão', () => {
   it('primeiro acesso: só com o token do seed, uma vez', async () => {
     await prisma.user.create({ data: { email: 'root@t.com', name: 'R', role: 'admin' } })
     await prisma.setting.create({ data: { key: 'setup_token_hash', value: sha256('token-do-seed-123') } })
-    const send = (token: string) => app.inject({ method: 'POST', url: '/api/auth/setup', headers: { origin: ORIGIN }, payload: { token, password: PASS } })
+    const send = (token: string) => app.inject({ method: 'POST', url: '/api/auth/setup', headers: { origin: ORIGIN }, payload: { token } })
     expect((await send('token-errado-0000')).statusCode).toBe(401)
-    expect((await send('token-do-seed-123')).statusCode).toBe(200)
+    const ok = await send('token-do-seed-123')
+    expect(ok.statusCode).toBe(200)
+    expect(ok.json().user.needsSetup).toBe(true)
     expect((await send('token-do-seed-123')).statusCode).toBe(401)
+    // Dentro do sistema: define e-mail e senha; depois entra pelo login normal.
+    const headers = { origin: ORIGIN, cookie: `sid=${ok.cookies[0].value}`, 'x-csrf-token': ok.json().csrfToken }
+    const done = await app.inject({ method: 'POST', url: '/api/auth/complete-setup', headers, payload: { name: 'Davi', email: 'Dono@T.com', password: PASS } })
+    expect(done.json().user).toMatchObject({ email: 'dono@t.com', needsSetup: false })
+    expect((await app.inject({ method: 'POST', url: '/api/auth/complete-setup', headers, payload: { name: 'X', email: 'x@t.com', password: PASS } })).statusCode).toBe(409)
+    expect((await prisma.user.findUniqueOrThrow({ where: { email: 'dono@t.com' } })).passwordHash).not.toBeNull() // daí em diante, login normal
   })
 
   it('limita tentativas de login (429 depois de 5)', async () => {

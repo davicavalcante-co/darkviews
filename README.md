@@ -44,7 +44,7 @@ O instalador pode ser rodado de novo quando quiser: o que já está instalado é
 ## Usar no dia a dia
 
 1. Dê **dois cliques** em `Ligar Darkviews`. O navegador abre sozinho em `http://localhost:5173`.
-2. **Só na primeira vez:** na tela de login, aba **Primeiro acesso**, cole o token e crie a senha do admin.
+2. **Só na primeira vez:** na tela de login, aba **Primeiro acesso**, cole o token e clique em **Entrar com o token**. Dentro do sistema abre uma janela para você definir o seu nome, e-mail e senha. Daí em diante, entre normalmente com eles. O sistema começa vazio, só com a sua conta.
 3. Para desligar, feche a janela do terminal que abriu.
 
 Para usar vozes próprias (aba **Vozes**): clique em **Ligar VoiceStudio** e, na primeira vez, em **Aceitar licença do modelo**. A primeira voz do dia demora uns 5 minutos para carregar.
@@ -79,4 +79,3 @@ O Darkviews conversa com o VoiceStudio (AGPL-3.0) pela rede local, sem incluir o
 
 - Peças: `apps/web` (site, React), `apps/api` (servidor, Fastify), `apps/worker` (cria os vídeos com FFmpeg), `apps/mcp` (conversa com o Claude), `packages/*` (banco, tipos e integrações).
 - Ligar pelo terminal: `pnpm dev`. Testes: `pnpm test`.
-- Contas de teste: `pnpm run db:demo` (apague antes de uso real).

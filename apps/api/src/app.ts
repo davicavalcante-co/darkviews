@@ -4,7 +4,7 @@ import rateLimit from '@fastify/rate-limit'
 import { hash, verify } from '@node-rs/argon2'
 import { ZodError } from 'zod'
 import { logEvent, prisma, type User } from '@corte/db'
-import { CreateUserInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
+import { CompleteSetupInput, CreateUserInput, LoginInput, SetupInput, UpdateUserInput, type PublicUser } from '@corte/shared'
 import { csrfFor, newToken, sha256 } from './security.js'
 import { requireAdmin, requireAuth } from './auth.js'
 import { projectRoutes } from './projects.js'
@@ -27,7 +27,8 @@ declare module 'fastify' {
   interface FastifyRequest { user: User | null; sessionToken: string | null }
 }
 
-const toPublic = (u: User): PublicUser => ({ id: u.id, email: u.email, name: u.name, role: u.role as PublicUser['role'] })
+// needsSetup: entrou pelo token e ainda não definiu e-mail e senha (o site abre o pop-up obrigatório).
+const toPublic = (u: User): PublicUser => ({ id: u.id, email: u.email, name: u.name, role: u.role as PublicUser['role'], needsSetup: !u.passwordHash })
 
 
 function audit(req: FastifyRequest, action: string, targetType: string, targetId: string | null, details: object = {}) {
@@ -118,15 +119,25 @@ export async function buildApp() {
 
   // Primeiro acesso: o seed imprime um token único; quem o tiver define a senha do admin.
   app.post('/api/auth/setup', { config: loginLimit }, async (req, reply) => {
-    const { token, password } = SetupInput.parse(req.body)
+    const { token } = SetupInput.parse(req.body)
     const setting = await prisma.setting.findUnique({ where: { key: 'setup_token_hash' } })
     const admin = await prisma.user.findFirst({ where: { role: 'admin', passwordHash: null } })
     if (!setting || !admin || setting.value !== sha256(token)) return reply.code(401).send({ error: 'Token de primeiro acesso inválido' })
-    const user = await prisma.user.update({ where: { id: admin.id }, data: { passwordHash: await hash(password) } })
-    await prisma.setting.delete({ where: { key: 'setup_token_hash' } })
-    req.user = user
-    await audit(req, 'admin.first_access', 'user', user.id)
-    return startSession(req, reply, user)
+    await prisma.setting.delete({ where: { key: 'setup_token_hash' } }) // vale uma vez só
+    req.user = admin
+    await audit(req, 'admin.first_access', 'user', admin.id)
+    return startSession(req, reply, admin)
+  })
+
+  // Dentro do sistema, logo depois do token: define o e-mail, o nome e a senha. Daí em diante, login normal.
+  app.post('/api/auth/complete-setup', { preHandler: requireAuth }, async (req, reply) => {
+    if (req.user!.passwordHash) return reply.code(409).send({ error: 'Esta conta já tem senha' })
+    const input = CompleteSetupInput.parse(req.body)
+    const email = input.email.toLowerCase()
+    if (await prisma.user.findFirst({ where: { email, id: { not: req.user!.id } } })) return reply.code(409).send({ error: 'E-mail já usado por outra conta' })
+    const user = await prisma.user.update({ where: { id: req.user!.id }, data: { email, name: input.name, passwordHash: await hash(input.password) } })
+    await audit(req, 'admin.setup_done', 'user', user.id, { email })
+    return { user: toPublic(user) }
   })
 
   app.post('/api/auth/logout', { preHandler: requireAuth }, async (req, reply) => {
