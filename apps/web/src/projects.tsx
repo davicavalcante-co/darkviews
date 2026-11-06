@@ -4,7 +4,7 @@ import { api } from './api'
 import { Modal, PageHead, Section } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
+  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
   rendering: 'Criando vídeo', editing: 'Em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 const STAGES = ['Na fila', 'Analisando referência', 'Escrevendo roteiro', 'Buscando imagens', 'Gerando áudio', 'Criando vídeo', 'Pronto']
@@ -16,6 +16,7 @@ function stageIndex(e: ProgressEvent) {
     case 'scripting': return 2
     case 'media': return e.job?.type === 'voice' ? 4 : 3
     case 'image_review': return 3
+    case 'script_review': return 2
     case 'talking_head': return 1
     case 'rendering': return 5
     case 'failed': return -1
@@ -150,6 +151,65 @@ function TalkingHead({ id }: { id: string }) {
         </div>
       </div>
       {error && <p className="notice alert" role="alert">✕ {error}</p>}
+    </div>
+  )
+}
+
+// Roteiro pronto: a pessoa lê cena por cena e aprova, ajusta as falas à mão ou pede ao Claude para refazer com dicas.
+function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
+  const [scenes, setScenes] = useState(detail.script!.scenes.map((s) => ({ index: s.index, narration: s.narration ?? '', onScreenText: s.onScreenText ?? '' })))
+  const [editing, setEditing] = useState(false)
+  const [redo, setRedo] = useState(false)
+  const [hint, setHint] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const changed = scenes.some((s, i) => s.narration !== (detail.script!.scenes[i].narration ?? '') || s.onScreenText !== (detail.script!.scenes[i].onScreenText ?? ''))
+  async function send(action: 'approve' | 'redo') {
+    setBusy(true); setError('')
+    try { await api(`/projects/${id}/script-review`, { method: 'POST', body: { action, hint: action === 'redo' ? hint : undefined, scenes: changed ? scenes : undefined } }) }
+    catch (e) { setError((e as Error).message); setBusy(false) }
+  }
+  const set = (i: number, patch: Partial<(typeof scenes)[number]>) => setScenes((cur) => cur.map((s, j) => (j === i ? { ...s, ...patch } : s)))
+  return (
+    <div className="script-review">
+      <div className="review-head">
+        <div>
+          <h3>{detail.metadata.title || 'Roteiro'}</h3>
+          <p className="muted">Leia o roteiro. Se estiver bom, aprove e o vídeo segue para as imagens. Dá para ajustar as falas aqui mesmo ou pedir ao Claude para refazer.</p>
+        </div>
+        <div className="row wrap">
+          <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setRedo(!redo); setEditing(false) }}>Refazer com dicas</button>
+          <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setEditing(!editing); setRedo(false) }}>{editing ? 'Fechar edição' : 'Editar falas'}</button>
+          <button type="button" disabled={busy} onClick={() => send('approve')}>{busy ? 'Enviando…' : changed ? 'Salvar e aprovar' : 'Aprovar roteiro'}</button>
+        </div>
+      </div>
+      {redo && (
+        <div className="redo-box">
+          <label>Como você quer o roteiro novo?
+            <textarea rows={3} maxLength={2000} value={hint} placeholder="Ex.: comece com uma pergunta, deixe mais curto, fale mais sobre a infância dele, tom mais divertido" onChange={(e) => setHint(e.target.value)} />
+          </label>
+          <button type="button" disabled={busy || !hint.trim()} onClick={() => send('redo')}>Refazer o roteiro</button>
+        </div>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+      <ol className="script-scenes">
+        {scenes.map((s, i) => (
+          <li key={s.index}>
+            <span className="tc-chip">{fmtDuration(detail.script!.scenes[i].startS)}</span>
+            {editing ? (
+              <div className="stack-sm">
+                <textarea rows={2} value={s.narration} aria-label={`Fala da cena ${i + 1}`} onChange={(e) => set(i, { narration: e.target.value })} />
+                <input value={s.onScreenText} maxLength={120} placeholder="Texto na tela (opcional)" aria-label={`Texto na tela da cena ${i + 1}`} onChange={(e) => set(i, { onScreenText: e.target.value })} />
+              </div>
+            ) : (
+              <div>
+                {s.onScreenText && <b className="scene-title">{s.onScreenText}</b>}
+                <p>{s.narration || <em className="muted">sem fala</em>}</p>
+              </div>
+            )}
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }
@@ -350,6 +410,7 @@ export function Progress({ id }: { id: string }) {
                 </p>
               </>
             )}
+            {ev.status === 'script_review' && <p className="warn" role="status">Roteiro pronto: leia abaixo e aprove, edite ou peça para refazer.</p>}
             {ev.status === 'image_review' && <p className="warn" role="status">Escolha das imagens pronta: aprove abaixo para seguir para a narração.</p>}
             {ev.job?.status === 'paused' && <p className="warn" role="status">Pausado: {(ev.job.stage ?? '').replace(/\.$/, '')}. Volta sozinho quando o Claude estiver disponível.</p>}
           </div>
@@ -369,6 +430,7 @@ export function Progress({ id }: { id: string }) {
       </Section>
 
       {ev.status === 'talking_head' && <Section idx={1} title="Pessoa falando"><TalkingHead id={id} /></Section>}
+      {ev.status === 'script_review' && detail?.script && <Section idx={1} title="Aprovar roteiro"><ScriptReview key={detail.script.version} id={id} detail={detail} /></Section>}
       {ev.status === 'image_review' && <Section idx={1} title="Aprovar imagens"><ImageReview key={ev.job?.type ?? ''} id={id} /></Section>}
 
       {(detail?.script || detail?.reference?.styleProfile) && (
