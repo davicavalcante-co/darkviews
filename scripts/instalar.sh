@@ -19,7 +19,7 @@ fi
 ok "pronto"
 
 step "3/8 Programas do sistema (Node, FFmpeg com legendas, yt-dlp, Python, uv)"
-for f in node pnpm ffmpeg-full yt-dlp python@3.11 uv; do brew list --formula "$f" >/dev/null 2>&1 || brew install "$f"; done
+for f in node pnpm ffmpeg-full yt-dlp python@3.11 uv whisper-cpp; do brew list --formula "$f" >/dev/null 2>&1 || brew install "$f"; done
 command -v claude >/dev/null || npm install -g @anthropic-ai/claude-code
 ok "pronto"
 
@@ -40,6 +40,9 @@ ok "pronto"
 step "6/8 Vozes locais (Kokoro e Piper)"
 [ -x .venv-kokoro/bin/python ] || { uv venv -q --python 3.11 .venv-kokoro && uv pip install -q --python .venv-kokoro/bin/python kokoro soundfile; }
 [ -x .venv-tts/bin/piper ] || { uv venv -q --python 3.11 .venv-tts && uv pip install -q --python .venv-tts/bin/python piper-tts; }
+# Whisper: transcreve as referências e confere se cada fala da narração ficou clara.
+[ -f vendor/whisper/ggml-small.bin ] || { mkdir -p vendor/whisper && curl -fL -o vendor/whisper/ggml-small.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin; }
+grep -q '^WHISPER_MODEL=""' .env && sed -i '' "s|^WHISPER_MODEL=\"\"|WHISPER_MODEL=\"$ROOT/vendor/whisper/ggml-small.bin\"|" .env
 ok "pronto (os modelos de voz baixam sozinhos na primeira fala)"
 
 step "7/8 VoiceStudio (aba Vozes: criar e clonar vozes)"

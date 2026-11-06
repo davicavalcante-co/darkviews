@@ -1097,3 +1097,6 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .pick-row:hover { border-color: var(--accent); }
 .pick-row > * { max-width: 100%; }
 .modal:has(.pick-list) { margin-top: 80px; max-height: calc(100vh - 128px); }
+.review-clock { align-self: center; white-space: nowrap; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.review-clock b { color: var(--fg); }
+.review-clock.late b { color: var(--danger); }

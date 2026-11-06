@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ProgressEvent, ProjectStatus } from '@corte/shared'
 import { api } from './api'
-import { Modal, PageHead, Section } from './ui'
+import { clock, Modal, PageHead, Section, useNow } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
@@ -103,6 +103,7 @@ export function ProjectList({ isAdmin, title = 'Projetos', statuses, href = (id)
 type SceneRow = { index: number; startS: number; endS: number; narration: string | null; onScreenText: string | null; assetId: string | null; searchQuery: string | null; transition: string | null }
 type Detail = {
   name: string
+  reviewUntil: string | null
   reference: { styleProfile: Record<string, unknown> | null } | null
   script: { version: number; body: string; scenes: SceneRow[] } | null
   metadata: { title?: string; description?: string; keywords?: string }
@@ -156,6 +157,19 @@ function TalkingHead({ id }: { id: string }) {
 }
 
 // Roteiro pronto: a pessoa lê cena por cena e aprova, ajusta as falas à mão ou pede ao Claude para refazer com dicas.
+// Prazo da aprovação (10 min por rodada). No fim, onExpire roda uma vez (o servidor também aprova se a tela estiver fechada).
+function ReviewClock({ until, onExpire }: { until: number | null; onExpire?: () => void }) {
+  const now = useNow(until !== null)
+  const fired = useRef(false)
+  useEffect(() => { if (until !== null && now >= until && !fired.current) { fired.current = true; onExpire?.() } }, [now, until])
+  if (until === null) return null
+  return (
+    <span className={`review-clock${until - now < 60_000 ? ' late' : ''}`} role="timer" title="Sem resposta até o fim do prazo, aprova sozinho e segue">
+      {until > now ? <>Aprovação automática em <b>{clock(until - now)}</b></> : 'Tempo esgotado: aprovando…'}
+    </span>
+  )
+}
+
 function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
   const [scenes, setScenes] = useState(detail.script!.scenes.map((s) => ({ index: s.index, narration: s.narration ?? '', onScreenText: s.onScreenText ?? '' })))
   const [editing, setEditing] = useState(false)
@@ -178,6 +192,8 @@ function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
           <p className="muted">Leia o roteiro. Se estiver bom, aprove e o vídeo segue para as imagens. Dá para ajustar as falas aqui mesmo ou pedir ao Claude para refazer.</p>
         </div>
         <div className="row wrap">
+          {/* Tempo esgotado com a tela aberta: aprova levando as falas que a pessoa já editou */}
+          <ReviewClock until={detail.reviewUntil ? Date.parse(detail.reviewUntil) : null} onExpire={() => { if (!busy) send('approve') }} />
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setRedo(!redo); setEditing(false) }}>Refazer com dicas</button>
           <button type="button" className="ghost-btn" disabled={busy} onClick={() => { setEditing(!editing); setRedo(false) }}>{editing ? 'Fechar edição' : 'Editar falas'}</button>
           <button type="button" disabled={busy} onClick={() => send('approve')}>{busy ? 'Enviando…' : changed ? 'Salvar e aprovar' : 'Aprovar roteiro'}</button>
@@ -217,10 +233,11 @@ function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
 function ImageReview({ id }: { id: string }) {
   const [scenes, setScenes] = useState<ReviewScene[] | null>(null)
   const [round, setRound] = useState(1)
+  const [until, setUntil] = useState<number | null>(null)
   const [swap, setSwap] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const load = () => api<{ scenes: ReviewScene[]; round: number }>(`/projects/${id}/review`).then((r) => { setScenes(r.scenes); setRound(r.round) }).catch((e) => setError(e.message))
+  const load = () => api<{ scenes: ReviewScene[]; round: number; reviewUntil: string | null }>(`/projects/${id}/review`).then((r) => { setScenes(r.scenes); setRound(r.round); setUntil(r.reviewUntil ? Date.parse(r.reviewUntil) : null) }).catch((e) => setError(e.message))
   useEffect(() => { load() }, [id])
   // 2ª rodada: a pessoa pode enviar a própria foto para a cena; ela já entra aprovada e sai desta lista.
   async function upload(index: number, f: File | undefined) {
@@ -245,6 +262,7 @@ function ImageReview({ id }: { id: string }) {
             ? <>Estas são as novas opções para as cenas que você trocou ({scenes.length}). Se nenhuma servir, clique em <b>Enviar minha foto</b> na cena.</>
             : <>Todas começam aprovadas. Clique em <b>Trocar</b> nas que não servem: o sistema busca outra opção só para essas cenas e mostra de novo.</>}</p>
         </div>
+        <ReviewClock until={until} />
         <button type="button" disabled={busy} onClick={send}>
           {busy ? 'Enviando…' : !scenes.length ? 'Tudo aprovado · continuar' : swap.size ? `Trocar ${swap.size} e aprovar o resto` : 'Aprovar todas e continuar'}
         </button>
@@ -280,7 +298,7 @@ function ImageReview({ id }: { id: string }) {
 }
 
 type Timing = { stages: { type: string; status: string; elapsedS: number; estimateS: number }[]; elapsedS: number; estimateS: number }
-const STAGE_NAME: Record<string, string> = { ingest: 'Referência', analyze: 'Análise', script: 'Roteiro', media: 'Imagens', voice: 'Áudio', render: 'Vídeo' }
+const STAGE_NAME: Record<string, string> = { ingest: 'Referência', analyze: 'Análise', script: 'Roteiro', media: 'Imagens', voice: 'Narração', render: 'Vídeo e áudio final' }
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 
 // Cronômetro da criação: tempo de cada etapa e estimativa total. Passou do previsto: pergunta se continua.

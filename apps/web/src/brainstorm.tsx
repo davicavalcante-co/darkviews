@@ -5,10 +5,20 @@ import { elapsed, Modal, PageHead, useNow } from './ui'
 
 type Row = { id: string; niche: string; notes: string | null; status: 'queued' | 'running' | 'done' | 'failed'; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; tokens: number | null; result: BrainstormResult | null }
 
-// Ideia → Novo vídeo já preenchido (nome, prompt com gancho e tópicos, duração).
-function toNewVideo(niche: string, i: BrainstormResult['ideas'][number]) {
-  const prompt = [`${i.angle}`, `Gancho: ${i.hook}`, `Tópicos: ${i.outline.join('; ')}`, `Nicho: ${niche}.`].join('\n')
-  const q = new URLSearchParams({ nome: i.title, prompt, minutos: String(Math.min(18, Math.max(0.5, i.durationMin))) })
+// Ideia → Novo vídeo já preenchido com TUDO da ideia (título, gancho, ângulo, por que funciona, tópicos, público, observações),
+// para o roteiro sair fiel a ela. O prompt cabe em 5000 caracteres.
+function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
+  const prompt = [
+    `Vídeo do Brainstorm do nicho "${b.niche}". Siga esta ideia fielmente.`,
+    `Título: ${i.title}`,
+    `Gancho (primeiros 5 segundos): ${i.hook}`,
+    `Ângulo: ${i.angle}`,
+    `Por que funciona: ${i.why}`,
+    `Tópicos do roteiro, nesta ordem:\n${i.outline.map((o, k) => `${k + 1}. ${o}`).join('\n')}`,
+    b.result?.audience ? `Público: ${b.result.audience}` : '',
+    b.notes ? `Observações do nicho: ${b.notes}` : '',
+  ].filter(Boolean).join('\n\n').slice(0, 5000)
+  const q = new URLSearchParams({ nome: i.title.slice(0, 120), prompt, minutos: String(Math.min(18, Math.max(0.5, i.durationMin))) })
   return `#/novo?${q}`
 }
 
@@ -80,7 +90,7 @@ export function BrainstormPage() {
                 <p>{i.angle}</p>
                 <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
                 <details><summary>Tópicos · {i.durationMin} min</summary><ol className="an-list">{i.outline.map((o, j) => <li key={j}>{o}</li>)}</ol></details>
-                <a className="btn" href={toNewVideo(open.niche, i)} onClick={() => setOpen(null)}>Criar vídeo com esta ideia</a>
+                <a className="btn" href={toNewVideo(open, i)} onClick={() => setOpen(null)}>Criar vídeo com esta ideia</a>
               </article>
             ))}</div>
           </div>

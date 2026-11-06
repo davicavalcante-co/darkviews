@@ -175,8 +175,8 @@ async function kokoroSpeak(items: { text: string; out: string; voice: string; sp
   })
 }
 
-// Várias falas de uma vez (um vídeo inteiro). Com Kokoro como voz principal, gera todas num processo só;
-// com as outras vozes, uma a uma. Fala que falhar fica de fora (o chamador decide o que fazer).
+// Várias falas de uma vez (um vídeo inteiro), sempre com UMA voz só. Com Kokoro, gera todas num processo só;
+// com as outras vozes, uma a uma.
 export type VoiceChoice = { provider?: string; voice?: string; speed?: number }
 // A voz escolhida na criação passa para o topo da lista; as outras seguem como reserva.
 // Depois dela, a reserva é a Kokoro (a que pronuncia melhor o português); Piper e macOS só no fim.
@@ -187,9 +187,15 @@ export const preferProvider = <T extends { provider: string }>(list: T[], provid
 }
 export async function synthesizeMany(items: { key: number; text: string; outBase: string }[], ffmpeg: string, userId?: string | null, choice: VoiceChoice = {}) {
   const result = new Map<number, { path: string; provider: string }>()
-  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider)
-  if (first && first.provider !== choice.provider) choice = { speed: choice.speed } // a voz escolhida era de outro fornecedor
-  if (first?.provider === 'kokoro') {
+  if (!items.length) return result
+  const active = await activeProviders('voz', userId)
+  if (choice.provider && !active.some((a) => a.provider === choice.provider))
+    throw new Error(`A voz escolhida (${choice.provider}) está desligada ou sem chave em Integrações. Ligue de novo ou escolha outra voz: o vídeo nunca troca de voz.`)
+  const [first] = preferProvider(active, choice.provider)
+  if (!first) throw new Error('Nenhuma voz disponível para narrar.')
+  // Uma voz só do começo ao fim: as outras nunca entram, nem se esta falhar (melhor parar do que misturar vozes).
+  const skip = active.map((a) => a.provider).filter((n) => n !== first.provider)
+  if (first.provider === 'kokoro') {
     try {
       const voice = choice.voice || first.config.voice || 'pf_dora', speed = choice.speed ?? (Number(first.config.speed) || 1)
       await kokoroSpeak(items.map((i) => ({ text: i.text, out: i.outBase + '.kokoro.wav', voice, speed })))
@@ -199,18 +205,17 @@ export async function synthesizeMany(items: { key: number; text: string; outBase
       }
       return result
     } catch (e) {
-      warn('kokoro', `voz falhou, usando a próxima: ${(e as Error).message}`, userId)
+      warn('kokoro', `lote falhou, narrando cena por cena com a mesma voz: ${(e as Error).message}`, userId)
     }
   }
-  // A primeira voz que falar narra o vídeo todo: as cenas seguintes não trocam de voz (melhor falhar do que misturar).
-  const names = (await activeProviders('voz', userId)).map((a) => a.provider)
-  let locked: string | null = null
   for (const i of items) {
-    const skip = locked ? names.filter((n) => n !== locked) : first?.provider === 'kokoro' ? ['kokoro'] : []
-    const v = await synthesize(i.text, i.outBase, ffmpeg, userId, skip, choice)
-    if (!v) throw new Error(locked ? `A voz ${locked} falhou numa cena. Clique em Tentar de novo.` : 'Nenhuma voz disponível para narrar.')
-    locked = v.provider
-    result.set(i.key, v)
+    // Falha passageira: espera e tenta de novo com a MESMA voz, até 4 vezes.
+    for (let attempt = 1; ; attempt++) {
+      const v = await synthesize(i.text, i.outBase, ffmpeg, userId, skip, choice)
+      if (v) { result.set(i.key, v); break }
+      if (attempt >= 4) throw new Error(`A voz ${first.provider} não conseguiu narrar uma cena depois de 4 tentativas. Clique em Tentar de novo: o vídeo não troca de voz.`)
+      await new Promise((r) => setTimeout(r, attempt * 5_000))
+    }
   }
   return result
 }
@@ -413,9 +418,9 @@ export async function studioAcceptLicenses() {
 }
 
 // Fala gerada (WAV). Com profileId usa a voz salva; com instruct, uma voz criada pelos atributos (seed fixa = mesma voz).
-export async function studioGenerate(o: { text: string; profileId?: string; instruct?: string; speed?: number }) {
+export async function studioGenerate(o: { text: string; profileId?: string; instruct?: string; speed?: number; seed?: number }) {
   const form = new FormData()
-  form.append('text', o.text); form.append('language', 'Auto'); form.append('speed', String(o.speed ?? 1)); form.append('seed', '42')
+  form.append('text', o.text); form.append('language', 'pt'); form.append('speed', String(o.speed ?? 1)); form.append('seed', String(o.seed ?? 42)) // português fixo: com 'Auto' frases curtas saíam com sotaque de outra língua
   if (o.profileId) form.append('profile_id', o.profileId)
   if (o.instruct) form.append('instruct', o.instruct)
   return Buffer.from(await (await studioFetch('/generate', { method: 'POST', body: form })).arrayBuffer())
