@@ -51,6 +51,7 @@ model Project {
   name            String
   prompt          String
   status          String    @default("queued") // queued|analyzing|scripting|media|rendering|editing|in_approval|approved|failed
+  reviewUntil     DateTime? // prazo da rodada atual de aprovação de imagens (10 min); passou, aprova sozinho
   targetDurationS Int
   aspect          String    @default("16:9")
   options         String    @default("{}") // JSON: fonte, estilo de destaque

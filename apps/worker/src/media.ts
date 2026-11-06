@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { mkdir, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -58,4 +59,27 @@ export async function imageSheet(paths: string[], out: string, cols = 6) {
   const concat = `${paths.map((_, i) => `[v${i}]`).join('')}concat=n=${n}:v=1:a=0,tile=${cols}x${rows}:padding=4`
   await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...paths.flatMap((p) => ['-i', p]), '-filter_complex', `${scaled};${concat}`, '-frames:v', '1', '-q:v', '4', out])
   return out
+}
+
+// Quantas palavras do texto aparecem no que foi ouvido (0 a 1), sem acento nem pontuação.
+export function wordRecall(text: string, heard: string) {
+  const words = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean)
+  const left = new Map<string, number>()
+  for (const w of words(heard)) left.set(w, (left.get(w) ?? 0) + 1)
+  const ref = words(text)
+  let hit = 0
+  for (const w of ref) if (left.get(w)) { hit++; left.set(w, left.get(w)! - 1) }
+  return ref.length ? hit / ref.length : 1
+}
+
+// A fala ficou clara? O Whisper ouve o áudio e compara com o texto. null = Whisper não instalado (pula a conferência).
+export async function clarity(audio: string, text: string): Promise<number | null> {
+  const model = process.env.WHISPER_MODEL
+  if (!model || !existsSync(model)) return null
+  const dir = await mkdtemp(join(tmpdir(), 'darkviews-clareza-'))
+  try {
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', audio, '-ar', '16000', '-ac', '1', join(dir, 'a.wav')])
+    await run('whisper-cli', ['-m', model, '-f', join(dir, 'a.wav'), '-l', 'pt', '-nt', '-otxt', '-of', join(dir, 't')], BIG)
+    return wordRecall(text, await readFile(join(dir, 't.txt'), 'utf8'))
+  } finally { await rm(dir, { recursive: true, force: true }) }
 }

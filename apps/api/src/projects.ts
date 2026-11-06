@@ -322,7 +322,7 @@ export async function projectRoutes(app: FastifyInstance) {
   })
 
   app.get<{ Params: { id: string } }>('/api/projects/:id/review', { preHandler: requireAuth }, async (req, reply) => {
-    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, reviewUntil: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     const scenes = await prisma.scene.findMany({
       where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, orderBy: { index: 'asc' },
@@ -330,6 +330,7 @@ export async function projectRoutes(app: FastifyInstance) {
     })
     return {
       status: p.status,
+      reviewUntil: p.reviewUntil,
       // 2ª rodada em diante (alguma cena já foi recusada): dá para enviar a própria foto no lugar.
       round: 1 + Math.max(0, ...scenes.filter((s) => !approvedScene(s.searchQuery)).map((s) => (s.searchQuery ? (JSON.parse(s.searchQuery) as { rejected?: string[] }).rejected?.length ?? 0 : 0))),
       // Só as que ainda não foram aprovadas: as aprovadas numa rodada anterior já esperam pela narração.
@@ -356,7 +357,7 @@ export async function projectRoutes(app: FastifyInstance) {
     // As que estavam nesta rodada e não foram recusadas ficam aprovadas de vez.
     const pending = (await prisma.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { id: true, index: true, searchQuery: true } }))
       .filter((s) => !approvedScene(s.searchQuery) && !rejected.includes(s.index))
-    const ok = await advance(p.id, 'image_review', { status: 'media' }, scenes.length ? 'media' : 'voice', (tx) => Promise.all([
+    const ok = await advance(p.id, 'image_review', { status: 'media', reviewUntil: null }, scenes.length ? 'media' : 'voice', (tx) => Promise.all([
       ...scenes.filter((s) => s.asset && s.searchQuery).map((s) => {
         const q = JSON.parse(s.searchQuery!)
         return tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, rejected: [...(q.rejected ?? []), `${s.asset!.sourceProvider}:${s.asset!.sourceId}`] }) } })
@@ -505,7 +506,7 @@ export async function projectRoutes(app: FastifyInstance) {
 }
 
 // Avança o projeto só se ele ainda estiver no status esperado: num clique duplo o segundo pedido não troca nada e não cria outra tarefa.
-async function advance(id: string, from: string, data: { status: string; options?: string }, jobType: string, extra?: (tx: Prisma.TransactionClient) => Promise<unknown>, payload?: string | null) {
+async function advance(id: string, from: string, data: { status: string; options?: string; reviewUntil?: null }, jobType: string, extra?: (tx: Prisma.TransactionClient) => Promise<unknown>, payload?: string | null) {
   return prisma.$transaction(async (tx) => {
     const { count } = await tx.project.updateMany({ where: { id, status: from }, data })
     if (!count) return false

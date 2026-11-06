@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ProgressEvent, ProjectStatus } from '@corte/shared'
 import { api } from './api'
-import { Modal, PageHead, Section } from './ui'
+import { clock, Modal, PageHead, Section, useNow } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens',
@@ -217,10 +217,12 @@ function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
 function ImageReview({ id }: { id: string }) {
   const [scenes, setScenes] = useState<ReviewScene[] | null>(null)
   const [round, setRound] = useState(1)
+  const [until, setUntil] = useState<number | null>(null)
+  const now = useNow(until !== null)
   const [swap, setSwap] = useState<Set<number>>(new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const load = () => api<{ scenes: ReviewScene[]; round: number }>(`/projects/${id}/review`).then((r) => { setScenes(r.scenes); setRound(r.round) }).catch((e) => setError(e.message))
+  const load = () => api<{ scenes: ReviewScene[]; round: number; reviewUntil: string | null }>(`/projects/${id}/review`).then((r) => { setScenes(r.scenes); setRound(r.round); setUntil(r.reviewUntil ? Date.parse(r.reviewUntil) : null) }).catch((e) => setError(e.message))
   useEffect(() => { load() }, [id])
   // 2ª rodada: a pessoa pode enviar a própria foto para a cena; ela já entra aprovada e sai desta lista.
   async function upload(index: number, f: File | undefined) {
@@ -245,6 +247,11 @@ function ImageReview({ id }: { id: string }) {
             ? <>Estas são as novas opções para as cenas que você trocou ({scenes.length}). Se nenhuma servir, clique em <b>Enviar minha foto</b> na cena.</>
             : <>Todas começam aprovadas. Clique em <b>Trocar</b> nas que não servem: o sistema busca outra opção só para essas cenas e mostra de novo.</>}</p>
         </div>
+        {until !== null && (
+          <span className={`review-clock${until - now < 60_000 ? ' late' : ''}`} role="timer" title="Sem resposta até o fim do prazo, as imagens são aprovadas sozinhas">
+            {until > now ? <>Aprovação automática em <b>{clock(until - now)}</b></> : 'Tempo esgotado: aprovando as imagens…'}
+          </span>
+        )}
         <button type="button" disabled={busy} onClick={send}>
           {busy ? 'Enviando…' : !scenes.length ? 'Tudo aprovado · continuar' : swap.size ? `Trocar ${swap.size} e aprovar o resto` : 'Aprovar todas e continuar'}
         </button>

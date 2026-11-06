@@ -8,7 +8,8 @@ Tudo roda na sua máquina, em `http://localhost:5173`. O roteiro e as escolhas d
 
 - **Novo vídeo:** prompt, duração, link ou vídeo de referência, suas fotos (com uma legenda curta para cada uma), voz e estilo de edição.
 - **Criação automática:** analisa a referência, escreve o roteiro, busca imagens nos bancos gratuitos (ou usa só as suas), narra e monta o vídeo em 1920×1080.
-- **Aprovação das imagens** antes da narração: você recusa as que não gostar e o sistema busca outras.
+- **Aprovação das imagens** antes da narração: você recusa as que não gostar e o sistema busca outras. Cada rodada tem 10 minutos; sem resposta, as imagens são aprovadas sozinhas.
+- **Narração com uma voz só:** a voz escolhida narra o vídeo inteiro (nunca troca por outra) e cada fala é conferida pelo Whisper; se sair pouco clara, é gerada de novo.
 - **Editor em camadas** (parecido com um programa de edição):
   - prévia do vídeo e linha do tempo com quadros, cenas, enunciados, legenda, narração, trilha e efeitos;
   - **Cena:** movimento da foto (Ken Burns, parallax, recorte, zoom rápido), curva do movimento e transição;
@@ -57,6 +58,7 @@ Para usar vozes próprias (aba **Vozes**): clique em **Ligar VoiceStudio** e, na
 | Limite do Claude atingido | O vídeo pausa e continua sozinho no horário em que o limite renova. |
 | "O VoiceStudio está desligado" | Aba **Vozes → Ligar VoiceStudio**. |
 | Narração com voz própria lenta | É normal: cada cena leva de 10 a 25 s. O andamento mostra "cena X de Y" e o tempo que falta. Feche outros programas se o Mac estiver com pouca memória. |
+| "A voz escolhida está desligada" | Ligue a voz de novo em **Integrações** ou escolha outra no editor. O vídeo nunca troca de voz sozinho. |
 | Vídeo parou com erro | Abra o projeto e clique em **Tentar de novo**: só a etapa que falhou é refeita. |
 | A porta 3333 ou 5173 está em uso | Já tem um Darkviews ligado. Feche a outra janela do terminal e ligue de novo. |
 

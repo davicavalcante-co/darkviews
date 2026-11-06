@@ -6,12 +6,14 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
-import { searchStock, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
+import { activeProviders, searchStock, studioGenerate, synthesize, synthesizeMany, type StockCandidate } from '@corte/providers'
 import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
+import { clarity } from './media.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
+export const REVIEW_MINUTES = 10 // cada rodada de aprovação de imagens tem o seu prazo
 
 // Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
 const UA = 'Darkviews/1.0 (local video tool; https://github.com/davicavalcante-co/darkviews)' // só ASCII: acento no User-Agent dá 403
@@ -118,7 +120,7 @@ export async function media(job: Job) {
   const stock = (await prisma.scene.findMany({ where: { scriptId: script.id, asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { searchQuery: true } }))
     .filter((s) => !(s.searchQuery && JSON.parse(s.searchQuery).approved === true)).length
   if (stock) {
-    await prisma.project.update({ where: { id: project.id }, data: { status: 'image_review' } })
+    await prisma.project.update({ where: { id: project.id }, data: { status: 'image_review', reviewUntil: new Date(Date.now() + REVIEW_MINUTES * 60_000) } })
   } else {
     await prisma.job.create({ data: { projectId: project.id, type: 'voice', stage: 'Na fila' } })
   }
@@ -143,10 +145,11 @@ export async function voice(job: Job) {
   const opts = JSON.parse(project.options) as { voiceBrief?: string; voicePreset?: string; voiceTone?: string }
   const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
   const directed = new Map<number, string>()
+  let own: { name: string; profileId: string | null; speed: number } | null = null
 
   // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
   if (chosenProvider === 'studio') {
-    const own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
+    own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
     // A voz escolhida narra o vídeo inteiro: sem ela, para (nunca troca por outra voz no meio).
     if (!own?.profileId) throw new Error('A voz escolhida não existe mais. Escolha outra voz no Novo vídeo ou no editor.')
     const todo = scenes.filter((x) => x.narration?.trim())
@@ -183,6 +186,33 @@ export async function voice(job: Job) {
     { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
   for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
 
+  // Fala clara: o Whisper ouve cada cena e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
+  // e fica com a melhor. Kokoro e Piper sempre geram igual, então nelas só confere e avisa.
+  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim())
+  const others = (await activeProviders('voz', project.ownerId)).map((a) => a.provider)
+  for (const [n, s] of spoken.entries()) {
+    let best = made.get(s.index)!
+    let score = await clarity(best.path, s.narration!)
+    if (score === null) break // Whisper não instalado: segue sem conferir
+    await prisma.job.update({ where: { id: job.id }, data: { stage: `Conferindo se a fala ficou clara · cena ${n + 1} de ${spoken.length}` } })
+    const random = ['studio', 'elevenlabs', 'openai_tts'].includes(best.provider)
+    for (let attempt = 1; random && score < 0.7 && attempt <= 2; attempt++) {
+      const base = `${bases.get(s.index)}-clareza${attempt}`
+      let file: string | null = null
+      if (best.provider === 'studio' && own?.profileId) {
+        await writeFile(base + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own.profileId, speed: own.speed, seed: 42 + attempt }))
+        await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', base + '.studio.wav', '-ar', '48000', '-ac', '2', base + '.wav'])
+        file = base + '.wav'
+      } else if (best.provider !== 'studio') {
+        file = (await synthesize(s.narration!, base, FFMPEG, project.ownerId, others.filter((o) => o !== best.provider), { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed }))?.path ?? null
+      }
+      const again = file ? await clarity(file, s.narration!) : null
+      if (file && again !== null && again > score) { best = { path: file, provider: best.provider }; score = again }
+    }
+    made.set(s.index, best)
+    if (score < 0.7) logEvent({ level: 'warn', source: 'worker', kind: 'job', message: `cena ${s.index + 1}: fala pode estar pouco clara (${Math.round(score * 100)}% das palavras reconhecidas)`, details: { jobId: job.id, projectId: project.id } })
+  }
+
   // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
   const isNewContext = (s: (typeof scenes)[number]) => !!s.onScreenText || (s.searchQuery ? JSON.parse(s.searchQuery).type === 'text_card' : false)
@@ -204,7 +234,7 @@ export async function voice(job: Job) {
       const out = bases.get(s.index)! + '.final.wav'
       await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
         // Corta o silêncio que a voz sintética deixa no começo e no fim antes de pôr as pausas certas.
-        `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+        `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,loudnorm=I=-16:TP=-1.5:LRA=7,afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
       dur = await durationOf(out)
       await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
     }

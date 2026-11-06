@@ -27,7 +27,26 @@ if (dead.length) await prisma.job.updateMany({ where: { id: { in: dead }, status
 await prisma.videoAnalysis.updateMany({ where: { status: 'running' }, data: { status: 'queued', stage: 'Na fila (recomeçando)' } })
 await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { status: 'queued' } })
 
+// Aprovação de imagens sem resposta no prazo da rodada: aprova sozinho o que está na tela e segue para a narração.
+async function autoApprove() {
+  const late = await prisma.project.findMany({ where: { status: 'image_review', reviewUntil: { lte: new Date() } }, select: { id: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { id: true } } } })
+  for (const p of late) {
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'image_review' }, data: { status: 'media', reviewUntil: null } })
+      if (!count) return
+      const scenes = await tx.scene.findMany({ where: { scriptId: p.scripts[0]?.id ?? '', asset: { kind: { in: ['stock_image', 'stock_video'] } } }, select: { id: true, searchQuery: true } })
+      for (const s of scenes) {
+        const q = s.searchQuery ? JSON.parse(s.searchQuery) : {}
+        if (q.approved !== true) await tx.scene.update({ where: { id: s.id }, data: { searchQuery: JSON.stringify({ ...q, approved: true }) } })
+      }
+      await tx.job.create({ data: { projectId: p.id, type: 'voice', stage: 'Na fila' } })
+    })
+    logEvent({ source: 'worker', kind: 'job', message: 'imagens aprovadas automaticamente (prazo de 10 min esgotado)', details: { projectId: p.id } })
+  }
+}
+
 async function runOne() {
+  await autoApprove()
   // Jobs pausados pelo limite do Claude voltam sozinhos para a fila no horário de reinício.
   await prisma.job.updateMany({ where: { status: 'paused', resumeAt: { lte: new Date() } }, data: { status: 'queued', resumeAt: null } })
   const job = await claimNextJob(WORKER_ID, Object.keys(HANDLERS))
