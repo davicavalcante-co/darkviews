@@ -195,7 +195,7 @@ export async function renderVideo(input: RenderInput) {
       audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
     }
     await mkdir(join(input.out, '..'), { recursive: true })
-    await ff([...args, '-filter_complex', `[0:v]subtitles=legendas.ass:fontsdir=fonts[v];${audio}`, '-map', '[v]', '-map', '[a]',
+    await ff([...args, '-filter_complex', `[0:v]fade=t=in:st=0:d=3:color=0x${(input.scenes[0]?.bg ?? '#000000').replace('#', '')},subtitles=legendas.ass:fontsdir=fonts[v];${audio}`, '-map', '[v]', '-map', '[a]',
       ...X264, '-preset', 'medium', '-crf', '20', '-c:a', 'aac', '-b:a', '192k', '-t', total.toFixed(3), '-movflags', '+faststart', input.out])
     if (input.cleanOut) {
       // Vídeo copiado sem reencode: só o áudio é misturado de novo.

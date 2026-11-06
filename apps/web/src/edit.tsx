@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as RPointerEvent } from 'react'
-import { MUSIC_STYLES, type Part } from '@corte/shared'
+import { DEFAULT_IDENTITY, MUSIC_STYLES, type Part } from '@corte/shared'
 import { api, uploadFont, useFonts } from './api'
 import { ApprovePage } from './approve'
 import { FontSelect, Modal, PageHead } from './ui'
@@ -443,6 +443,7 @@ function AudioPanel({ id, data, scene, options, stageOptions }: Ctx) {
 
 // ---------- Card da direita: legenda e enunciado ----------
 const PRESETS: { id: string; name: string; style: Partial<Track> }[] = [
+  { id: 'padrao', name: 'Padrão', style: DEFAULT_IDENTITY.caption },
   { id: 'classica', name: 'Clássica', style: { fontFamily: 'Montserrat', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFFFFF', highlightMode: 'manual', position: 'bottom-center', outline: true } },
   { id: 'destaque', name: 'Destaque', style: { fontFamily: 'Montserrat', fontWeight: 900, size: 72, color: '#FFFFFF', highlightColor: '#FFD43B', highlightMode: 'palavra-chave', position: 'bottom-center', outline: true } },
   { id: 'karaoke', name: 'Karaokê', style: { fontFamily: 'Poppins', fontWeight: 900, size: 76, color: '#FFFFFF', highlightColor: '#40C057', highlightMode: 'karaokê', position: 'middle-center', outline: true } },
@@ -494,6 +495,10 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
     <div className="stack-sm">
       <p className="lead">Escolha como a legenda vai aparecer. O texto sai da narração; depois você ajusta palavra por palavra.</p>
       <div className="presets">{PRESETS.map((p) => <PresetCard key={p.id} p={p} on={preset?.id === p.id} onPick={() => set(p.style)} />)}</div>
+      <div className="row wrap cap-colors">
+        <label>Cor da legenda<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
+        <label>Cor do destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
+      </div>
       <button type="button" disabled={busy} onClick={() => act(async () => {
         const { version: _v, ...body } = track
         await api(`/projects/${id}/captions`, { method: 'PUT', body })
@@ -511,6 +516,11 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
         <button type="button" className={`chip${more ? ' on' : ''}`} onClick={() => setMore(!more)}>Ajustes</button>
       </div>
       <AlignIcons value={track.position} onChange={(position) => set({ position })} />
+      {/* Começa na identidade padrão; a cor muda aqui, só neste vídeo */}
+      <div className="row wrap cap-colors">
+        <label>Cor da legenda<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
+        <label>Cor do destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
+      </div>
       {more && (
         <div className="cap-more">
           <div className="font-row">
@@ -525,8 +535,6 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
           <div className="grid2">
             <label>Peso<select value={track.fontWeight} onChange={(e) => set({ fontWeight: Number(e.target.value) })}><option value={400}>Normal</option><option value={700}>Negrito</option><option value={900}>Extra</option></select></label>
             <label>Tamanho<input type="number" min={24} max={140} value={track.size} onChange={(e) => set({ size: Number(e.target.value) })} /></label>
-            <label>Cor<input type="color" value={track.color} onChange={(e) => set({ color: e.target.value.toUpperCase() })} /></label>
-            <label>Destaque<input type="color" value={track.highlightColor} onChange={(e) => set({ highlightColor: e.target.value.toUpperCase() })} /></label>
             <label>Modo<select value={track.highlightMode} onChange={(e) => set({ highlightMode: e.target.value })}><option value="palavra-chave">Palavras-chave</option><option value="karaokê">Karaokê</option><option value="manual">Manual</option></select></label>
             <label className="check"><input type="checkbox" checked={track.outline !== false} onChange={(e) => set({ outline: e.target.checked })} /> Traçado</label>
           </div>

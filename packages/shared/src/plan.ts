@@ -90,8 +90,9 @@ export function checkPlan(plan: ScriptOutput, targetDurationS: number, imageCoun
   const errors: string[] = []
   const end = plan.scenes.at(-1)!.endS
   if (end > MAX_DURATION_S) errors.push(`O vídeo passa de 18 minutos (${end}s)`)
-  if (Math.abs(end - targetDurationS) > Math.max(5, targetDurationS * 0.1)) {
-    errors.push(`Duração total ${end}s longe da duração pedida (${targetDurationS}s)`)
+  // Tempo aproximado: qualidade vem antes; só recusa muito curto ou acima do máximo.
+  if (end < targetDurationS * 0.7) {
+    errors.push(`Duração total ${end}s longe da duração pedida (${targetDurationS}s; pode passar, mas não ficar muito abaixo)`)
   }
   plan.scenes.forEach((s, i) => {
     const prevEnd = i === 0 ? 0 : plan.scenes[i - 1].endS

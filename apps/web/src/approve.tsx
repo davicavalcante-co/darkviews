@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { CUT_LABELS, CUT_LIMITS, type CutPlatform } from '@corte/shared'
+import { CUT_LABELS, CUT_LIMITS, planCuts, type CutPlatform } from '@corte/shared'
 import { api } from './api'
 import { PageHead, Section } from './ui'
 
-type Cut = { id: string; platform: CutPlatform; partIndex: number; startS: number; endS: number; cropX: number; status: string }
+type Cut = { id: string; platform: CutPlatform; partIndex: number; startS: number; endS: number; background: 'blur' | 'color'; status: string }
 type CutsData = { status: string; approvedAt: string | null; job: { stage: string | null; progress: number } | null; cuts: Cut[] }
 type Detail = { name: string; status: string; video: { version: number; durationS: number } | null }
 
@@ -11,16 +11,7 @@ const PLATFORMS = Object.keys(CUT_LIMITS) as CutPlatform[]
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
 const STATUS: Record<string, string> = { queued: 'na fila', running: 'gerando…', done: 'pronto', failed: 'falhou' }
 
-// Mostra o quadro com a janela 9:16 por cima, na posição do enquadramento.
-function Framing({ src, cropX }: { src: string; cropX: number }) {
-  const w = (608 / 1920) * 100
-  return (
-    <div className="framing">
-      <img src={src} alt="Quadro do vídeo" />
-      <span className="window" style={{ width: `${w}%`, left: `${((100 - w) * cropX) / 100}%` }} />
-    </div>
-  )
-}
+const BG_LABEL = { blur: 'vídeo embaçado', color: 'cor de fundo' } as const
 
 export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }) {
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -28,14 +19,17 @@ export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }
   const [platforms, setPlatforms] = useState<CutPlatform[]>(['shorts', 'reels'])
   const [startS, setStart] = useState(0)
   const [endS, setEnd] = useState(60)
-  const [cropX, setCropX] = useState(50)
+  const [partS, setPartS] = useState(60)
+  const [background, setBackground] = useState<'blur' | 'color'>('blur')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLVideoElement>(null)
 
   const load = () => Promise.all([api<Detail>(`/projects/${id}`).then(setDetail), api<CutsData>(`/projects/${id}/cuts`).then(setData)])
   useEffect(() => { load().catch(() => setError('Projeto não encontrado')) }, [id])
-  useEffect(() => { if (detail?.video) setEnd((e) => Math.min(e, detail.video!.durationS)) }, [detail?.video?.durationS])
+  // Trecho padrão: do fim do último corte já feito (não repete segundos) até o fim do vídeo.
+  const lastEnd = Math.max(0, ...(data?.cuts ?? []).map((c) => c.endS))
+  useEffect(() => { if (!detail?.video) return; const d = detail.video.durationS; setStart(lastEnd < d - 3 ? lastEnd : 0); setEnd(d) }, [detail?.video?.durationS, lastEnd])
   // Atualiza enquanto os cortes são gerados.
   useEffect(() => {
     if (!data?.job && !data?.cuts.some((c) => c.status === 'queued' || c.status === 'running')) return
@@ -74,7 +68,13 @@ export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }
                 <button type="button" className="link" onClick={() => setEnd(now())}>usar posição do player</button>
               </label>
             </div>
-            <p className="muted">Trecho de {fmt(startS)} a {fmt(Math.min(endS, dur))} ({Math.max(0, Math.min(endS, dur) - startS).toFixed(0)} s). Cada plataforma usa o começo do trecho até o seu limite.</p>
+            <label>Duração de cada corte (s)
+              <input type="number" min={3} max={180} step={1} value={partS} onChange={(e) => setPartS(Number(e.target.value))} />
+            </label>
+            <p className="muted">Trecho de {fmt(startS)} a {fmt(Math.min(endS, dur))}, em cortes seguidos de {partS} s (sem repetir segundos). Cada plataforma respeita o seu limite; Stories sempre em partes de 15 s.</p>
+            {platforms.length > 0 && endS - startS >= 3 && (
+              <p className="muted small">{platforms.map((p) => { const c = planCuts({ platforms: [p], startS, endS, partS }, dur); return `${CUT_LABELS[p]}: ${c.length} ${c.length === 1 ? 'corte' : 'cortes'} (${c.slice(0, 3).map((x) => `${fmt(x.startS)}–${fmt(x.endS)}`).join(', ')}${c.length > 3 ? '…' : ''})` }).join(' · ')}</p>
+            )}
           </div>
 
           <fieldset>
@@ -87,17 +87,20 @@ export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }
                 </label>
               ))}
             </div>
-            <label>Enquadramento (arraste para escolher a faixa vertical)
-              <input type="range" min={0} max={100} value={cropX} onChange={(e) => setCropX(Number(e.target.value))} />
-            </label>
-            <Framing src={`/api/projects/${id}/frame?t=${startS.toFixed(1)}&v=${detail.video.version}`} cropX={cropX} />
+            <div className="field-label">Fundo atrás do vídeo</div>
+            <div className="stack">
+              {(['blur', 'color'] as const).map((b) => (
+                <label key={b} className="check"><input type="radio" name="fundo" checked={background === b} onChange={() => setBackground(b)} /><span>{b === 'blur' ? 'Vídeo embaçado' : 'Cor de fundo do vídeo'}</span></label>
+              ))}
+            </div>
+            <p className="muted small">O vídeo horizontal aparece inteiro, um pouco menor, no meio da tela vertical. A legenda fica no fundo, abaixo dele.</p>
             {error && <p className="error" role="alert">{error}</p>}
             <div className="row">
               {detail.status === 'editing'
                 ? <button type="button" className="link" disabled={busy} onClick={() => run(() => api(`/projects/${id}/submit`, { method: 'POST' }))}>Enviar para aprovação</button>
                 : <span />}
               <button type="button" disabled={busy || !platforms.length || !!data.job}
-                onClick={() => run(() => api(`/projects/${id}/approve`, { method: 'POST', body: { platforms, startS, endS, cropX } }))}>
+                onClick={() => run(() => api(`/projects/${id}/approve`, { method: 'POST', body: { platforms, startS, endS, partS, background } }))}>
                 {data.approvedAt ? 'Gerar cortes' : 'Aprovar e gerar cortes'}
               </button>
             </div>
@@ -107,24 +110,23 @@ export function ApprovePage({ id, embedded }: { id: string; embedded?: boolean }
 
       {data.cuts.length > 0 && (
         <Section idx={2} title={`Cortes · ${data.cuts.length}`}>
-          <div className="cuts">{data.cuts.map((c) => <CutCard key={c.id} id={id} cut={c} disabled={!!data.job} onRedo={(x) => run(() => api(`/projects/${id}/cuts/${c.id}/redo`, { method: 'POST', body: { cropX: x } }))} />)}</div>
+          <div className="cuts">{data.cuts.map((c) => <CutCard key={c.id} id={id} cut={c} disabled={!!data.job} onRedo={(x) => run(() => api(`/projects/${id}/cuts/${c.id}/redo`, { method: 'POST', body: { background: x } }))} />)}</div>
         </Section>
       )}
     </div>
   )
 }
 
-function CutCard({ id, cut, disabled, onRedo }: { id: string; cut: Cut; disabled: boolean; onRedo: (cropX: number) => void }) {
-  const [cropX, setCropX] = useState(cut.cropX)
+function CutCard({ id, cut, disabled, onRedo }: { id: string; cut: Cut; disabled: boolean; onRedo: (background: 'blur' | 'color') => void }) {
   const file = `/api/projects/${id}/cuts/${cut.id}/file`
+  const other = cut.background === 'blur' ? 'color' : 'blur'
   return (
     <article className="cut">
-      <strong>{CUT_LABELS[cut.platform]}{cut.platform === 'stories' ? ` · parte ${cut.partIndex + 1}` : ''}</strong>
+      <strong>{CUT_LABELS[cut.platform]} · parte {cut.partIndex + 1}</strong>
       <small className="muted">{fmt(cut.startS)}–{fmt(cut.endS)} · {STATUS[cut.status] ?? cut.status}</small>
       {cut.status === 'done' && <video controls preload="metadata" src={file} />}
       {cut.status === 'done' && <a className="btn" href={`${file}?download=1`}>Baixar</a>}
-      <label>Enquadramento<input type="range" min={0} max={100} value={cropX} onChange={(e) => setCropX(Number(e.target.value))} /></label>
-      <button type="button" className="link" disabled={disabled || cropX === cut.cropX} onClick={() => onRedo(cropX)}>Refazer com este enquadramento</button>
+      <button type="button" className="link" disabled={disabled} onClick={() => onRedo(other)}>Refazer com {BG_LABEL[other]}</button>
     </article>
   )
 }

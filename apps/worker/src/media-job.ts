@@ -13,6 +13,7 @@ import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { clarity } from './media.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
+export const INTRO_S = 3 // abertura: a cor de fundo esmaece para a 1ª imagem; a fala começa depois
 export const REVIEW_MINUTES = 10 // cada rodada de aprovação de imagens tem o seu prazo
 
 // Bancos como o Wikimedia (fonte do Openverse) exigem identificação e limitam rajadas: identifica e tenta de novo no 429.
@@ -182,8 +183,21 @@ export async function voice(job: Job) {
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
-  const made = await synthesizeMany(todo.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
-    { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
+  // Vídeo grande: narra em partes de ~3 min (sem cortar cena no meio), salva cada parte e passa para a próxima.
+  const parts: (typeof todo)[] = [[]]
+  let partS = 0
+  for (const s of todo) {
+    const est = s.narration!.length / 14 // ~14 caracteres por segundo de fala
+    if (partS + est > 180 && parts.at(-1)!.length) { parts.push([]); partS = 0 }
+    parts.at(-1)!.push(s); partS += est
+  }
+  const made = new Map<number, { path: string; provider: string }>()
+  for (const [n, part] of parts.entries()) {
+    await step(parts.length > 1 ? `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
+    const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
+      { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
+    for (const [k, v] of got) made.set(k, v)
+  }
   for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
 
   // Fala clara: o Whisper ouve cada cena e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
@@ -223,18 +237,17 @@ export async function voice(job: Job) {
     await step('Narração com a voz escolhida', 60 + Math.round((i / scenes.length) * 35))
     const next = scenes[i + 1]
     // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
-    const lead = i > 0 && isNewContext(s) ? 0.25 : 0.05
+    const lead = i === 0 ? INTRO_S : isNewContext(s) ? 0.25 : 0.05
     const tail = next && isNewContext(next) ? 0.4 : 0.18
-    // Cena sem fala (cartela) é só uma virada rápida, nunca um silêncio longo.
-    // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão até 1,6 s.
-    let dur = s.narration?.trim() ? s.endS - s.startS : cardDefault ?? Math.min(s.endS - s.startS, 1.6)
+    // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão 3 s (+ a abertura, se for a primeira).
+    let dur = s.narration?.trim() ? s.endS - s.startS : (cardDefault ?? 3) + (i === 0 ? INTRO_S : 0)
     const v = made.get(s.index)
     if (v) {
       // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
       const out = bases.get(s.index)! + '.final.wav'
       await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
-        // Corta o silêncio que a voz sintética deixa no começo e no fim antes de pôr as pausas certas.
-        `silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.02,areverse,silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05,areverse,loudnorm=I=-16:TP=-1.5:LRA=7,afade=t=in:d=0.02,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+        // Corta só o silêncio do FIM (cortar o do começo comia a 1ª sílaba: "Em Assis" virava "sis"). O volume é igualado no render.
+        `areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
       dur = await durationOf(out)
       await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
     }

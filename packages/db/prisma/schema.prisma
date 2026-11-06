@@ -234,7 +234,7 @@ model Cut {
   partIndex Int      @default(0)
   startS    Float
   endS      Float
-  cropX     Float    @default(50) // 0–100
+  background String  @default("blur") // blur: vídeo embaçado atrás | color: cor de fundo do vídeo
   filePath  String?
   status    String   @default("queued")
   createdAt DateTime @default(now())
