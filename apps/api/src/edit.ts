@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { prisma, STORAGE_DIR } from '@corte/db'
-import { CaptionTrackInput, ChangeRequestInput, MetadataInput, MetaField, MUSIC_STYLES, RegenInput, RestoreInput } from '@corte/shared'
+import { CaptionTrackInput, ChangeRequestInput, MetadataInput, MetaField, MUSIC_STYLES, RegenInput, RestoreInput, voiceKey } from '@corte/shared'
 import { requireAuth } from './auth.js'
 import { enabledFonts } from './settings.js'
 import { z } from 'zod'
@@ -200,6 +200,17 @@ export async function editRoutes(app: FastifyInstance) {
     if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
     // titlesOnly: só enunciados mudaram; o worker escreve os títulos sobre o vídeo atual, sem montar tudo de novo.
     const titlesOnly = (req.body as { titlesOnly?: boolean } | null)?.titlesOnly === true
+    // A voz escolhida (já salva) é outra que a da narração atual: narra de novo; o vídeo é montado logo depois.
+    // Projetos antigos sem voicedWith ficam como estão.
+    const o = JSON.parse(p.options) as { voicePreset?: string; voiceTone?: string; voicedWith?: string }
+    if (o.voicedWith !== undefined && o.voicedWith !== voiceKey(o)) {
+      await prisma.$transaction([
+        prisma.captionTrack.updateMany({ where: { projectId: p.id }, data: { isCurrent: false } }),
+        prisma.project.update({ where: { id: p.id }, data: { status: 'media' } }),
+        prisma.job.create({ data: { projectId: p.id, type: 'voice', stage: 'Na fila' } }),
+      ])
+      return reply.code(202).send({ ok: true, revoice: true })
+    }
     await prisma.job.create({ data: { projectId: p.id, type: 'render', stage: 'Na fila', ...(titlesOnly && { payload: JSON.stringify({ titlesOnly }) }) } })
     await prisma.project.update({ where: { id: p.id }, data: { status: 'rendering' } })
     return reply.code(202).send({ ok: true })

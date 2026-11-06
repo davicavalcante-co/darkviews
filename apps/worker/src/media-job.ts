@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, sniffFile, STORAGE_DIR, type Job } from '@corte/db'
 import { activeProviders, preferProvider, searchStock, StudioError, studioGenerate, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, VOICE_TONES } from '@corte/shared'
+import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { ensureOmniVoice, narrateWithClaude } from './omnivoice.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
@@ -229,6 +229,8 @@ export async function voice(job: Job) {
 
   // A trilha não entra na criação: é escolhida no editor e buscada no render.
 
-  await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering' } })
+  // Guarda com qual voz/ritmo a narração foi feita: o render compara com a escolha atual e narra de novo se mudou.
+  const fresh = JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: project.id }, select: { options: true } })).options)
+  await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering', options: JSON.stringify({ ...fresh, voicedWith: voiceKey(opts) }) } })
   await prisma.job.create({ data: { projectId: project.id, type: 'render', stage: 'Na fila' } })
 }

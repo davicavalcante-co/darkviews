@@ -232,3 +232,6 @@ export const VOICE_PRESETS: Record<string, { id: string; label: string }[]> = {
   macos_say: [{ id: 'Luciana', label: 'Luciana - Mulher' }],
   omnivoice: [{ id: 'mulher jovem, animada', label: 'Mulher jovem, animada' }, { id: 'homem maduro, calmo, voz grave', label: 'Homem maduro, calmo' }, { id: 'narradora de documentário, tom sério', label: 'Narradora de documentário' }],
 }
+
+// Voz e ritmo de uma narração, para saber se ela precisa ser feita de novo.
+export const voiceKey = (o: { voicePreset?: string; voiceTone?: string }) => `${o.voicePreset ?? ''}|${o.voiceTone ?? 'natural'}`

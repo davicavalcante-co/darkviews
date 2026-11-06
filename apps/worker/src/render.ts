@@ -188,8 +188,9 @@ export async function renderVideo(input: RenderInput) {
     let audio: string
     if (input.music) {
       args.push('-stream_loop', '-1', '-i', input.music)
-      // Música abaixa sozinha enquanto há fala e volta nas pausas (ducking).
-      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
+      // Música: cada faixa é nivelada no mesmo volume da voz (-16 LUFS), para o % do editor valer igual em qualquer trilha;
+      // depois abaixa um pouco enquanto há fala e volta nas pausas (ducking leve: com 8:1 ela sumia e trocar a trilha não fazia diferença).
+      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.05:ratio=3:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
     } else {
       audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
     }
