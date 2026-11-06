@@ -1090,3 +1090,9 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .idea-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
 .idea { gap: 8px; } .idea-title { font-size: 1rem; } .idea-hook { font-style: italic; color: var(--accent-text); }
 .idea .btn { align-self: flex-start; margin-top: auto; }
+
+/* Novo vídeo: escolher um vídeo analisado como referência */
+.pick-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow: auto; }
+.pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: var(--card); color: var(--fg); border: 1px solid var(--border); min-width: 0; }
+.pick-row:hover { border-color: var(--accent); }
+.pick-row > * { max-width: 100%; }

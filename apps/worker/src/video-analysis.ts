@@ -30,7 +30,7 @@ export async function runNextAnalysis(workerJobId: string | null) {
     await mkdir(thumbs, { recursive: true })
     const thumbPath = join(thumbs, `${next.id}.jpg`)
     await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-ss', String(Math.min(3, durationS * 0.1)), '-i', video, '-frames:v', '1', '-vf', 'scale=960:-2', thumbPath])
-    await prisma.videoAnalysis.update({ where: { id: next.id }, data: { title: got.title, durationS, thumbPath } })
+    await prisma.videoAnalysis.update({ where: { id: next.id }, data: { title: got.title, channel: got.channel, durationS, thumbPath } })
 
     await stage('Detectando cortes e transições')
     const cuts = await detectScenes(video)

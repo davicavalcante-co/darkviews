@@ -74,6 +74,8 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   const [editStyle, setEditStyle] = useState(o.editStyle ?? 'auto')
   const fileRef = useRef<HTMLInputElement>(null)
   const [link, setLink] = useState('')
+  const [analyses, setAnalyses] = useState<{ id: string; title: string | null; channel: string | null }[] | null>(null)
+  const pickAnalysis = () => api<{ id: string; title: string | null; channel: string | null; status: string }[]>('/analyses').then((l) => setAnalyses(l.filter((a) => a.status === 'done'))).catch(() => setAnalyses([]))
   const [video, setVideo] = useState<File | null>(null)
   const [images, setImages] = useState<Img[]>(() => (base?.assets ?? []).map((a) => ({ id: a.id, caption: a.userCaption ?? '', url: `/api/projects/${base!.id}/assets/${a.id}` })))
   const [minutes, setMinutes] = useState(base ? base.targetDurationS / 60 : Number(idea?.get('minutos')) || 3)
@@ -173,6 +175,19 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
               <input type="file" accept="video/mp4,video/quicktime,video/webm" disabled={!!link} onChange={(e) => pickVideo(e.target.files?.[0])} />
               <Icon name="tocar" size={14} /><span className="ellipsis">{video ? video.name : 'Enviar vídeo de referência'}</span>
             </label>
+            {!style && <button type="button" className="btn ghost" onClick={pickAnalysis}>Usar vídeo analisado</button>}
+            {analyses && (
+              <Modal open onClose={() => setAnalyses(null)} kicker="Referência" title="Vídeos analisados">
+                {analyses.length ? (
+                  <div className="pick-list">{analyses.map((a) => (
+                    <button type="button" key={a.id} className="pick-row" onClick={() => { setStyle(a); setAnalyses(null) }}>
+                      <b className="ellipsis">{a.title ?? 'Vídeo analisado'}</b>
+                      <small className="muted ellipsis">{a.channel ?? 'Canal desconhecido'}</small>
+                    </button>
+                  ))}</div>
+                ) : <p className="muted">Nenhum vídeo analisado ainda. Analise um vídeo na aba <a href="#/analises" onClick={() => setAnalyses(null)}>Análise</a>.</p>}
+              </Modal>
+            )}
           </div>
         )}
 

@@ -21,10 +21,11 @@ export async function download(url: string) {
   try {
     const { stdout } = await run('yt-dlp', [
       '--no-playlist', '--max-filesize', '2G', '-f', 'mp4/bestvideo*+bestaudio/best', '--merge-output-format', 'mp4',
-      '-o', join(dir, `${id}.%(ext)s`), '--print', 'before_dl:%(title)s', '--print', 'after_move:filepath', '--', url,
+      '-o', join(dir, `${id}.%(ext)s`), '--print', 'before_dl:%(title)s\t%(channel,uploader|)s', '--print', 'after_move:filepath', '--', url,
     ], { maxBuffer: 1024 * 1024, timeout: 30 * 60_000 })
     const lines = stdout.trim().split('\n')
-    return { path: lines.at(-1)!, title: lines.length > 1 ? lines[0] : null }
+    const [title, channel] = lines.length > 1 ? lines[0].split('\t') : []
+    return { path: lines.at(-1)!, title: title || null, channel: channel || null }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('yt-dlp não está instalado nesta máquina (veja o README)')
     throw new Error('Não foi possível baixar a referência: ' + ((e as { stderr?: string }).stderr ?? '').split('\n').filter(Boolean).pop())
