@@ -38,7 +38,7 @@ export async function cutRoutes(app: FastifyInstance) {
     const plan = planCuts(input, video.durationS)
     await prisma.$transaction([
       prisma.project.update({ where: { id: p.id }, data: { status: 'approved', approvedAt: p.approvedAt ?? new Date() } }),
-      prisma.cut.createMany({ data: plan.map((c) => ({ ...c, projectId: p.id, cropX: input.cropX, status: 'queued' })) }),
+      prisma.cut.createMany({ data: plan.map((c) => ({ ...c, projectId: p.id, background: input.background, status: 'queued' })) }),
       prisma.job.create({ data: { projectId: p.id, type: 'cuts', stage: 'Na fila' } }),
     ])
     return reply.code(202).send({ cuts: plan.length })
@@ -50,20 +50,20 @@ export async function cutRoutes(app: FastifyInstance) {
     const [cuts, job] = await Promise.all([
       prisma.cut.findMany({
         where: { projectId: p.id }, orderBy: [{ createdAt: 'desc' }, { platform: 'asc' }, { partIndex: 'asc' }],
-        select: { id: true, platform: true, partIndex: true, startS: true, endS: true, cropX: true, status: true, createdAt: true },
+        select: { id: true, platform: true, partIndex: true, startS: true, endS: true, background: true, status: true, createdAt: true },
       }),
       prisma.job.findFirst({ where: { projectId: p.id, status: { in: ['queued', 'running', 'paused'] } }, select: { type: true, stage: true, progress: true, status: true } }),
     ])
     return { status: p.status, approvedAt: p.approvedAt, job, cuts }
   })
 
-  // Refaz um corte com outro enquadramento.
+  // Refaz um corte com o outro fundo (embaçado ou cor).
   app.post<{ Params: { id: string; cutId: string } }>('/api/projects/:id/cuts/:cutId/redo', guard, async (req, reply) => {
     const p = await project(req)
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
     if (await busy(p.id)) return reply.code(409).send({ error: 'Já existe uma tarefa em andamento neste projeto' })
-    const { cropX } = RedoCutInput.parse(req.body)
-    const { count } = await prisma.cut.updateMany({ where: { id: req.params.cutId, projectId: p.id }, data: { cropX, status: 'queued', filePath: null } })
+    const { background } = RedoCutInput.parse(req.body)
+    const { count } = await prisma.cut.updateMany({ where: { id: req.params.cutId, projectId: p.id }, data: { background, status: 'queued', filePath: null } })
     if (!count) return reply.code(404).send({ error: 'Corte não encontrado' })
     await prisma.job.create({ data: { projectId: p.id, type: 'cuts', stage: 'Na fila' } })
     return reply.code(202).send({ ok: true })

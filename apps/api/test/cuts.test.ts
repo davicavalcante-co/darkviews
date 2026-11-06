@@ -10,7 +10,7 @@ const PASS = 'senha-forte-123'
 let app: Awaited<ReturnType<typeof buildApp>>
 let dono: Record<string, string>, outro: Record<string, string>
 let projectId = ''
-const body = { platforms: ['shorts', 'stories'], startS: 5, endS: 40, cropX: 50 }
+const body = { platforms: ['shorts', 'stories'], startS: 5, endS: 40 }
 
 async function login(email: string) {
   const res = await app.inject({ method: 'POST', url: '/api/auth/login', headers: { origin: ORIGIN }, payload: { email, password: PASS } })
