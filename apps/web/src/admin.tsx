@@ -51,18 +51,16 @@ function Profile() {
   return (
     <form className="panel profile" onSubmit={save} key={me.email + me.name}>
       <span className="panel-title">Meu perfil</span>
-      <div className="grid">
+      <div className="profile-grid">
         <label>Nome<input name="firstName" required maxLength={60} defaultValue={first} autoComplete="given-name" /></label>
         <label>Sobrenome<input name="lastName" maxLength={60} defaultValue={rest.join(' ')} autoComplete="family-name" /></label>
+        <label className="span2">E-mail<input name="email" type="email" required defaultValue={me.email} autoComplete="username" /></label>
+        <label><span>Senha nova <em>deixe vazio para manter</em></span><input name="newPassword" type="password" minLength={10} autoComplete="new-password" /></label>
+        <label><span>Repita a senha nova</span><input name="confirm" type="password" minLength={10} autoComplete="new-password" /></label>
+        <label><span>Senha atual <em>para confirmar</em></span><input name="currentPassword" type="password" required autoComplete="current-password" /></label>
+        <div className="profile-save"><button disabled={busy}>{busy ? 'Salvando…' : 'Salvar perfil'}</button></div>
       </div>
-      <label>E-mail<input name="email" type="email" required defaultValue={me.email} autoComplete="username" /></label>
-      <div className="grid">
-        <label>Senha nova <small className="muted">deixe vazio para manter</small><input name="newPassword" type="password" minLength={10} autoComplete="new-password" /></label>
-        <label>Repita a senha nova<input name="confirm" type="password" minLength={10} autoComplete="new-password" /></label>
-      </div>
-      <label>Senha atual <small className="muted">para confirmar</small><input name="currentPassword" type="password" required autoComplete="current-password" /></label>
       {msg && <p className={msg.ok ? 'notice ok-box' : 'notice alert'} role="status">{msg.ok ? '✓' : '✕'} {msg.text}</p>}
-      <div className="row wrap"><button disabled={busy}>{busy ? 'Salvando…' : 'Salvar perfil'}</button></div>
     </form>
   )
 }
