@@ -201,7 +201,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const p = await prisma.project.findFirst({
       where: projectScope(req, req.params.id),
       select: {
-        id: true, name: true, prompt: true, status: true, targetDurationS: true, options: true, createdAt: true,
+        id: true, name: true, prompt: true, status: true, reviewUntil: true, targetDurationS: true, options: true, createdAt: true,
         reference: { select: { sourceType: true, platform: true, url: true, durationS: true, styleProfile: true } },
         scripts: { orderBy: { version: 'desc' }, take: 1, select: { version: true, body: true, scenes: { orderBy: { index: 'asc' }, select: { index: true, startS: true, endS: true, narration: true, onScreenText: true, assetId: true, searchQuery: true, transition: true } } } },
         metadataFields: { where: { isCurrent: true }, select: { field: true, value: true } },
@@ -315,7 +315,7 @@ export async function projectRoutes(app: FastifyInstance) {
     }
     if (input.action === 'save') return { ok: true }
     const ok = input.action === 'approve'
-      ? await advance(p.id, 'script_review', { status: 'media' }, 'media')
+      ? await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, 'media')
       : await advance(p.id, 'script_review', { status: 'scripting' }, 'script', undefined, JSON.stringify({ hint: input.hint }))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
     return reply.code(202).send({ next: input.action === 'approve' ? 'imagens' : 'novo_roteiro' })
@@ -534,7 +534,7 @@ async function tokensByProject(ids: string[]) {
 function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
   return JSON.stringify({
     ...prev, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
-    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle,
+    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, ...(input.analysisId && { analysisId: input.analysisId }),
   })
 }
 

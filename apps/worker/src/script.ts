@@ -26,7 +26,9 @@ export async function script(job: Job) {
   })
   const images = project.assets.filter((a) => a.kind === 'user_image')
   const talkingVideo = project.assets.find((a) => a.kind === 'user_video')
-  const options = JSON.parse(project.options) as { fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
+  const options = JSON.parse(project.options) as { analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
+  // Vídeo da aba Análise escolhido como referência: a análise completa (roteiro, gancho, técnicas, ritmo...) guia o roteiro.
+  const analysis = options.analysisId ? await prisma.videoAnalysis.findFirst({ where: { id: options.analysisId, ownerId: project.ownerId, status: 'done' }, select: { title: true, channel: true, details: true } }) : null
   // Pasta temporária só com as imagens do usuário, para o Claude abrir (Read) sem ver o resto do disco.
   const dir = await mkdtemp(join(tmpdir(), 'corte-roteiro-'))
   try {
@@ -58,7 +60,8 @@ export async function script(job: Job) {
         'ênfase: frases curtas nos momentos fortes, ritmo variado, palavras concretas e visuais, fala de conversa (você, a gente), sem jargão;',
         'feche com um final que emocione ou surpreenda e um convite natural para comentar ou se inscrever.',
       ].join(' '),
-      `Pedido do cliente:\n"""\n${project.prompt}\n"""`,
+      `Pedido do cliente (siga fielmente: se trouxer título, gancho, ângulo e tópicos, use esse título e esse gancho e cubra todos os tópicos, na ordem):\n"""\n${project.prompt}\n"""`,
+      analysis?.details ? `Análise completa do vídeo de referência escolhido ("${analysis.title ?? 'sem título'}"${analysis.channel ? `, canal ${analysis.channel}` : ''}). Reproduza no roteiro novo a mesma estrutura, o tipo de gancho, as técnicas de roteiro, o tom, o ritmo e as pausas, as ênfases, a dinâmica para prender a atenção e a chamada para ação descritos aqui, com o conteúdo do pedido (não copie as falas):\n${analysis.details}` : '',
       // Refazer o roteiro pela tela de aprovação: a orientação do cliente manda.
       hint ? `O cliente leu o roteiro anterior e pediu para refazer assim:\n"""\n${hint}\n"""` : '',
       `Duração alvo: ${project.targetDurationS} s (nunca acima de 1080 s). As cenas devem ser contínuas: cada uma começa onde a anterior termina, a primeira em 0 e a última termina na duração alvo.`,
@@ -111,7 +114,7 @@ export async function script(job: Job) {
   } finally { await rm(dir, { recursive: true, force: true }) }
 
   // Para aqui: a pessoa lê o roteiro e aprova, edita ou pede para refazer (tela de Andamento).
-  await prisma.project.update({ where: { id: project.id }, data: { status: 'script_review' } })
+  await prisma.project.update({ where: { id: project.id }, data: { status: 'script_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } }) // 10 min para aprovar; passou, aprova sozinho
 }
 
 async function save(projectId: string, plan: ScriptOutput, imageIds: string[], talkingVideoId?: string) {
