@@ -464,7 +464,7 @@ function PresetCard({ p, on, onPick }: { p: (typeof PRESETS)[number]; on: boolea
 }
 
 // Alinhamento da legenda em ícones: vertical (cima, meio, baixo) e horizontal (esquerda, centro, direita).
-function AlignIcons({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function AlignIcons({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [v, h = 'center'] = value.split('-')
   const V: [string, string, string][] = [['top', 'Em cima', 'M4 4h16M8 9h8M10 14h4'], ['middle', 'No meio', 'M4 12h16M8 7h8M8 17h8'], ['bottom', 'Embaixo', 'M4 20h16M8 15h8M10 10h4']]
   const H: [string, string, string][] = [['left', 'À esquerda', 'M4 6h16M4 10h10M4 14h16M4 18h10'], ['center', 'Centralizada', 'M4 6h16M7 10h10M4 14h16M7 18h10'], ['right', 'À direita', 'M4 6h16M10 10h10M4 14h16M10 18h10']]

@@ -2,8 +2,9 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { PublicUser } from '@corte/shared'
 import { api, uploadFont } from './api'
 import { PageHead } from './ui'
+import { IdentityTab } from './identity'
 
-const TABS = [['users', 'Perfil'], ['fonts', 'Fontes'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
+const TABS = [['users', 'Perfil'], ['identity', 'Identidade'], ['fonts', 'Fontes'], ['audit', 'Auditoria'], ['logs', 'Logs']] as const
 type Tab = (typeof TABS)[number][0]
 
 async function act(fn: () => Promise<unknown>, after: () => unknown) {
@@ -20,6 +21,7 @@ export function AdminPage() {
           {TABS.map(([t, label]) => <button key={t} type="button" role="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{label}</button>)}
         </div>
         {tab === 'users' && <Profile />}
+        {tab === 'identity' && <IdentityTab />}
         {tab === 'fonts' && <Fonts />}
         {tab === 'audit' && <Audit />}
         {tab === 'logs' && <Logs />}

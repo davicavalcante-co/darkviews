@@ -13,6 +13,7 @@ import { EditPage } from './edit'
 import { ApprovePage } from './approve'
 import { VoicesPage } from './voices'
 import { AnalysesPage } from './analyses'
+import { BrainstormPage } from './brainstorm'
 import './style.css'
 
 type Session = { user: PublicUser; csrfToken: string }
@@ -114,6 +115,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
   const items = [
     { href: '#/', label: 'Painel', icon: 'painel', match: (h: string) => h === '' || h === '#/' },
     { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h.startsWith('#/novo') },
+    { href: '#/brainstorm', label: 'Brainstorm', icon: 'brainstorm', match: (h: string) => h === '#/brainstorm' },
     { href: '#/analises', label: 'Análise', icon: 'analise', match: (h: string) => h === '#/analises' },
     { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') || h.startsWith('#/editar/') },
     { href: '#/aprovados', label: 'Aprovados', icon: 'aprovacao', match: (h: string) => h === '#/aprovados' || h.startsWith('#/aprovar/') },
@@ -170,6 +172,7 @@ function App() {
         <div className="top-bar"><ThemeToggle /><ClaudePill isAdmin={isAdmin} /></div>
         {hash.startsWith('#/novo') ? <NewVideo key={hash} />
           : hash === '#/analises' ? <AnalysesPage />
+          : hash === '#/brainstorm' ? <BrainstormPage />
           : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />
           : hash === '#/vozes' ? <VoicesPage />
           : hash === '#/projetos' ? <ProjectList isAdmin={isAdmin} />

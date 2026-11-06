@@ -226,3 +226,25 @@ export const VOICE_PRESETS: Record<string, { id: string; label: string }[]> = {
 
 // Voz e ritmo de uma narração, para saber se ela precisa ser feita de novo.
 export const voiceKey = (o: { voicePreset?: string; voiceTone?: string }) => `${o.voicePreset ?? ''}|${o.voiceTone ?? 'natural'}`
+
+// ---------- Identidade visual: o padrão dos vídeos novos (legenda, enunciados e fundo). Dá para mudar em cada vídeo. ----------
+const hex6 = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+const ALIGN6 = /^(top|middle|bottom)-(left|center|right)$/
+export const Identity = z.object({
+  bgColor: hex6,
+  caption: z.object({
+    fontFamily: z.string().trim().min(1).max(60), fontWeight: z.union([z.literal(400), z.literal(700), z.literal(900)]), size: z.number().int().min(24).max(140),
+    color: hex6, highlightColor: hex6, highlightMode: z.enum(['palavra-chave', 'karaokê', 'manual']), position: z.string().regex(ALIGN6), outline: z.boolean(),
+  }),
+  title: z.object({
+    fontFamily: z.string().trim().min(1).max(60), size: z.number().int().min(60).max(260), color: hex6, bandColor: hex6,
+    bandSize: z.number().int().min(24).max(140), cardAlign: z.string().regex(ALIGN6), bandAlign: z.string().regex(ALIGN6), upper: z.boolean(),
+  }),
+})
+export type Identity = z.infer<typeof Identity>
+// Identidade padrão do sistema (vale até a pessoa salvar a dela).
+export const DEFAULT_IDENTITY: Identity = {
+  bgColor: '#111418',
+  caption: { fontFamily: 'Montserrat', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', highlightMode: 'palavra-chave', position: 'bottom-center', outline: true },
+  title: { fontFamily: 'Montserrat', size: 154, color: '#FFFFFF', bandColor: '#FFD43B', bandSize: 62, cardAlign: 'middle-center', bandAlign: 'top-left', upper: true },
+}

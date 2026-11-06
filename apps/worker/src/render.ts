@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, STORAGE_DIR, type Job } from '@corte/db'
-import { MAX_DURATION_S, MUSIC_STYLES } from '@corte/shared'
+import { DEFAULT_IDENTITY, MAX_DURATION_S, MUSIC_STYLES, type Identity } from '@corte/shared'
 import { pickMusic } from '@corte/providers'
 import { randomUUID } from 'node:crypto'
 import { buildSegments, toAss, type CaptionStyle, type Segment, type TimedScene, type TitleStyle } from './captions.js'
@@ -223,7 +223,6 @@ export function trackStyle(t: { fontFamily: string; fontWeight: number; size: nu
   return { fontFamily: t.fontFamily, fontWeight: t.fontWeight, size: t.size, color: t.color, highlightColor: t.highlightColor, highlightMode: t.highlightMode, position: t.position, outline: t.outline }
 }
 
-const DEFAULT_STYLE = { fontFamily: 'Montserrat', fontWeight: 700, size: 64, color: '#FFFFFF', highlightColor: '#FFD43B', position: 'bottom-center', highlightMode: 'palavra-chave' }
 
 // Queima só a legenda da fala sobre o vídeo base (que já tem cartelas e destaques). O áudio é copiado.
 export async function burnCaptions(src: string, ass: string, out: string) {
@@ -257,13 +256,17 @@ export async function render(job: Job) {
   const keywords = (project.metadataFields.find((m) => m.field === 'keywords')?.value ?? '').split(',').map((k) => k.trim())
 
   const timed = timedScenes(scenes, voices)
+  const identityRow = await prisma.setting.findUnique({ where: { key: `identity:${project.ownerId}` } })
+  const identity: Identity = identityRow ? { ...DEFAULT_IDENTITY, ...JSON.parse(identityRow.value) } : DEFAULT_IDENTITY
+  opts.titleStyle ??= identity.title
+  opts.bgColor ??= identity.bgColor
 
   // Usa a trilha de legenda atual (editada na aba Legendas) ou cria a primeira a partir da narração, no estilo padrão.
   let track = project.captionTracks[0]
   if (!track) {
     // Nova versão do vídeo: a fala mudou, então o texto é refeito, mas no mesmo estilo da legenda anterior.
     const last = await prisma.captionTrack.findFirst({ where: { projectId: project.id }, orderBy: { version: 'desc' } })
-    const style0 = last ? { fontFamily: last.fontFamily, fontWeight: last.fontWeight, size: last.size, color: last.color, highlightColor: last.highlightColor, position: last.position, highlightMode: last.highlightMode, outline: last.outline } : DEFAULT_STYLE
+    const style0 = last ? { fontFamily: last.fontFamily, fontWeight: last.fontWeight, size: last.size, color: last.color, highlightColor: last.highlightColor, position: last.position, highlightMode: last.highlightMode, outline: last.outline } : identity.caption
     const segs = buildSegments(timed, style0.highlightMode, keywords)
     track = await prisma.captionTrack.create({
       data: {
