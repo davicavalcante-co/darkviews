@@ -19,24 +19,19 @@ export type StockCandidate = {
 }
 type Active = { provider: string; config: Record<string, string>; secrets: Record<string, string> }
 
-// Integrações ligadas de uma categoria, por prioridade.
-// Vale a preferência do usuário; o que ele não configurou segue o padrão do admin; as locais (builtIn) vêm ligadas.
+// Integrações ligadas de uma categoria, por prioridade. Só valem as do próprio usuário;
+// o que ele nunca mexeu segue o catálogo (as gratuitas sem chave, builtIn, vêm ligadas).
 export async function activeProviders(category: IntegrationCategory, userId?: string | null): Promise<Active[]> {
-  const rows = await prisma.integration.findMany({
-    where: { category, OR: [{ ownerId: null }, ...(userId ? [{ ownerId: userId }] : [])] },
-    include: { secrets: true },
-  })
-  const list: (Active & { priority: number; mine: boolean })[] = []
+  const rows = userId ? await prisma.integration.findMany({ where: { category, ownerId: userId }, include: { secrets: true } }) : []
+  const list: (Active & { priority: number })[] = []
   for (const p of PROVIDERS.filter((x) => x.category === category)) {
-    const mine = userId ? rows.find((r) => r.provider === p.provider && r.ownerId === userId) : undefined
-    const row = mine ?? rows.find((r) => r.provider === p.provider && r.ownerId === null)
+    const row = rows.find((r) => r.provider === p.provider)
     if (row ? !row.enabled : !p.builtIn) continue
     const secrets = Object.fromEntries((row?.secrets ?? []).map((s) => [s.name, decryptSecret(s)]))
     if (p.secrets.some((n) => !secrets[n])) continue // ligada mas sem chave: não dá para usar
-    list.push({ provider: p.provider, priority: row?.priority ?? p.priority, mine: !!mine, config: { ...p.config, ...(row ? JSON.parse(row.config) : {}) }, secrets })
+    list.push({ provider: p.provider, priority: row?.priority ?? p.priority, config: { ...p.config, ...(row ? JSON.parse(row.config) : {}) }, secrets })
   }
-  // Mesma prioridade: a do usuário vem antes da do sistema.
-  return list.sort((a, b) => a.priority - b.priority || Number(b.mine) - Number(a.mine))
+  return list.sort((a, b) => a.priority - b.priority)
 }
 
 async function getJson(url: string, headers: Record<string, string> = {}) {
@@ -49,22 +44,6 @@ const warn = (provider: string, message: string, userId?: string | null) =>
 
 // ---------- bancos de imagens ----------
 /* eslint-disable @typescript-eslint/no-explicit-any */
-async function pexels(a: Active, query: string, kind: 'image' | 'video', orientation: string): Promise<StockCandidate[]> {
-  const h = { Authorization: a.secrets.api_key }
-  const q = `query=${encodeURIComponent(query)}&orientation=${orientation}&per_page=5`
-  if (kind === 'image') {
-    const d = await getJson(`https://api.pexels.com/v1/search?${q}`, h)
-    return d.photos.map((p: any) => ({
-      provider: 'pexels', sourceId: String(p.id), kind, url: p.src.original, pageUrl: p.url, description: p.alt || query,
-      color: p.avg_color, author: p.photographer, license: 'Pexels License',
-    }))
-  }
-  const d = await getJson(`https://api.pexels.com/videos/search?${q}`, h)
-  return d.videos.flatMap((v: any) => {
-    const files = v.video_files.filter((f: any) => f.file_type === 'video/mp4' && f.width).sort((x: any, y: any) => Math.abs(x.width - 1920) - Math.abs(y.width - 1920))
-    return files[0] ? [{ provider: 'pexels', sourceId: String(v.id), kind, url: files[0].link, pageUrl: v.url, description: query, color: null, author: v.user?.name ?? 'Pexels', license: 'Pexels License', durationS: v.duration }] : []
-  })
-}
 
 async function pixabay(a: Active, query: string, kind: 'image' | 'video', orientation: string): Promise<StockCandidate[]> {
   const q = `key=${encodeURIComponent(a.secrets.api_key)}&q=${encodeURIComponent(query)}&per_page=5&safesearch=true`
@@ -137,7 +116,7 @@ async function wikimedia(_a: Active, query: string, kind: 'image' | 'video', _or
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-const STOCK: Record<string, typeof pexels> = { pexels, pixabay, openverse, serper, web, wikimedia }
+const STOCK: Record<string, typeof pixabay> = { pixabay, openverse, serper, web, wikimedia }
 
 // Busca por níveis: os termos vêm do mais fiel (nível 1) ao mais genérico (nível 4). Para cada termo, tenta as fontes
 // por prioridade (web e Wikimedia antes dos bancos de foto genérica) e para quando já tem opções suficientes.
@@ -208,8 +187,7 @@ export const preferProvider = <T extends { provider: string }>(list: T[], provid
 }
 export async function synthesizeMany(items: { key: number; text: string; outBase: string }[], ffmpeg: string, userId?: string | null, choice: VoiceChoice = {}) {
   const result = new Map<number, { path: string; provider: string }>()
-  // OmniVoice é narrado à parte (via Claude Code); aqui vale a primeira voz que este código sabe gerar.
-  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider).filter((a) => a.provider !== 'omnivoice')
+  const [first] = preferProvider(await activeProviders('voz', userId), choice.provider)
   if (first && first.provider !== choice.provider) choice = { speed: choice.speed } // a voz escolhida era de outro fornecedor
   if (first?.provider === 'kokoro') {
     try {
@@ -364,19 +342,12 @@ export async function pickMusic(userId: string | null | undefined, tags: string 
 export async function testIntegration(provider: string, secrets: Record<string, string>, config: Record<string, string>) {
   const a: Active = { provider, secrets, config }
   try {
-    if (provider === 'pexels') await pexels(a, 'coffee', 'image', 'landscape')
-    else if (provider === 'pixabay') await pixabay(a, 'coffee', 'image', 'landscape')
+    if (provider === 'pixabay') await pixabay(a, 'coffee', 'image', 'landscape')
     else if (provider === 'serper') { if (!(await serper(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'openverse') { if (!(await openverse(a, 'coffee', 'image', 'landscape')).length) return false }
     else if (provider === 'elevenlabs') await getJson('https://api.elevenlabs.io/v1/user', { 'xi-api-key': secrets.api_key })
     else if (provider === 'openai_tts') await getJson('https://api.openai.com/v1/models/gpt-4o-mini-tts', { authorization: `Bearer ${secrets.api_key}` })
     else if (provider === 'google_tts') await getJson(`https://texttospeech.googleapis.com/v1/voices?languageCode=pt-BR&key=${encodeURIComponent(secrets.api_key)}`)
-    else if (provider === 'omnivoice') {
-      const api = process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
-      if (!(await fetch(`${api}/health`, { signal: AbortSignal.timeout(3000) })).ok) return false
-      const form = new FormData(); form.append('text', '.'); form.append('num_step', '1')
-      if ((await fetch(`${api}/generate`, { method: 'POST', body: form, signal: AbortSignal.timeout(120_000) })).status === 403) return false // licença não aceita
-    }
     else if (provider === 'kokoro') { await kokoroSpeak([{ text: 'Olá.', out: join(tmpdir(), `kokoro-teste-${process.pid}.wav`), voice: config.voice || 'pf_dora', speed: 1 }]) }
     else if (provider === 'piper') { await piperModel(config.voice || 'faber'); await run(PIPER_BIN, ['--help']) }
     else if (provider === 'macos_say') await run('say', ['-v', config.voice || 'Luciana', '-o', '/dev/null', 'ok'])
@@ -390,7 +361,7 @@ export async function testIntegration(provider: string, secrets: Record<string, 
 
 // ---------- VoiceStudio (aba Vozes): perfis de voz próprios, criados ou clonados ----------
 // Conversa com o servidor local do VoiceStudio por HTTP; o código dele (AGPL) não entra neste projeto.
-const STUDIO = () => process.env.OMNIVOICE_API_URL ?? 'http://127.0.0.1:3900'
+const STUDIO = () => process.env.VOICESTUDIO_URL ?? 'http://127.0.0.1:3900'
 export const STUDIO_FFMPEG = process.env.FFMPEG_PATH
   ?? (existsSync('/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg') ? '/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg' : 'ffmpeg')
 export const STUDIO_SAMPLE_TEXT = 'Olá! Esta é a minha voz. Vou narrar os seus vídeos com calma, clareza e muita naturalidade.'

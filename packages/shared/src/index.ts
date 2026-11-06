@@ -111,11 +111,6 @@ export const PROVIDERS: CatalogItem[] = [
     config: { voice: 'faber', speed: '1.08' }, choices: { voice: ['faber', 'cadu'] },
     help: 'Reserva: voz local mais simples (pode errar sons como lh e tr).',
     tutorial: ['Já vem pronta, sem cadastro.', 'Escolha a voz (Faber ou Cadu) e a velocidade da fala.', 'Clique em Testar e depois em Salvar.'] },
-  { provider: 'omnivoice', label: 'OmniVoice · via Claude Code', category: 'voz', tier: 'gratis', secrets: [], priority: 15,
-    config: { steps: '16', speed: '1.0' }, choices: { steps: ['8', '16', '32'] },
-    help: 'Voz neural local com design de voz, dirigida pelo Claude Code (skill omnivoice + MCP). Atenção: o modelo padrão é NÃO COMERCIAL (CC-BY-NC).',
-    signup: 'https://github.com/debpalash/OmniVoice-Studio',
-    tutorial: ['Uso só para testes pessoais: o modelo de voz padrão do OmniVoice não pode ser usado em vídeos de clientes pagantes (licença não comercial).', 'Precisa ser instalado pelo administrador no computador (uma vez).', 'Depois de instalado, ligue aqui e descreva a voz desejada em Novo vídeo.'] },
   { provider: 'elevenlabs', label: 'ElevenLabs', category: 'voz', tier: 'pago', secrets: ['api_key'], priority: 10,
     config: { voice_id: '' }, help: 'A voz mais humana do mercado. Plano grátis com cota pequena.', signup: 'https://elevenlabs.io/app/settings/api-keys',
     tutorial: ['Crie uma conta em elevenlabs.io (o plano grátis dá alguns minutos por mês).', 'Abra Settings → API Keys e clique em "Create API Key". Copie a chave.', 'Em Voices → Voice Library, escolha uma voz em português e copie o Voice ID.', 'Cole a chave e o ID da voz aqui, ligue o card e clique em Testar.'] },
@@ -136,9 +131,6 @@ export const PROVIDERS: CatalogItem[] = [
   { provider: 'wikimedia', label: 'Wikimedia Commons', category: 'banco_de_imagens', tier: 'gratis', secrets: [], builtIn: true, priority: 5, config: {},
     help: 'Fotos reais de pessoas, lugares e eventos com licença livre. Já vem ligada.',
     tutorial: ['Já vem pronta, sem cadastro.', 'O crédito de cada foto entra sozinho na descrição do vídeo.'] },
-  { provider: 'pexels', label: 'Pexels', category: 'banco_de_imagens', tier: 'gratis_chave', secrets: ['api_key'], priority: 10, config: {},
-    help: 'Fotos e vídeos reais, de graça. Crie a chave em 1 minuto.', signup: 'https://www.pexels.com/api/new/',
-    tutorial: ['Crie uma conta grátis em pexels.com.', 'Abra pexels.com/api/new, preencha o motivo de uso (ex.: "criação de vídeos") e envie.', 'Copie a chave que aparece na página.', 'Cole aqui, ligue o card e clique em Testar.'] },
   { provider: 'pixabay', label: 'Pixabay', category: 'banco_de_imagens', tier: 'gratis_chave', secrets: ['api_key'], priority: 20, config: {},
     help: 'Fotos e vídeos gratuitos.', signup: 'https://pixabay.com/api/docs/',
     tutorial: ['Crie uma conta grátis em pixabay.com.', 'Abra pixabay.com/api/docs: com a conta logada, a sua chave aparece na seção "Parameters" (key).', 'Copie a chave, cole aqui, ligue o card e clique em Testar.'] },
@@ -230,7 +222,6 @@ export const VOICE_PRESETS: Record<string, { id: string; label: string }[]> = {
   google_tts: [{ id: 'pt-BR-Neural2-A', label: 'Neural2-A - Mulher' }, { id: 'pt-BR-Neural2-C', label: 'Neural2-C - Mulher' }, { id: 'pt-BR-Neural2-B', label: 'Neural2-B - Homem' }],
   elevenlabs: [{ id: '', label: 'Voz configurada na sua conta' }],
   macos_say: [{ id: 'Luciana', label: 'Luciana - Mulher' }],
-  omnivoice: [{ id: 'mulher jovem, animada', label: 'Mulher jovem, animada' }, { id: 'homem maduro, calmo, voz grave', label: 'Homem maduro, calmo' }, { id: 'narradora de documentário, tom sério', label: 'Narradora de documentário' }],
 }
 
 // Voz e ritmo de uma narração, para saber se ela precisa ser feita de novo.

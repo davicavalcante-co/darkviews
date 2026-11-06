@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Start the OmniVoice FastAPI backend on 127.0.0.1:3900, detached, idempotent.
-# Honors $OMNIVOICE_HOME (default ~/OmniVoice-Studio).
+# Liga o servidor do VoiceStudio on 127.0.0.1:3900, detached, idempotent.
+# Usa $VOICESTUDIO_HOME (padrão vendor/voicestudio).
 #
 # Exit codes:
 #   0   success (already running, or freshly started + healthy within 60s)
-#   2   $OMNIVOICE_HOME doesn't exist
+#   2   $VOICESTUDIO_HOME doesn't exist
 #   3   port 3900 held but /health unresponsive (won't auto-kill — caller decides)
 #   4   backend started but /health didn't respond within 60s
 #   5   uvicorn process died during the wait
 
 set -euo pipefail
 
-HOME_DIR="${OMNIVOICE_HOME:-$(cd "$(dirname "$0")/../../../.." && pwd)/vendor/voicestudio}"
-URL="${OMNIVOICE_API_URL:-http://127.0.0.1:3900}"
+HOME_DIR="${VOICESTUDIO_HOME:-$(cd "$(dirname "$0")/.." && pwd)/vendor/voicestudio}"
+URL="${VOICESTUDIO_URL:-http://127.0.0.1:3900}"
 LOG="$HOME_DIR/backend.log"
 
 if [ ! -d "$HOME_DIR" ]; then
-  echo "OMNIVOICE_HOME not found: $HOME_DIR" >&2
-  echo "See references/mcp-setup.md for install steps." >&2
+  echo "VOICESTUDIO_HOME not found: $HOME_DIR" >&2
+  echo "Instale com: bash scripts/voicestudio-setup.sh" >&2
   exit 2
 fi
 
@@ -36,7 +36,7 @@ if [ -n "$BIND_PID" ]; then
   echo "  bound process: $BIND_CMD" >&2
   case "$BIND_CMD" in
     *uvicorn*main:app*)
-      echo "  → looks like a stale uvicorn from a previous run; consider scripts/stop-backend.sh" >&2
+      echo "  → looks like a stale uvicorn from a previous run; stop it first" >&2
       ;;
     *)
       echo "  → unknown process holds the port; resolve before re-running this script" >&2

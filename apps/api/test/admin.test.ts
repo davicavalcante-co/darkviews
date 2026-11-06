@@ -31,7 +31,6 @@ beforeAll(async () => {
 // Todas as rotas de admin. Rota nova de admin entra aqui.
 const ADMIN_ROUTES = [
   ['GET', '/api/admin/users'], ['POST', '/api/admin/users'], ['PATCH', '/api/admin/users/x'],
-  ['GET', '/api/admin/integrations'], ['PUT', '/api/admin/integrations/pexels'], ['POST', '/api/admin/integrations/pexels/test'],
   ['GET', '/api/admin/settings'], ['PUT', '/api/admin/settings'],
   ['GET', '/api/admin/fonts'], ['POST', '/api/admin/fonts'], ['PUT', '/api/admin/fonts/Inter'],
   ['GET', '/api/admin/audit'],
