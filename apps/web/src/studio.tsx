@@ -48,9 +48,9 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
-// Aba do método "Vídeo por cortes" (em teste; depois entra na mesma aba de criação).
+// Aba Dark Vídeos: método por cortes (em teste; depois entra na mesma aba de criação). Aceita ?analise= e a ideia do Brainstorm.
 export function CutsVideo() {
-  return <div className="studio"><Composer base={null} onCancel={() => {}} analysisId={null} cortes /></div>
+  return <div className="studio"><Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} cortes /></div>
 }
 
 export function NewVideo() {
@@ -154,7 +154,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">{cortes ? 'Novo método' : 'Estúdio'}</span><h1>{cortes ? 'Vídeo por cortes' : 'Novo vídeo'}</h1></div>
+        <div><span className="kicker">{cortes ? 'Novo método' : 'Estúdio'}</span><h1>{cortes ? 'Dark Vídeos' : 'Novo vídeo'}</h1></div>
         <span className="muted">até {maxMin} min</span>
       </div>
 
@@ -171,6 +171,15 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
             </label>
             {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
             <small className="muted">O sistema corta trechos aleatórios desses vídeos e monta a imagem (só com transição). Depois entra a narração e a legenda por cima.</small>
+            <div className="field-label">Roteiro no estilo de um vídeo analisado <span className="muted">opcional</span></div>
+            {style && (
+              <div className="style-pick">
+                <img src={`/api/analyses/${style.id}/thumb`} alt="" />
+                <div><small className="muted">Estilo da análise</small><b className="ellipsis">{style.title ?? 'Vídeo analisado'}</b></div>
+                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = cortes ? '#/cortes' : '#/novo' }}>Tirar</button>
+              </div>
+            )}
+            {!style && <button type="button" className="btn ghost" onClick={pickAnalysis}>Usar vídeo analisado</button>}
           </div>
         ) : base ? (
           <div className="field">
@@ -184,7 +193,7 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
               <div className="style-pick">
                 <img src={`/api/analyses/${style.id}/thumb`} alt="" />
                 <div><small className="muted">Estilo da análise</small><b className="ellipsis">{style.title ?? 'Vídeo analisado'}</b></div>
-                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = '#/novo' }}>Tirar</button>
+                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = cortes ? '#/cortes' : '#/novo' }}>Tirar</button>
               </div>
             )}
             <input value={link} onChange={(e) => setLink(e.target.value)} disabled={!!video} aria-label="Link de referência"
@@ -195,7 +204,9 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
               <Icon name="tocar" size={14} /><span className="ellipsis">{video ? video.name : 'Enviar vídeo de referência'}</span>
             </label>
             {!style && <button type="button" className="btn ghost" onClick={pickAnalysis}>Usar vídeo analisado</button>}
-            {analyses && (
+          </div>
+        )}
+        {analyses && (
               <Modal open onClose={() => setAnalyses(null)} kicker="Referência" title="Vídeos analisados">
                 {analyses.length ? (
                   <div className="pick-list">{analyses.map((a) => (
@@ -207,8 +218,6 @@ function Composer({ base, onCancel, analysisId, cortes }: { base: Base | null; o
                 ) : <p className="muted">Nenhum vídeo analisado ainda. Analise um vídeo na aba <a href="#/analises" onClick={() => setAnalyses(null)}>Análise</a>.</p>}
               </Modal>
             )}
-          </div>
-        )}
 
         {!cortes && <div className="field">
           <div className="field-label">Imagens <span className="muted">{images.length}</span></div>

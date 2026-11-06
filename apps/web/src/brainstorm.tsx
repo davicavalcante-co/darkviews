@@ -7,7 +7,7 @@ type Row = { id: string; niche: string; notes: string | null; status: 'queued' |
 
 // Ideia → Novo vídeo já preenchido com TUDO da ideia (título, gancho, ângulo, por que funciona, tópicos, público, observações),
 // para o roteiro sair fiel a ela. O prompt cabe em 5000 caracteres.
-function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
+function toNewVideo(b: Row, i: BrainstormResult['ideas'][number], page = '#/novo') {
   const prompt = [
     `Vídeo do Brainstorm do nicho "${b.niche}". Siga esta ideia fielmente.`,
     `Título: ${i.title}`,
@@ -19,7 +19,7 @@ function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
     b.notes ? `Observações do nicho: ${b.notes}` : '',
   ].filter(Boolean).join('\n\n').slice(0, 5000)
   const q = new URLSearchParams({ nome: i.title.slice(0, 120), prompt, minutos: String(Math.min(60, Math.max(0.5, i.durationMin))) })
-  return `#/novo?${q}`
+  return `${page}?${q}`
 }
 
 // Aba Brainstorm: escreve o nicho e recebe ideias de vídeo pesquisadas.
@@ -90,7 +90,7 @@ export function BrainstormPage() {
                 <p>{i.angle}</p>
                 <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
                 <details><summary>Tópicos · {i.durationMin} min</summary><ol className="an-list">{i.outline.map((o, j) => <li key={j}>{o}</li>)}</ol></details>
-                <a className="btn" href={toNewVideo(open, i)} onClick={() => setOpen(null)}>Criar vídeo com esta ideia</a>
+                <div className="row wrap"><a className="btn" href={toNewVideo(open, i)} onClick={() => setOpen(null)}>Criar vídeo com esta ideia</a><a className="btn ghost" href={toNewVideo(open, i, '#/cortes')} onClick={() => setOpen(null)}>Criar Dark Vídeo</a></div>
               </article>
             ))}</div>
           </div>
