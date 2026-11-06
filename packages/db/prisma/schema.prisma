@@ -415,6 +415,8 @@ model VideoAnalysis {
   platform  String?
   title     String?
   channel   String?
+  startedAt  DateTime?
+  finishedAt DateTime?
   thumbPath String?
   durationS Float?
   status    String   @default("queued") // queued | running | done | failed

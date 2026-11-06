@@ -9,6 +9,7 @@ import { regenPart } from './regen-part.js'
 import { cuts } from './cuts.js'
 import { runNextAnalysis } from './video-analysis.js'
 import { runNextBrainstorm } from './brainstorm.js'
+import { deadline } from './deadline.js'
 import { ClaudeUnavailable, recordStatus } from './claude.js'
 import { checkClaude, holdLongVideo } from './claude-check.js'
 
@@ -21,6 +22,10 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch
 const stuck = await prisma.job.findMany({ where: { status: 'running', lockedBy: { startsWith: hostname() + ':' } }, select: { id: true, lockedBy: true } })
 const dead = stuck.filter((j) => !alive(Number(j.lockedBy!.split(':').pop()))).map((j) => j.id)
 if (dead.length) await prisma.job.updateMany({ where: { id: { in: dead }, status: 'running' }, data: { status: 'queued', lockedBy: null } })
+// Análises e brainstorms interrompidos (sistema desligado no meio) voltam para a fila e recomeçam sozinhos.
+// shortcut: supõe um worker por máquina (uma conta por máquina); guardar o dono como nos jobs se um dia rodar mais de um.
+await prisma.videoAnalysis.updateMany({ where: { status: 'running' }, data: { status: 'queued', stage: 'Na fila (recomeçando)' } })
+await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { status: 'queued' } })
 
 async function runOne() {
   // Jobs pausados pelo limite do Claude voltam sozinhos para a fila no horário de reinício.
@@ -41,7 +46,7 @@ async function runOne() {
   try {
     const target = await inputDuration(job.projectId)
     await prisma.job.update({ where: { id: job.id }, data: { etaS: await estimateSeconds(job.type, target) } })
-    await HANDLERS[job.type](job)
+    await deadline(HANDLERS[job.type](job), 180) // 3 h: nem o vídeo mais longo com voz própria passa disso
     // A pessoa pediu para parar: esta etapa termina, as seguintes que ela criou são canceladas e o vídeo fica como "Falhou".
     if ((await prisma.job.findUnique({ where: { id: job.id }, select: { error: true } }))?.error === 'Parado por você') {
       await prisma.job.updateMany({ where: { projectId: job.projectId, status: 'queued' }, data: { status: 'failed', error: 'Parado por você', finishedAt: new Date() } })

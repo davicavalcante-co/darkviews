@@ -879,7 +879,7 @@ button.big { padding: 8px 12px; font-size: 14px; }
 .rec-done { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; } .rec-done audio { flex: 1; min-width: 220px; }
 .upload-link { align-self: flex-start; cursor: pointer; font-size: .85rem; }
 .voice-foot { flex-wrap: wrap; } .voice-foot button { white-space: nowrap; }
-.voice-foot button.link.danger, .brainstorm-row button.link.danger { background: none; color: var(--danger); }
+button.link.danger { background: none; color: var(--danger); }
 
 /* Barra lateral: mais espaço entre a logo e o menu, e entre os itens */
 .sidebar-top { gap: calc(var(--s5) + 8px); }

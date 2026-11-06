@@ -2,9 +2,9 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import type { AnalysisDetails } from '@corte/shared'
 import { api } from './api'
 import { Icon } from './icons'
-import { Modal, PageHead } from './ui'
+import { elapsed, Modal, PageHead, useNow } from './ui'
 
-type Card = { id: string; url: string; platform: string | null; title: string | null; durationS: number | null; status: 'queued' | 'running' | 'done' | 'failed'; stage: string | null; error: string | null; createdAt: string; hasThumb: boolean }
+type Card = { id: string; url: string; platform: string | null; title: string | null; durationS: number | null; status: 'queued' | 'running' | 'done' | 'failed'; stage: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; hasThumb: boolean }
 type Full = Card & { details: AnalysisDetails | null }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
@@ -19,6 +19,7 @@ export function AnalysesPage() {
   const load = () => api<Card[]>('/analyses').then(setRows).catch(() => setRows([]))
   useEffect(() => { load() }, [])
   // Enquanto alguma análise roda, atualiza a cada 4 s.
+  const now = useNow(rows?.some((r) => r.status === 'running'))
   useEffect(() => {
     if (!rows?.some((r) => r.status === 'queued' || r.status === 'running')) return
     const t = setTimeout(load, 4000)
@@ -50,7 +51,7 @@ export function AnalysesPage() {
           <button type="button" className="project-thumb" disabled={r.status !== 'done'} onClick={() => setOpen(r.id)} aria-label={`Abrir a análise de ${r.title ?? r.url}`}>
             {r.hasThumb ? <img src={`/api/analyses/${r.id}/thumb`} alt="" loading="lazy" /> : <span className="muted">{r.status === 'failed' ? 'Falhou' : 'Analisando…'}</span>}
             {r.durationS ? <span className="project-dur">{fmt(r.durationS)}</span> : null}
-            {(r.status === 'queued' || r.status === 'running') && <span className="analysis-stage"><span className="making-dot" />{r.stage ?? 'Na fila'}</span>}
+            {(r.status === 'queued' || r.status === 'running') && <span className="analysis-stage"><span className="making-dot" />{r.stage ?? 'Na fila'}{r.status === 'running' && r.startedAt ? ` · ${elapsed(r, now)}` : ''}</span>}
           </button>
           <div className="project-body">
             <button type="button" className="link analysis-title" disabled={r.status !== 'done'} onClick={() => setOpen(r.id)}>{r.title ?? r.url}</button>
@@ -58,8 +59,10 @@ export function AnalysesPage() {
               <span className="pill">{PLATFORM[r.platform ?? ''] ?? 'Link'}</span>
               {r.status === 'failed' && <span className="error small" title={r.error ?? ''}>Falhou</span>}
               {r.status === 'failed' && <button type="button" className="link" onClick={() => api(`/analyses/${r.id}/retry`, { method: 'POST' }).then(load)}>Tentar de novo</button>}
+              {r.status === 'done' && r.startedAt && <span className="muted small" title="Tempo da análise">{elapsed(r, now)}</span>}
               <span className="spacer" />
-              {r.status !== 'running' && <button type="button" className="link danger" onClick={() => api(`/analyses/${r.id}`, { method: 'DELETE' }).then(load)}>Excluir</button>}
+              {(r.status === 'queued' || r.status === 'running') && <button type="button" className="link" onClick={() => api(`/analyses/${r.id}/stop`, { method: 'POST' }).then(load)}>Parar</button>}
+              <button type="button" className="link danger" onClick={() => api(`/analyses/${r.id}`, { method: 'DELETE' }).then(load)}>Excluir</button>
             </div>
           </div>
         </article>

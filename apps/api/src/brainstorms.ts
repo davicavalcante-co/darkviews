@@ -22,10 +22,16 @@ export async function brainstormRoutes(app: FastifyInstance) {
     await prisma.brainstorm.update({ where: { id: b.id }, data: { status: 'queued', error: null } })
     return { ok: true }
   })
+  // Parar: tira da fila ou interrompe o que travou; depois dá para Tentar de novo ou Excluir.
+  app.post<{ Params: { id: string } }>('/api/brainstorms/:id/stop', guard, async (req, reply) => {
+    const x = await mine(req)
+    if (!x) return reply.code(404).send({ error: 'Não encontrado' })
+    await prisma.brainstorm.updateMany({ where: { id: x.id, status: { in: ['queued', 'running'] } }, data: { status: 'failed', error: 'Parado por você', finishedAt: new Date() } })
+    return { ok: true }
+  })
   app.delete<{ Params: { id: string } }>('/api/brainstorms/:id', guard, async (req, reply) => {
     const b = await mine(req)
     if (!b) return reply.code(404).send({ error: 'Não encontrado' })
-    if (b.status === 'running') return reply.code(409).send({ error: 'Espere terminar' })
     await prisma.brainstorm.delete({ where: { id: b.id } })
     return { ok: true }
   })

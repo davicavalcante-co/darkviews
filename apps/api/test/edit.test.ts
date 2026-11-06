@@ -252,5 +252,10 @@ describe('identidade e brainstorm', () => {
     expect(b).toMatchObject({ status: 'queued', startedAt: null, finishedAt: null, tokens: null })
     expect((await app.inject({ url: '/api/brainstorms', headers: outro })).json()).toEqual([])
     expect((await app.inject({ method: 'DELETE', url: `/api/brainstorms/${b.id}`, headers: outro })).statusCode).toBe(404)
+    // Parar: travado ou na fila vira "falhou" e pode tentar de novo
+    expect((await app.inject({ method: 'POST', url: `/api/brainstorms/${b.id}/stop`, headers: outro })).statusCode).toBe(404)
+    await app.inject({ method: 'POST', url: `/api/brainstorms/${b.id}/stop`, headers: dono })
+    expect((await app.inject({ url: '/api/brainstorms', headers: dono })).json()[0]).toMatchObject({ status: 'failed', error: 'Parado por você' })
+    expect((await app.inject({ method: 'POST', url: `/api/brainstorms/${b.id}/retry`, headers: dono })).statusCode).toBe(200)
   })
 })

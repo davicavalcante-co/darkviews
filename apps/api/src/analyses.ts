@@ -7,8 +7,8 @@ import { detectPlatform } from '@corte/shared'
 import { requireAuth } from './auth.js'
 
 const Url = z.object({ url: z.string().trim().max(500).refine((v) => !!detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok') })
-const card = (a: { id: string; url: string; platform: string | null; title: string | null; channel: string | null; durationS: number | null; status: string; stage: string | null; error: string | null; createdAt: Date; thumbPath: string | null }) =>
-  ({ id: a.id, url: a.url, platform: a.platform, title: a.title, channel: a.channel, durationS: a.durationS, status: a.status, stage: a.stage, error: a.error, createdAt: a.createdAt, hasThumb: !!a.thumbPath })
+const card = (a: { id: string; url: string; platform: string | null; title: string | null; channel: string | null; startedAt: Date | null; finishedAt: Date | null; durationS: number | null; status: string; stage: string | null; error: string | null; createdAt: Date; thumbPath: string | null }) =>
+  ({ id: a.id, url: a.url, platform: a.platform, title: a.title, channel: a.channel, startedAt: a.startedAt, finishedAt: a.finishedAt, durationS: a.durationS, status: a.status, stage: a.stage, error: a.error, createdAt: a.createdAt, hasThumb: !!a.thumbPath })
 
 // Aba Análise: envia um link, o worker analisa e o card guarda tudo para usar o estilo num vídeo novo.
 export async function analysisRoutes(app: FastifyInstance) {
@@ -44,10 +44,16 @@ export async function analysisRoutes(app: FastifyInstance) {
     return { ok: true }
   })
 
+  // Parar: tira da fila ou interrompe o que travou; depois dá para Tentar de novo ou Excluir.
+  app.post<{ Params: { id: string } }>('/api/analyses/:id/stop', guard, async (req, reply) => {
+    const x = await mine(req)
+    if (!x) return reply.code(404).send({ error: 'Não encontrado' })
+    await prisma.videoAnalysis.updateMany({ where: { id: x.id, status: { in: ['queued', 'running'] } }, data: { status: 'failed', stage: null, error: 'Parado por você', finishedAt: new Date() } })
+    return { ok: true }
+  })
   app.delete<{ Params: { id: string } }>('/api/analyses/:id', guard, async (req, reply) => {
     const a = await mine(req)
     if (!a) return reply.code(404).send({ error: 'Análise não encontrada' })
-    if (a.status === 'running') return reply.code(409).send({ error: 'Espere a análise terminar' })
     await prisma.videoAnalysis.delete({ where: { id: a.id } })
     if (a.thumbPath) await rm(a.thumbPath, { force: true })
     return { ok: true }
