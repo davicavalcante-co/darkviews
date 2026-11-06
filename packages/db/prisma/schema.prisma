@@ -26,6 +26,7 @@ model User {
   changeRequests ChangeRequest[]
   integrations   Integration[]
   studioVoices   StudioVoice[]
+  analyses       VideoAnalysis[]
   @@map("users")
 }
 
@@ -402,4 +403,26 @@ model StudioVoice {
   updatedAt  DateTime @updatedAt
   @@index([ownerId])
   @@map("studio_voices")
+}
+
+// Aba Análise: um vídeo (link) analisado em detalhe. "Utilizar este estilo" leva o perfil para um vídeo novo.
+model VideoAnalysis {
+  id        String   @id @default(uuid())
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  url       String
+  platform  String?
+  title     String?
+  thumbPath String?
+  durationS Float?
+  status    String   @default("queued") // queued | running | done | failed
+  stage     String?
+  error     String?
+  profile   String?  // StyleProfile (o mesmo da referência de um projeto)
+  details   String?  // AnalysisDetails: tudo, organizado para o pop-up
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([ownerId])
+  @@index([status])
+  @@map("video_analyses")
 }

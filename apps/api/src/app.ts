@@ -17,6 +17,7 @@ import { claudeAuthRoutes } from './claude-auth.js'
 import { logRoutes } from './logs.js'
 import { claudeMcpRoutes } from './claude-mcp.js'
 import { voiceStudioRoutes } from './voice-studio.js'
+import { analysisRoutes } from './analyses.js'
 
 const SESSION_MS = 7 * 24 * 3600 * 1000
 const PUBLIC_MUTATIONS = new Set(['/api/auth/login', '/api/auth/setup'])
@@ -178,5 +179,6 @@ export async function buildApp() {
   await app.register(logRoutes)
   await app.register(claudeMcpRoutes)
   await app.register(voiceStudioRoutes)
+  await app.register(analysisRoutes)
   return app
 }

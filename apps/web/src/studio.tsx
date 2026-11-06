@@ -54,13 +54,15 @@ export function NewVideo() {
   const pick = (id: string, v?: number) => api<Base>(`/projects/${id}${v ? `?fromVersion=${v}` : ''}`).then((b) => { setBase(b); scrollTo({ top: 0, behavior: 'smooth' }) })
   return (
     <div className="studio">
-      <Composer key={`${base?.id ?? 'novo'}-${base?.fromVersion ?? ''}`} base={base} onCancel={() => setBase(null)} />
+      <Composer key={`${base?.id ?? 'novo'}-${base?.fromVersion ?? ''}`} base={base} onCancel={() => setBase(null)} analysisId={base ? null : new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} />
       <Creations onPick={pick} picked={base?.id ?? null} />
     </div>
   )
 }
 
-function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void }) {
+function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel: () => void; analysisId: string | null }) {
+  const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
+  useEffect(() => { if (analysisId) api<{ id: string; title: string | null; status: string }>(`/analyses/${analysisId}`).then((a) => a.status === 'done' && setStyle(a)).catch(() => {}) }, [analysisId])
   const o = (base?.options ?? {}) as { voicePreset?: string; voiceTone?: string; bgColor?: string; useStock?: boolean; editStyle?: string }
   const [name, setName] = useState(base?.name ?? '')
   const [prompt, setPrompt] = useState(base?.prompt ?? '')
@@ -121,6 +123,7 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
     body.append('targetDurationS', String(seconds))
     if (base) body.append('order', JSON.stringify(images.map((i) => (i.id ? { id: i.id, caption: i.caption } : { new: true, caption: i.caption }))))
     else {
+      if (style) body.append('analysisId', style.id)
       if (link) body.append('link', link)
       body.append('captions', JSON.stringify(images.map((i) => i.caption)))
       if (video) body.append('video', video)
@@ -153,6 +156,13 @@ function Composer({ base, onCancel }: { base: Base | null; onCancel: () => void 
         ) : (
         <div className="field">
             <div className="field-label">Referência <span className="muted">opcional</span></div>
+            {style && (
+              <div className="style-pick">
+                <img src={`/api/analyses/${style.id}/thumb`} alt="" />
+                <div><small className="muted">Estilo da análise</small><b className="ellipsis">{style.title ?? 'Vídeo analisado'}</b></div>
+                <button type="button" className="link" onClick={() => { setStyle(null); location.hash = '#/novo' }}>Tirar</button>
+              </div>
+            )}
             <input value={link} onChange={(e) => setLink(e.target.value)} disabled={!!video} aria-label="Link de referência"
               placeholder="Link do YouTube, Instagram, Kwai ou TikTok" />
             {link && <small className={platform ? 'ok' : 'error'}>{platform ? `Plataforma: ${PLATFORM_LABEL[platform]}` : 'Plataforma não suportada'}</small>}

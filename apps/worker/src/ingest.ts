@@ -13,7 +13,7 @@ async function stage(job: Job, stage: string, progress: number) {
 }
 
 // Argumentos separados, nunca concatenados num shell; o link já passou pela lista de domínios.
-async function download(url: string) {
+export async function download(url: string) {
   if (!detectPlatform(url)) throw new Error('Link fora da lista de plataformas permitidas')
   const dir = join(STORAGE_DIR, 'references')
   await mkdir(dir, { recursive: true })
@@ -21,16 +21,17 @@ async function download(url: string) {
   try {
     const { stdout } = await run('yt-dlp', [
       '--no-playlist', '--max-filesize', '2G', '-f', 'mp4/bestvideo*+bestaudio/best', '--merge-output-format', 'mp4',
-      '-o', join(dir, `${id}.%(ext)s`), '--print', 'after_move:filepath', '--', url,
+      '-o', join(dir, `${id}.%(ext)s`), '--print', 'before_dl:%(title)s', '--print', 'after_move:filepath', '--', url,
     ], { maxBuffer: 1024 * 1024, timeout: 30 * 60_000 })
-    return stdout.trim().split('\n').pop()!
+    const lines = stdout.trim().split('\n')
+    return { path: lines.at(-1)!, title: lines.length > 1 ? lines[0] : null }
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('yt-dlp não está instalado nesta máquina (veja o README)')
     throw new Error('Não foi possível baixar a referência: ' + ((e as { stderr?: string }).stderr ?? '').split('\n').filter(Boolean).pop())
   }
 }
 
-async function probeDuration(path: string) {
+export async function probeDuration(path: string) {
   try {
     const { stdout } = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', path])
     return Number(JSON.parse(stdout).format?.duration) || null
@@ -47,7 +48,7 @@ export async function ingest(job: Job) {
     let filePath = ref.filePath
     if (ref.sourceType === 'link') {
       await stage(job, 'Baixando referência', 10)
-      filePath = await download(ref.url!)
+      filePath = (await download(ref.url!)).path
       const type = await sniffFile(filePath)
       if (type?.kind !== 'video') { await rm(filePath, { force: true }); throw new Error('O link não devolveu um vídeo válido') }
     }
