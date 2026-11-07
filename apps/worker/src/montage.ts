@@ -5,6 +5,7 @@ import { prisma, projectDir, type Job } from '@corte/db'
 import { MAX_DURATION_S } from '@corte/shared'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { INTRO_S } from './media-job.js'
+import { checkCancel } from './cancel.js'
 
 const FPS = 30
 const FADE = 0.25 // transição: escurece e clareia rápido entre um corte e outro
@@ -64,6 +65,7 @@ export async function montage(job: Job) {
     const out = join(dir, `corte-${Date.now()}-${i}.mp4`)
     await run(FFMPEG, clipArgs(c.path, c.startS, c.lenS, out), { maxBuffer: 16 * 1024 * 1024 })
     await prisma.asset.create({ data: { projectId: project.id, kind: 'footage_cut', filePath: out, mime: 'video/mp4', durationS: c.lenS, sourceProvider: 'upload', sourceId: JSON.stringify(c), sortOrder: i } })
+    if (i % 10 === 0) await checkCancel(job.id)
     if (i % 10 === 0) await prisma.job.update({ where: { id: job.id }, data: { stage: `Cortando os vídeos enviados · corte ${i + 1} de ${cuts.length}`, progress: Math.round((i / cuts.length) * 95) } })
   }
   // Vídeo com falas: sem aprovação dos cortes (menos trabalho); vai direto para as cenas.

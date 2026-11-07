@@ -10,6 +10,7 @@ import { buildSegments, retimeSegments, toAss, type CaptionStyle, type Segment, 
 import { assertLibass, durationOf, FFMPEG, run } from './ffmpeg.js'
 import { ensureFont, FONTS_DIR } from './fonts.js'
 import { subjectMask } from './subject.js'
+import { checkCancel } from './cancel.js'
 
 const FPS = 30
 const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
@@ -365,7 +366,7 @@ export async function render(job: Job) {
     music, musicVolume: opts.musicVolume, sfxVolume: opts.sfxVolume, ass: toAss([], timed, style, undefined, true, opts.titleStyle), fontsDir: FONTS_DIR, out: base, cleanOut,
     // Vídeo com falas: monta por etapa (narrador, fala, narrador...).
     blockStarts: scenes.some((s) => s.asset?.kind === 'quote_video') ? quoteStages(scenes).map((st) => scenes.findIndex((s) => s.index === st.first)) : undefined,
-    onProgress: (p, stage) => prisma.job.update({ where: { id: job.id }, data: { stage: stage ?? (p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros'), progress: p } }),
+    onProgress: async (p, stage) => checkCancel(job.id).then(() => prisma.job.update({ where: { id: job.id }, data: { stage: stage ?? (p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros'), progress: p } })),
   })
   let out = base
   if (opts.captionsOn) {

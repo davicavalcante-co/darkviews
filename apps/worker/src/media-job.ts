@@ -11,6 +11,7 @@ import { MAX_DURATION_S, quoteStages, VOICE_TONES, voiceKey } from '@corte/share
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { clarity } from './media.js'
+import { checkCancel } from './cancel.js'
 
 const MAX_DOWNLOAD = 500 * 1024 * 1024
 export const INTRO_S = 3 // abertura: a cor de fundo esmaece para a 1ª imagem; a fala começa depois
@@ -48,7 +49,7 @@ export async function media(job: Job) {
   // Só imagens / só vídeos: o banco busca só esse tipo, seja o que o roteiro pediu.
   const mediaMode = (JSON.parse(project.options) as { mediaMode?: string }).mediaMode
   const dir = await projectDir(project.id, 'midia')
-  const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
+  const step = async (stage: string, progress: number) => { await checkCancel(job.id); await prisma.job.update({ where: { id: job.id }, data: { stage, progress } }) }
 
   // 1. Busca nos bancos (por prioridade) para cada cena que pede banco.
   await step('Buscando imagens', 5)
@@ -138,7 +139,7 @@ export async function voice(job: Job) {
   if (!script) throw new Error('Projeto sem roteiro')
   const dir = await projectDir(project.id, 'narracao')
   await mkdir(dir, { recursive: true })
-  const step = (stage: string, progress: number) => prisma.job.update({ where: { id: job.id }, data: { stage, progress } })
+  const step = async (stage: string, progress: number) => { await checkCancel(job.id); await prisma.job.update({ where: { id: job.id }, data: { stage, progress } }) }
 
   // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
@@ -159,6 +160,7 @@ export async function voice(job: Job) {
     for (const [n, s] of todo.entries()) {
       // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
       const left = n ? Math.round(((Date.now() - started) / n) * (todo.length - n) / 1000) : null
+      await checkCancel(job.id)
       await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
       // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, as cenas já narradas não são refeitas.
       const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${s.narration}`).digest('hex').slice(0, 16)
@@ -222,6 +224,7 @@ export async function voice(job: Job) {
     let best = made.get(s.index)!
     let score = await clarity(best.path, s.narration!)
     if (score === null) break // Whisper não instalado: segue sem conferir
+    await checkCancel(job.id)
     await prisma.job.update({ where: { id: job.id }, data: { stage: `Conferindo se a fala ficou clara · cena ${n + 1} de ${spoken.length}` } })
     const random = ['studio', 'elevenlabs', 'openai_tts'].includes(best.provider)
     for (let attempt = 1; random && score < 0.7 && attempt <= 2; attempt++) {
