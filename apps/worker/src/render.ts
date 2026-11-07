@@ -156,19 +156,31 @@ export async function renderVideo(input: RenderInput) {
       await ff(['-i', clips[0], '-c', 'copy', 'video.mp4'])
     } else {
       // Dissolvências entre as cenas: a transição k começa onde a cena k-1 terminaria, então a voz continua sincronizada.
-      let graph = clips.map((_, k) => `[${k}:v]settb=AVTB,setpts=PTS-STARTPTS[c${k}]`).join(';')
-      // Offsets pela duração real de cada clipe (arredondada em quadros): somar as durações das cenas deixava
-      // a transição passar do fim do trecho anterior e o FFmpeg cortava o resto do vídeo.
-      const lens = await Promise.all(clips.map((c) => durationOf(join(work, c))))
-      let prev = 'c0', offset = 0, chain = lens[0]
-      for (let k = 1; k < clips.length; k++) {
-        const [type, d] = into[k]!
-        offset = chain - d
-        chain = offset + lens[k]
-        graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${(Math.floor(offset * 1000) / 1000).toFixed(3)}[x${k}]`
-        prev = `x${k}`
+      // Offsets pela duração real de cada clipe. Em blocos de 40 clipes: um comando com 150+ entradas o FFmpeg não aguenta
+      // (vídeo longo falhava só no fim). Cada bloco termina com a sobra da transição seguinte, então juntar os blocos com a
+      // mesma transição dá o mesmo resultado de uma corrente só.
+      const chain = async (files: string[], into0: ([string, number] | null)[], out: string) => {
+        if (files.length === 1) return ff(['-i', files[0], '-c', 'copy', out])
+        let graph = files.map((_, k) => `[${k}:v]settb=AVTB,setpts=PTS-STARTPTS[c${k}]`).join(';')
+        const lens = await Promise.all(files.map((c) => durationOf(join(work, c))))
+        let prev = 'c0', offset = 0, acc = lens[0]
+        for (let k = 1; k < files.length; k++) {
+          const [type, d] = into0[k]!
+          offset = acc - d
+          acc = offset + lens[k]
+          graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${(Math.floor(offset * 1000) / 1000).toFixed(3)}[x${k}]`
+          prev = `x${k}`
+        }
+        await ff([...files.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', out])
       }
-      await ff([...clips.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', 'video.mp4'])
+      const SIZE = 40
+      const blocks: string[] = [], blockInto: ([string, number] | null)[] = []
+      for (let k = 0; k < clips.length; k += SIZE) {
+        const out = `bloco-${String(k / SIZE).padStart(3, '0')}.mp4`
+        await chain(clips.slice(k, k + SIZE), into.slice(k, k + SIZE), out)
+        blocks.push(out); blockInto.push(k === 0 ? null : into[k])
+      }
+      await chain(blocks, blockInto, 'video.mp4')
     }
     // O vídeo montado precisa ter a duração toda; se não tiver, para aqui com o motivo em vez de entregar um vídeo congelado.
     const built = await durationOf(join(work, 'video.mp4'))
