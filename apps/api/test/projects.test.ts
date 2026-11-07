@@ -76,7 +76,7 @@ describe('novo vídeo', () => {
     expect(r.json()).toMatchObject({ removed: 1, next: 'novos_cortes' })
     const after = await prisma.project.findUnique({ where: { id }, include: { assets: true, jobs: { orderBy: { createdAt: 'desc' }, take: 1 } } })
     expect(after!.assets.some((a) => a.id === cuts[0].id)).toBe(false) // reprovado apagado
-    expect(after!.assets.filter((a) => a.kind === 'footage_clip')).toHaveLength(2)
+    expect(after!.assets.filter((a) => a.kind === 'clip_video')).toHaveLength(2)
     expect(JSON.parse(after!.jobs[0].payload!)).toEqual({ count: 1 })
     expect(JSON.parse(after!.options).cutRanges).toHaveLength(1) // o trecho reprovado não é cortado de novo
     expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/cut-review`, headers: ana.headers, payload: {} })).statusCode).toBe(409)

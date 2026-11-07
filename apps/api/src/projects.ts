@@ -391,8 +391,8 @@ export async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/projects/:id/cut-review', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, reviewUntil: true } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
-    const clips = await prisma.asset.findMany({ where: { projectId: p.id, kind: { in: ['footage_cut', 'footage_clip'] } }, orderBy: [{ createdAt: 'asc' }, { sortOrder: 'asc' }], select: { id: true, kind: true, durationS: true } })
-    return { status: p.status, reviewUntil: p.reviewUntil, pending: clips.filter((c) => c.kind === 'footage_cut').map(({ id, durationS }) => ({ id, durationS })), approved: clips.filter((c) => c.kind === 'footage_clip').length }
+    const clips = await prisma.asset.findMany({ where: { projectId: p.id, kind: { in: ['footage_cut', 'clip_video'] } }, orderBy: [{ createdAt: 'asc' }, { sortOrder: 'asc' }], select: { id: true, kind: true, durationS: true } })
+    return { status: p.status, reviewUntil: p.reviewUntil, pending: clips.filter((c) => c.kind === 'footage_cut').map(({ id, durationS }) => ({ id, durationS })), approved: clips.filter((c) => c.kind === 'clip_video').length }
   })
 
   // Reprovados são apagados do sistema. Com reprovados, refill diz: 'new' faz cortes novos no lugar; 'loop' repete os aprovados.
@@ -408,7 +408,7 @@ export async function projectRoutes(app: FastifyInstance) {
       const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'cut_review' }, data: { status: 'media', reviewUntil: null, options: JSON.stringify({ ...opts, cutRanges: ranges }) } })
       if (!count) return false
       await tx.asset.deleteMany({ where: { id: { in: gone.map((g) => g.id) } } })
-      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'footage_clip' } })
+      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'clip_video' } })
       await tx.job.create({ data: { projectId: p.id, type: 'montage', stage: 'Na fila', payload: JSON.stringify(gone.length && refill === 'new' ? { count: gone.length } : { assemble: true }) } })
       return true
     })

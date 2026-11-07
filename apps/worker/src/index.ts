@@ -36,7 +36,7 @@ async function autoApprove() {
     const moved = await prisma.$transaction(async (tx) => {
       const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'cut_review' }, data: { status: 'media', reviewUntil: null } })
       if (!count) return 0
-      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'footage_clip' } })
+      await tx.asset.updateMany({ where: { projectId: p.id, kind: 'footage_cut' }, data: { kind: 'clip_video' } })
       await tx.job.create({ data: { projectId: p.id, type: 'montage', stage: 'Na fila', payload: JSON.stringify({ assemble: true }) } })
       return count
     })
