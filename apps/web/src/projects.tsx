@@ -494,6 +494,25 @@ function Retry({ id, error, hasVideo }: { id: string; error: string | null; hasV
   )
 }
 
+// Em criação (qualquer método, inclusive esperando aprovação): dá para cancelar. Para no próximo ponto seguro.
+const CREATING = ['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'quote_review', 'rendering']
+function CancelVideo({ id }: { id: string }) {
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  return (
+    <>
+      <button type="button" className="ghost-btn" onClick={() => setOpen(true)}>Cancelar vídeo</button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Cancelar este vídeo?">
+        <p>A criação para agora (no máximo ao fim da cena em andamento). O que já ficou pronto é guardado: depois dá para <b>Tentar de novo</b> de onde parou ou <b>Excluir</b>.</p>
+        <footer className="modal-actions"><span className="spacer" />
+          <button type="button" className="ghost-btn" onClick={() => setOpen(false)}>Voltar</button>
+          <button type="button" className="danger" disabled={busy} onClick={async () => { setBusy(true); await api(`/projects/${id}/cancel`, { method: 'POST' }).catch(() => {}); setBusy(false); setOpen(false) }}>{busy ? 'Cancelando…' : 'Cancelar vídeo'}</button>
+        </footer>
+      </Modal>
+    </>
+  )
+}
+
 export function Progress({ id }: { id: string }) {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [ev, setEv] = useState<ProgressEvent | null>(null)
@@ -518,6 +537,7 @@ export function Progress({ id }: { id: string }) {
   return (
     <div className="page">
       <PageHead back={{ href: '#/projetos', label: 'Projetos' }} kicker={STATUS_LABEL[ev.status]} title={name}>
+        {CREATING.includes(ev.status) && <CancelVideo id={id} />}
         {detail?.video && <>
           <a className="btn ghost" href={`/api/projects/${id}/video?download=1`}>Baixar MP4</a>
           <a className="btn ghost" href={`#/editar/${id}`}>Editar</a>

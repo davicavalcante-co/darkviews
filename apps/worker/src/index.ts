@@ -111,6 +111,8 @@ async function runOne() {
       return true
     }
     const message = e instanceof Error ? e.message : String(e)
+    // Cancelado pela pessoa: as próximas etapas que já estavam na fila também saem.
+    if (message === 'Parado por você') await prisma.job.updateMany({ where: { projectId: job.projectId, status: 'queued' }, data: { status: 'failed', error: message, finishedAt: new Date() } })
     console.error(`[worker] falhou ${job.id}: ${message}`)
     logEvent({ level: 'error', source: 'worker', kind: 'job', message: `${job.type} falhou: ${message}`, details: { jobId: job.id, projectId: job.projectId, stack: (e as Error).stack?.split('\n').slice(0, 8).join('\n'), stderr: String((e as { stderr?: string }).stderr ?? '').slice(-2000) } })
     await prisma.job.update({ where: { id: job.id }, data: { status: 'failed', error: message.slice(0, 500), finishedAt: new Date() } })
