@@ -51,11 +51,19 @@ function ago(iso: string) {
 // Aba em teste: o roteiro marca as falas exatas (de filme, série ou vídeo); você envia o corte de cada uma e o resto é o locutor.
 export function QuotesVideo() {
   return (
+    // Mesmo layout do Novo vídeo: o formulário à esquerda e, no lugar da lista de criações, o passo a passo.
     <div className="studio">
-      <div className="stack-sm">
-        <p className="notice">O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Depois de aprovar o roteiro, você envia o corte de cada fala; o locutor anuncia, espera 3 s, entra o corte com o áudio original e o locutor volta explicando. Fala sem corte é dita pelo locutor, com a frase na tela.</p>
-        <Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes />
-      </div>
+      <Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes />
+      <section className="panel quotes-help">
+        <h2 className="panel-title">Como funciona</h2>
+        <ol>
+          <li>Preencha ao lado como no Novo vídeo (nome, voz do locutor, prompt, duração) e clique em <b>Criar vídeo</b>.</li>
+          <li>O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Você aprova o roteiro.</li>
+          <li>Na tela <b>Falas do vídeo</b>, envie o corte de cada fala, ou escolha <b>Usar o locutor</b>.</li>
+          <li>No vídeo: o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original e o locutor volta explicando.</li>
+        </ol>
+        <p className="muted small">O que não é fala exata (abertura, explicações, final, "deixe seu like") é sempre o locutor.</p>
+      </section>
     </div>
   )
 }
