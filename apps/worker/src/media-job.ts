@@ -148,6 +148,8 @@ export async function voice(job: Job) {
   const opts = JSON.parse(project.options) as { voiceBrief?: string; voicePreset?: string; voiceTone?: string }
   const [chosenProvider, chosenVoice] = opts.voicePreset?.includes(':') ? opts.voicePreset.split(/:(.*)/s) : [undefined, opts.voicePreset]
   const directed = new Map<number, string>()
+  // A voz sintética às vezes engole a 1ª palavra: começar com "..." dá um respiro antes dela (não aparece na legenda).
+  const say = (t: string) => `... ${t.trim()}`
   let own: { name: string; profileId: string | null; speed: number } | null = null
 
   // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
@@ -163,12 +165,12 @@ export async function voice(job: Job) {
       await checkCancel(job.id)
       await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
       // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, as cenas já narradas não são refeitas.
-      const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${s.narration}`).digest('hex').slice(0, 16)
+      const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${say(s.narration!)}`).digest('hex').slice(0, 16)
       const out = join(dir, `voz-propria-${key}`)
       // Falha passageira (ex.: o Mac sem memória livre): espera e tenta de novo, até 6 vezes. Demora mais, mas a voz não muda.
       for (let attempt = 1; !existsSync(out + '.wav'); attempt++) {
         try {
-          await writeFile(out + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own.profileId, speed: own.speed }))
+          await writeFile(out + '.studio.wav', await studioGenerate({ text: say(s.narration!), profileId: own.profileId, speed: own.speed }))
           await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
         } catch (e) {
           logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index} (tentativa ${attempt} de 6): ${(e as Error).message}`, details: { jobId: job.id } })
@@ -191,7 +193,9 @@ export async function voice(job: Job) {
     const c = quoteOf(s)
     if (!c) continue
     const out = join(dir, `fala-${s.index}.wav`)
-    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-af', 'areverse,afade=t=in:d=0.6,areverse', '-ar', '48000', '-ac', '2', out]) // esmaece no fim
+    // O corte entra inteiro: o áudio dele como está (só esmaece no fim). Corte sem som: silêncio do mesmo tamanho.
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-af', 'areverse,afade=t=in:d=0.6,areverse', '-ar', '48000', '-ac', '2', out])
+      .catch(async () => run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', String(await durationOf(c.filePath)), out]))
     directed.set(s.index, out)
   }
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
@@ -210,7 +214,7 @@ export async function voice(job: Job) {
   const made = new Map<number, { path: string; provider: string }>()
   for (const [n, part] of parts.entries()) {
     await step(parts.length > 1 ? clips.length ? `Narração · etapa do narrador ${n + 1} de ${parts.length}` : `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
-    const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
+    const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: say(s.narration!), outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
       { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
     for (const [k, v] of got) made.set(k, v)
   }
@@ -231,11 +235,11 @@ export async function voice(job: Job) {
       const base = `${bases.get(s.index)}-clareza${attempt}`
       let file: string | null = null
       if (best.provider === 'studio' && own?.profileId) {
-        await writeFile(base + '.studio.wav', await studioGenerate({ text: s.narration!, profileId: own.profileId, speed: own.speed, seed: 42 + attempt }))
+        await writeFile(base + '.studio.wav', await studioGenerate({ text: say(s.narration!), profileId: own.profileId, speed: own.speed, seed: 42 + attempt }))
         await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', base + '.studio.wav', '-ar', '48000', '-ac', '2', base + '.wav'])
         file = base + '.wav'
       } else if (best.provider !== 'studio') {
-        file = (await synthesize(s.narration!, base, FFMPEG, project.ownerId, others.filter((o) => o !== best.provider), { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed }))?.path ?? null
+        file = (await synthesize(say(s.narration!), base, FFMPEG, project.ownerId, others.filter((o) => o !== best.provider), { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed }))?.path ?? null
       }
       const again = file ? await clarity(file, s.narration!) : null
       if (file && again !== null && again > score) { best = { path: file, provider: best.provider }; score = again }
@@ -263,10 +267,13 @@ export async function voice(job: Job) {
     if (v) {
       // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
       const out = bases.get(s.index)! + '.final.wav'
+      const clip = quoteOf(s)
       await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
-        // Corta só o silêncio do FIM (cortar o do começo comia a 1ª sílaba: "Em Assis" virava "sis"). O volume é igualado no render.
-        `areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+        // Narrador: corta só o silêncio do FIM (cortar o do começo comia a 1ª sílaba). Corte de fala enviado: nada é cortado.
+        `${clip ? '' : 'areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,'}adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
       dur = await durationOf(out)
+      // A cena do corte dura o vídeo inteiro dele (mesmo que passe do tempo pedido).
+      if (clip) dur = Math.max(dur, lead + (await durationOf(clip.filePath)) + tail)
       await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
     }
     await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
