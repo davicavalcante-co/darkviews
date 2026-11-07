@@ -58,7 +58,8 @@ describe('novo vídeo', () => {
   })
 
   it('vídeo com falas: depois do roteiro, cada fala recebe o corte ou vai com o locutor', async () => {
-    const res = await create(ana, { quotes: '1' })
+    expect((await create(ana, { quotes: '1' })).statusCode).toBe(400) // precisa do vídeo longo
+    const res = await create(ana, { quotes: '1' }, [['footage', MP4, 'serie.mp4']])
     const id = res.json().id
     expect(JSON.parse((await prisma.project.findUnique({ where: { id } }))!.options).quotes).toBe(true)
     const q = (text: string) => JSON.stringify({ type: 'quote', text, source: 'Série X, Jesus' })
@@ -80,10 +81,21 @@ describe('novo vídeo', () => {
     expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review`, headers: ana.headers })).statusCode).toBe(202)
     const p = await prisma.project.findUnique({ where: { id }, include: { jobs: { orderBy: { createdAt: 'desc' }, take: 1 }, scripts: { include: { scenes: { orderBy: { index: 'asc' }, include: { asset: true } } } } } })
     expect(p!.status).toBe('media')
-    expect(p!.jobs[0].type).toBe('media')
+    expect(p!.jobs[0].type).toBe('montage') // só vídeo: cortes do vídeo longo, sem busca de imagens
     const [, comCorte, semCorte] = p!.scripts[0].scenes
     expect(comCorte.asset!.kind).toBe('quote_video')
     expect(JSON.parse(semCorte.searchQuery!)).toEqual({ type: 'text_card', text: '“Vinde a mim”' }) // sem corte: locutor, frase na tela
+
+    // Trilha enviada na edição
+    const mp3 = Buffer.concat([Buffer.from('ID3'), Buffer.alloc(64)])
+    const fm = new FormData(); fm.append('music', new Blob([new Uint8Array(mp3)]), 'trilha.mp3')
+    const rq = new Request('http://x', { method: 'POST', body: fm })
+    await prisma.job.updateMany({ where: { projectId: id }, data: { status: 'done' } })
+    const mu = await app.inject({ method: 'POST', url: `/api/projects/${id}/music`, headers: { ...ana.headers, 'content-type': rq.headers.get('content-type')! }, payload: Buffer.from(await rq.arrayBuffer()) })
+    expect(mu.statusCode).toBe(201)
+    const withMusic = await prisma.project.findUnique({ where: { id }, include: { assets: { where: { kind: 'music' } } } })
+    expect(withMusic!.assets[0].filePath).toMatch(/\/midia\/trilha-enviada-[0-9a-f]{8}\.mp3$/)
+    expect(JSON.parse(withMusic!.options)).toMatchObject({ musicStyle: 'upload', musicPicked: 'upload' })
   })
 
   it('só vídeos com vídeos enviados: corta, aprova, apaga os reprovados e repõe ou repete', async () => {

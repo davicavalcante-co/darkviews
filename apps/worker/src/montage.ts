@@ -56,13 +56,20 @@ export async function montage(job: Job) {
   const taken = project.assets.filter((a) => a.kind !== 'user_video' && a.sourceId).map((a) => JSON.parse(a.sourceId!) as { path: string; startS: number; lenS: number })
   // Reprovados já foram apagados; os trechos deles ficam guardados nas opções para não serem cortados de novo.
   const avoid = (JSON.parse(project.options).cutRanges ?? []) as { path: string; startS: number; lenS: number }[]
-  const scenes = (project.scripts[0]?.scenes ?? []).length || Math.ceil(totalS / 5)
+  // Cenas que recebem corte: as do narrador (não as falas com corte próprio nem as cartelas).
+  const quotes = JSON.parse(project.options).quotes === true
+  const scenes = (project.scripts[0]?.scenes ?? []).filter((s) => !own(s)).length || Math.ceil(totalS / 5)
   const cuts = pickCuts(sources, (count ?? scenes) * 6, Math.random, [...taken, ...avoid]).slice(0, count ?? scenes)
   for (const [i, c] of cuts.entries()) {
     const out = join(dir, `corte-${Date.now()}-${i}.mp4`)
     await run(FFMPEG, clipArgs(c.path, c.startS, c.lenS, out), { maxBuffer: 16 * 1024 * 1024 })
     await prisma.asset.create({ data: { projectId: project.id, kind: 'footage_cut', filePath: out, mime: 'video/mp4', durationS: c.lenS, sourceProvider: 'upload', sourceId: JSON.stringify(c), sortOrder: i } })
     if (i % 10 === 0) await prisma.job.update({ where: { id: job.id }, data: { stage: `Cortando os vídeos enviados · corte ${i + 1} de ${cuts.length}`, progress: Math.round((i / cuts.length) * 95) } })
+  }
+  // Vídeo com falas: sem aprovação dos cortes (menos trabalho); vai direto para as cenas.
+  if (quotes) {
+    await prisma.asset.updateMany({ where: { projectId: project.id, kind: 'footage_cut' }, data: { kind: 'clip_video' } })
+    return assign(job, project.id, await prisma.asset.findMany({ where: { projectId: project.id, kind: 'clip_video' }, select: { id: true } }))
   }
   // Para aqui: a pessoa aprova ou reprova cada corte (10 min; passou, aprova sozinho).
   await prisma.project.update({ where: { id: project.id }, data: { status: 'cut_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } })
@@ -73,11 +80,18 @@ async function assign(job: Job, projectId: string, clips: { id: string }[]) {
   if (!clips.length) throw new Error('Nenhum corte aprovado. Faça novos cortes ou envie outros vídeos.')
   const script = await prisma.script.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, include: { scenes: { orderBy: { index: 'asc' } } } })
   let pool: { id: string }[] = []
-  for (const s of script?.scenes ?? []) {
+  const scenes = script?.scenes ?? []
+  for (const [i, s] of scenes.entries()) {
+    // Fala com corte e cartela ficam como estão; depois de uma fala, esmaece para o narrador.
+    const afterQuote = i > 0 && scenes[i - 1].searchQuery?.includes('"type":"quote"')
+    if (own(s)) { if (afterQuote) await prisma.scene.update({ where: { id: s.id }, data: { transition: 'fade' } }); continue }
     if (!pool.length) pool = [...clips].sort(() => Math.random() - 0.5)
     const c = pool.pop()!
-    await prisma.scene.update({ where: { id: s.id }, data: { assetId: c.id, transition: 'cut', motion: null, onScreenText: null } })
+    await prisma.scene.update({ where: { id: s.id }, data: { assetId: c.id, transition: afterQuote ? 'fade' : 'cut', motion: null, onScreenText: null } })
   }
   await prisma.job.update({ where: { id: job.id }, data: { stage: `${clips.length} cortes aprovados distribuídos nas cenas`, progress: 100 } })
   await prisma.job.create({ data: { projectId, type: 'voice', stage: 'Na fila' } })
 }
+
+// Cena que já tem a sua imagem: a fala com o corte enviado, ou uma cartela.
+const own = (s: { searchQuery: string | null }) => !!s.searchQuery && (s.searchQuery.includes('"type":"quote"') || s.searchQuery.includes('"type":"text_card"'))

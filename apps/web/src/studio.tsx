@@ -57,10 +57,11 @@ export function QuotesVideo() {
       <section className="panel quotes-help">
         <h2 className="panel-title">Como funciona</h2>
         <ol>
-          <li>Preencha ao lado como no Novo vídeo (nome, voz do locutor, prompt, duração) e clique em <b>Criar vídeo</b>.</li>
+          <li>Preencha ao lado (nome, voz do locutor, prompt, duração) e envie o <b>vídeo longo</b>: os cortes dele passam enquanto o narrador fala. Clique em <b>Criar vídeo</b>.</li>
           <li>O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Você aprova o roteiro.</li>
           <li>Na tela <b>Falas do vídeo</b>, envie o corte de cada fala, ou escolha <b>Usar o locutor</b>.</li>
-          <li>No vídeo: o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original e o locutor volta explicando.</li>
+          <li>No vídeo: abre com a cartela do título e a trilha; o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original, esmaece e o locutor volta explicando.</li>
+          <li>Sem fotos, sem busca de imagens e sem efeitos: só cortes secos e esmaecimento. A trilha você troca ou envia na edição.</li>
         </ol>
         <p className="muted small">O que não é fala exata (abertura, explicações, final, "deixe seu like") é sempre o locutor.</p>
       </section>
@@ -139,6 +140,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
     if (!(seconds >= 15 && seconds <= MAX_DURATION_S)) return setError(`Duração entre 15 segundos e ${maxMin} minutos`)
     if (link && !platform) return setError('Link precisa ser de YouTube, Instagram, Kwai ou TikTok')
     if (link && video) return setError('Use link ou vídeo de referência, não os dois')
+    if (quotes && !footage.length) return setError('Envie o vídeo longo de onde saem os cortes')
 
     const body = new FormData()
     body.append('name', name)
@@ -159,7 +161,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
     if (mediaMode !== 'videos') images.forEach((i) => i.file && body.append('images', i.file))
     body.append('mediaMode', mediaMode)
     if (quotes) body.append('quotes', '1')
-    if (mediaMode === 'videos' && !base) footage.forEach((f) => body.append('footage', f))
+    if ((mediaMode === 'videos' || quotes) && !base) footage.forEach((f) => body.append('footage', f))
 
     setBusy(true); setError('')
     try {
@@ -217,7 +219,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
               </Modal>
             )}
 
-        <div className="field">
+        {!quotes && <div className="field">
           <div className="field-label">Mídia do vídeo</div>
           <div className="choice-grid" role="radiogroup" aria-label="Mídia do vídeo">
             {([['mixed', 'Imagens e vídeos'], ['images', 'Só imagens'], ['videos', 'Só vídeos']] as const).map(([id, label]) => (
@@ -225,21 +227,21 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
             ))}
           </div>
           <small className="muted">{mediaMode === 'images' ? 'Só fotos (suas e dos bancos).' : mediaMode === 'videos' ? 'Só vídeos dos bancos ou, se você enviar vídeos abaixo, cortes dos seus vídeos para aprovar.' : 'Fotos e vídeos, como o sistema achar melhor.'}</small>
-        </div>
+        </div>}
 
-        {mediaMode === 'videos' && !base && (
+        {(mediaMode === 'videos' || quotes) && !base && (
           <div className="field">
-            <div className="field-label">Seus vídeos para cortar <span className="muted">{footage.length ? footage.length : 'opcional'}</span></div>
+            <div className="field-label">{quotes ? 'Vídeo longo para os cortes do narrador' : 'Seus vídeos para cortar'} <span className="muted">{footage.length ? footage.length : quotes ? 'obrigatório' : 'opcional'}</span></div>
             <label className="drop">
               <input type="file" multiple accept="video/mp4,video/quicktime,video/webm" onChange={(e) => { setFootage([...footage, ...(e.target.files ?? [])]); e.target.value = '' }} />
               <Icon name="tocar" size={14} /><span className="ellipsis">{footage.length ? footage.map((f) => f.name).join(', ') : 'Enviar vídeos longos'}</span>
             </label>
             {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
-            <small className="muted">O sistema corta trechos desses vídeos e mostra para você aprovar. Os reprovados são apagados. Os vídeos dos bancos não são cortados.</small>
+            <small className="muted">{quotes ? 'Enquanto o narrador fala, passam cortes aleatórios deste vídeo. Os cortes das falas você envia depois de aprovar o roteiro.' : 'O sistema corta trechos desses vídeos e mostra para você aprovar. Os reprovados são apagados. Os vídeos dos bancos não são cortados.'}</small>
           </div>
         )}
 
-        {mediaMode !== 'videos' && <div className="field">
+        {mediaMode !== 'videos' && !quotes && <div className="field">
           <div className="field-label">Imagens <span className="muted">{images.length}</span></div>
           <div className={`tiles-sm${dragging ? ' dragging' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
@@ -270,7 +272,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
           <textarea name="prompt" required maxLength={5000} rows={7} placeholder="Sobre o que é o vídeo, público, tom, chamada para ação…" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
 
-        {!footage.length && <div className="field">
+        {!footage.length && !quotes && <div className="field">
           <div className="field-label">Estilo de edição</div>
           <div className="choice-grid" role="radiogroup" aria-label="Estilo de edição">
             {EDIT_STYLES.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={editStyle === id} className="choice small-choice" onClick={() => setEditStyle(id)}>{label}</button>)}

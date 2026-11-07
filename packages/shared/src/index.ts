@@ -214,7 +214,7 @@ export * from './claude-usage'
 
 // ---------- Trilha sonora: estilos (termos de busca em inglês) ----------
 export const MUSIC_STYLES = [
-  { id: 'auto', label: 'Automático', tags: 'background' }, { id: 'lofi', label: 'Lo-fi', tags: 'lofi chill' },
+  { id: 'auto', label: 'Automático', tags: 'background' }, { id: 'upload', label: 'Enviada por você', tags: '' }, { id: 'lofi', label: 'Lo-fi', tags: 'lofi chill' },
   { id: 'eletronica', label: 'Eletrônica', tags: 'electronic' }, { id: 'rock', label: 'Rock', tags: 'rock' },
   { id: 'classica', label: 'Clássica', tags: 'classical piano' }, { id: 'cinematica', label: 'Cinema', tags: 'cinematic' },
   { id: 'epica', label: 'Épica', tags: 'epic orchestral' }, { id: 'acustica', label: 'Acústica', tags: 'acoustic guitar' },

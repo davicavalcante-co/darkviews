@@ -433,6 +433,7 @@ async function buildSfx(scenes: RenderScene[], into: ([string, number] | null)[]
 // musicPicked indefinido = projeto antigo, cuja trilha já veio da criação e fica como está.
 async function syncMusic(projectId: string, ownerId: string, opts: { musicStyle?: string; musicPicked?: string | null }, current: string | null, durationS: number) {
   const want = opts.musicStyle && opts.musicStyle !== 'none' ? MUSIC_STYLES.find((m) => m.id === opts.musicStyle) ?? MUSIC_STYLES[0] : null
+  if (want?.id === 'upload') return current // trilha enviada pela pessoa: nunca troca
   if (current && (!want || (opts.musicPicked !== undefined && opts.musicPicked !== want.id))) {
     await prisma.asset.deleteMany({ where: { projectId, kind: 'music' } })
     current = null

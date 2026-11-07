@@ -189,7 +189,7 @@ export async function voice(job: Job) {
     const c = quoteOf(s)
     if (!c) continue
     const out = join(dir, `fala-${s.index}.wav`)
-    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-ar', '48000', '-ac', '2', out])
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-af', 'areverse,afade=t=in:d=0.6,areverse', '-ar', '48000', '-ac', '2', out]) // esmaece no fim
     directed.set(s.index, out)
   }
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))

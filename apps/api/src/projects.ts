@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { mkdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
@@ -89,8 +89,10 @@ export async function projectRoutes(app: FastifyInstance) {
       // Método "Vídeo por cortes": os vídeos longos que vão ser cortados e montados.
       const footage = files.filter((f) => f.field === 'footage')
       // Só vídeos com vídeos enviados: os enviados são cortados e passam por aprovação (método por cortes).
-      const cortes = input.mediaMode === 'videos' && footage.length > 0
-      if (footage.length && input.mediaMode !== 'videos') throw httpError(400, 'Vídeos para cortar só no modo "Só vídeos"')
+      // Vídeo com falas: só vídeo (cortes do vídeo longo enviado + cortes das falas), sem busca de imagens.
+      if (input.quotes && !footage.length) throw httpError(400, 'Envie o vídeo longo de onde saem os cortes')
+      const cortes = (input.mediaMode === 'videos' || input.quotes) && footage.length > 0
+      if (footage.length && input.mediaMode !== 'videos' && !input.quotes) throw httpError(400, 'Vídeos para cortar só no modo "Só vídeos"')
       if (video.length > 1) throw httpError(400, 'Envie só um vídeo de referência')
       if (video.length && input.link) throw httpError(400, 'Use link ou vídeo de referência, não os dois')
       // Estilo de uma análise pronta: a referência já vem analisada; pula baixar e analisar e vai direto ao roteiro.
@@ -388,6 +390,30 @@ export async function projectRoutes(app: FastifyInstance) {
     ]))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
+  })
+
+  // Editor: a pessoa envia a própria trilha sonora (MP3, WAV, M4A ou OGG, até 50 MB). Vale no próximo render.
+  app.post<{ Params: { id: string } }>('/api/projects/:id/music', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, options: true, assets: { where: { kind: 'music' } }, jobs: { where: { status: { in: ['queued', 'running'] } }, select: { id: true } } } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.jobs.length) return reply.code(409).send({ error: 'Espere a tarefa em andamento terminar' })
+    const part = await req.file()
+    if (!part || part.fieldname !== 'music') return reply.code(400).send({ error: 'Envie o arquivo da trilha' })
+    const tmp = join(await projectDir(p.id, 'midia'), `trilha-enviada-${randomUUID().slice(0, 8)}`)
+    await pipeline(part.file, createWriteStream(tmp))
+    const head = (await readFile(tmp)).subarray(0, 12)
+    const ext = head.subarray(0, 3).toString() === 'ID3' || (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) ? 'mp3'
+      : head.subarray(0, 4).toString() === 'RIFF' && head.subarray(8, 12).toString() === 'WAVE' ? 'wav'
+      : head.subarray(4, 8).toString() === 'ftyp' ? 'm4a' : head.subarray(0, 4).toString() === 'OggS' ? 'ogg' : null
+    if (!ext || part.file.truncated || (await stat(tmp)).size > 50 * 1024 * 1024) { await rm(tmp, { force: true }); return reply.code(415).send({ error: 'A trilha precisa ser MP3, WAV, M4A ou OGG de até 50 MB' }) }
+    await rename(tmp, `${tmp}.${ext}`)
+    // A trilha anterior deste vídeo sai (a biblioteca de músicas compartilhada nunca é apagada).
+    await prisma.asset.deleteMany({ where: { id: { in: p.assets.map((a) => a.id) } } })
+    await Promise.all(p.assets.filter((a) => !a.filePath.startsWith(join(STORAGE_DIR, 'music'))).map((a) => rm(a.filePath, { force: true })))
+    await prisma.asset.create({ data: { projectId: p.id, kind: 'music', filePath: `${tmp}.${ext}`, mime: ext === 'mp3' ? 'audio/mpeg' : `audio/${ext === 'm4a' ? 'mp4' : ext}`, sourceProvider: 'upload', attribution: 'Trilha enviada por você' } })
+    const opts = JSON.parse(p.options)
+    await prisma.project.update({ where: { id: p.id }, data: { options: JSON.stringify({ ...opts, musicStyle: 'upload', musicPicked: 'upload', musicVolume: opts.musicVolume || 35, pendingChanges: [...(opts.pendingChanges ?? []), 'Trilha: enviada por você'] }) } })
+    return reply.code(201).send({ ok: true })
   })
 
   // ---------- Vídeo com falas: a pessoa envia o corte de cada fala ou deixa o locutor falar ----------
