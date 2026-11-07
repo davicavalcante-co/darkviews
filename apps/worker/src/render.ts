@@ -16,7 +16,7 @@ const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
 export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string; offsetS?: number }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
-export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number) => Promise<unknown> }
+export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number, stage?: string) => Promise<unknown> }
 
 // Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
 // Os cortes secos usam 1 quadro de transição (na prática, corte direto).
@@ -179,7 +179,9 @@ export async function renderVideo(input: RenderInput) {
         const out = `bloco-${String(k / SIZE).padStart(3, '0')}.mp4`
         await chain(clips.slice(k, k + SIZE), into.slice(k, k + SIZE), out)
         blocks.push(out); blockInto.push(k === 0 ? null : into[k])
+        await input.onProgress?.(75 + Math.round(((k + SIZE) / clips.length) * 3), `Juntando as cenas · bloco ${blocks.length} de ${Math.ceil(clips.length / SIZE)}`)
       }
+      await input.onProgress?.(78, 'Juntando os blocos num vídeo só (vídeo longo leva alguns minutos)')
       await chain(blocks, blockInto, 'video.mp4')
     }
     // O vídeo montado precisa ter a duração toda; se não tiver, para aqui com o motivo em vez de entregar um vídeo congelado.
@@ -356,7 +358,7 @@ export async function render(job: Job) {
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
     })),
     music, musicVolume: opts.musicVolume, sfxVolume: opts.sfxVolume, ass: toAss([], timed, style, undefined, true, opts.titleStyle), fontsDir: FONTS_DIR, out: base, cleanOut,
-    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros', progress: p } }),
+    onProgress: (p, stage) => prisma.job.update({ where: { id: job.id }, data: { stage: stage ?? (p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros'), progress: p } }),
   })
   let out = base
   if (opts.captionsOn) {
