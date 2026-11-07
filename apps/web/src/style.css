@@ -1128,3 +1128,20 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
 .quote-row { gap: 10px; } .quote-text { display: flex; flex-direction: column; gap: 4px; } .quote-clip { width: min(100%, 420px); border-radius: var(--radius); background: #000; }
 .quotes-help ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.5; }
 .stage-list { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+
+/* Brainstorm: ideias em carrossel, pop-up mais largo */
+.modal:has(.idea-carousel) { width: min(1100px, calc(100vw - 48px)); }
+.idea-carousel { display: flex; flex-direction: column; gap: 16px; }
+.idea-context summary { cursor: pointer; font-weight: 500; }
+.idea-context p, .idea-context ul { margin-top: 8px; }
+.carousel-row { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; gap: 16px; }
+.carousel-arrow { width: 48px; height: 48px !important; min-height: 48px; padding: 0 !important; border-radius: 50%; font-size: 28px; line-height: 1; background: var(--soft, var(--card)); color: var(--fg); border: 1px solid var(--border); }
+.carousel-arrow:hover { border-color: var(--accent); }
+.idea-big { gap: 12px; padding: 24px 28px; min-height: 320px; }
+.idea-big .idea-title { font-size: 1.4rem; line-height: 1.3; }
+.idea-big .idea-hook { font-size: 1.05rem; }
+.idea-actions { margin-top: auto; gap: 10px; }
+.carousel-dots { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.carousel-dots button { width: 10px; height: 10px !important; min-height: 10px; padding: 0 !important; border-radius: 50%; background: var(--border); border: 0; }
+.carousel-dots button.on { background: var(--accent-text); width: 24px; border-radius: 5px; }
+@media (max-width: 640px) { .carousel-row { grid-template-columns: 1fr; } .carousel-arrow { display: none; } }
