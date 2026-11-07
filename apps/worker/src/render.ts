@@ -15,7 +15,7 @@ import { checkCancel } from './cancel.js'
 const FPS = 30
 const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
-export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string; offsetS?: number }
+export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string; offsetS?: number; once?: boolean }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
 export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; blockStarts?: number[]; onProgress?: (p: number, stage?: string) => Promise<unknown> }
 
@@ -108,7 +108,8 @@ function clipArgs(s: RenderScene, i: number, out: string, extraS = 0): string[] 
   }
   if (s.kind === 'video') {
     // offsetS: de onde o trecho começa no vídeo (o vídeo enviado é distribuído pelas cenas sem voltar ao início).
-    return ['-stream_loop', '-1', '-ss', (s.offsetS ?? 0).toFixed(3), '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
+    // once: corte de fala enviado: toca uma vez só, inteiro (se a cena for maior, o último quadro fica parado).
+    return [...(s.once ? [] : ['-stream_loop', '-1']), '-ss', (s.offsetS ?? 0).toFixed(3), '-i', s.path!, '-t', len.toFixed(3), '-an', '-vf',
       `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS}${fade}`, ...X264, '-preset', 'veryfast', '-crf', '18', out]
   }
   // Cartela: a foto da cena vizinha desfocada e tingida com a cor de fundo (como as cartelas de capítulo das referências).
@@ -358,7 +359,7 @@ export async function render(job: Job) {
   if (!reuse && !retitle) await renderVideo({
     scenes: scenes.map((s) => ({
       // Começo e fim de cada cena no quadro exato: com 100+ cenas, arredondar cada duração separado somava atraso entre imagem e fala.
-      durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: offsets.get(s.index),
+      durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: offsets.get(s.index), once: s.asset?.kind === 'quote_video',
       kind: !s.asset ? 'card' : s.asset.kind.endsWith('video') ? 'video' : 'image',
       path: s.asset?.filePath ?? nearPhoto(s.index), transition: s.transition ?? 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor,
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
