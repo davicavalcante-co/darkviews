@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { BrainstormResult } from '@corte/shared'
 import { api } from './api'
 import { elapsed, Modal, PageHead, useNow } from './ui'
+import { Icon } from './icons'
 
 type Row = { id: string; niche: string; notes: string | null; status: 'queued' | 'running' | 'done' | 'failed'; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; tokens: number | null; result: BrainstormResult | null }
 
@@ -83,17 +84,17 @@ export function BrainstormPage() {
   )
 }
 
-// Ideias em carrossel: uma por vez, grande, com setas (e as setas do teclado). Público e tendências ficam recolhidos em cima.
+// Ideias em carrossel: duas por vez, com setas (e as setas do teclado). Público e tendências ficam recolhidos em cima.
 function IdeasModal({ b, onClose }: { b: Row; onClose: () => void }) {
   const ideas = b.result!.ideas
-  const [k, setK] = useState(0)
-  const go = (d: number) => setK((x) => (x + d + ideas.length) % ideas.length)
+  const pages = Math.ceil(ideas.length / 2)
+  const [page, setPage] = useState(0)
+  const go = (d: number) => setPage((x) => (x + d + pages) % pages)
   useEffect(() => {
     const key = (e: KeyboardEvent) => { if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1) }
     addEventListener('keydown', key)
     return () => removeEventListener('keydown', key)
-  }, [ideas.length])
-  const i = ideas[k]
+  }, [pages])
   return (
     <Modal open onClose={onClose} kicker={`Brainstorm · ${ideas.length} ideias`} title={b.niche} wide>
       <div className="idea-carousel">
@@ -103,23 +104,25 @@ function IdeasModal({ b, onClose }: { b: Row; onClose: () => void }) {
           <ul className="an-list">{b.result!.trends.map((t, n) => <li key={n}>{t}</li>)}</ul>
         </details>
         <div className="carousel-row">
-          <button type="button" className="carousel-arrow" aria-label="Ideia anterior" onClick={() => go(-1)}>‹</button>
-          <article className="an-block idea idea-big" aria-live="polite">
-            <span className="kicker">Ideia {k + 1} de {ideas.length} · {i.durationMin} min</span>
-            <h3 className="idea-title">{i.title}</h3>
-            <p className="idea-hook">“{i.hook}”</p>
-            <p>{i.angle}</p>
-            <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
-            <details><summary>Tópicos do roteiro ({i.outline.length})</summary><ol className="an-list">{i.outline.map((o, j) => <li key={j}>{o}</li>)}</ol></details>
-            <div className="row wrap idea-actions">
-              <a className="btn" href={toNewVideo(b, i)} onClick={onClose}>Criar vídeo com esta ideia</a>
-              <a className="btn ghost" href={toNewVideo(b, i, '#/falas')} onClick={onClose}>Usar no Vídeo com falas</a>
-            </div>
-          </article>
-          <button type="button" className="carousel-arrow" aria-label="Próxima ideia" onClick={() => go(1)}>›</button>
+          <button type="button" className="carousel-arrow" aria-label="Ideias anteriores" onClick={() => go(-1)}><Icon name="anterior" size={20} /></button>
+          <div className="carousel-page" aria-live="polite">{ideas.slice(page * 2, page * 2 + 2).map((i, j) => (
+            <article key={page * 2 + j} className="an-block idea idea-big">
+              <span className="kicker">Ideia {page * 2 + j + 1} de {ideas.length} · {i.durationMin} min</span>
+              <h3 className="idea-title">{i.title}</h3>
+              <p className="idea-hook">“{i.hook}”</p>
+              <p>{i.angle}</p>
+              <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
+              <details><summary>Tópicos do roteiro ({i.outline.length})</summary><ol className="an-list">{i.outline.map((o, n) => <li key={n}>{o}</li>)}</ol></details>
+              <div className="row wrap idea-actions">
+                <a className="btn" href={toNewVideo(b, i)} onClick={onClose}>Criar vídeo com esta ideia</a>
+                <a className="btn ghost" href={toNewVideo(b, i, '#/falas')} onClick={onClose}>Usar no Vídeo com falas</a>
+              </div>
+            </article>
+          ))}</div>
+          <button type="button" className="carousel-arrow" aria-label="Próximas ideias" onClick={() => go(1)}><Icon name="proximo" size={20} /></button>
         </div>
-        <div className="carousel-dots" role="tablist" aria-label="Ideias">{ideas.map((x, n) => (
-          <button key={n} type="button" role="tab" aria-selected={n === k} aria-label={`Ideia ${n + 1}: ${x.title}`} className={n === k ? 'on' : ''} onClick={() => setK(n)} />
+        <div className="carousel-dots" role="tablist" aria-label="Páginas de ideias">{Array.from({ length: pages }, (_, n) => (
+          <button key={n} type="button" role="tab" aria-selected={n === page} aria-label={`Ideias ${n * 2 + 1} e ${n * 2 + 2}`} className={n === page ? 'on' : ''} onClick={() => setPage(n)} />
         ))}</div>
       </div>
     </Modal>
