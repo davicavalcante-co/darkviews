@@ -337,8 +337,8 @@ export async function projectRoutes(app: FastifyInstance) {
     if (input.action === 'save') return { ok: true }
     const ok = input.action === 'approve'
       ? waitsQuotes(p.options)
-        // Vídeo com falas: para na tela das falas (10 min) antes das imagens.
-        ? (await prisma.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: { status: 'quote_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } })).count > 0
+        // Vídeo com falas: para na tela das falas, SEM prazo: só segue quando a pessoa clicar em Continuar.
+        ? (await prisma.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: { status: 'quote_review', reviewUntil: null } })).count > 0
         : await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, afterScript(p.options))
       : await advance(p.id, 'script_review', { status: 'scripting' }, 'script', undefined, JSON.stringify({ hint: input.hint }))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
@@ -440,10 +440,7 @@ export async function projectRoutes(app: FastifyInstance) {
     const part = await req.file()
     if (!part || part.fieldname !== 'footage') return reply.code(400).send({ error: 'Envie o vídeo longo' })
     const saved = await keep(await saveUpload(part), p.id, 'envios')
-    const first = !(await prisma.asset.count({ where: { projectId: p.id, kind: 'user_video' } }))
     await prisma.asset.create({ data: { projectId: p.id, kind: 'user_video', filePath: saved.path, mime: saved.mime } })
-    // O prazo de 10 min só começa quando chega o vídeo longo (sem ele não dá para montar).
-    if (first) await prisma.project.update({ where: { id: p.id }, data: { reviewUntil: new Date(Date.now() + 10 * 60_000) } })
     return reply.code(201).send({ ok: true })
   })
   app.post<{ Params: { id: string; index: string } }>('/api/projects/:id/quote-review/:index', { preHandler: requireAuth }, async (req, reply) => {

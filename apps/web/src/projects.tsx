@@ -252,14 +252,13 @@ function QuoteReview({ id }: { id: string }) {
           <h3>Envie o corte de cada fala</h3>
           <p className="muted">O corte entra com a imagem e o áudio originais, 3 s depois do locutor anunciar. Sem corte, o locutor fala a frase e ela aparece na tela.</p>
         </div>
-        {data.footage > 0 && <ReviewClock until={data.reviewUntil ? Date.parse(data.reviewUntil) : null} onExpire={load} />}
-        <button type="button" disabled={busy !== null || !data.footage} title={data.footage ? '' : 'Envie o vídeo longo primeiro'} onClick={() => act('all', () => api(`/projects/${id}/quote-review`, { method: 'POST' }))}>
+        <button type="button" disabled={busy !== null || !data.footage} title={data.footage ? '' : 'Envie o vídeo longo primeiro'} onClick={() => { if (pending && !confirm(`${pending} ${pending === 1 ? 'fala está' : 'falas estão'} sem corte e vão com o locutor. Continuar mesmo assim?`)) return; act('all', () => api(`/projects/${id}/quote-review`, { method: 'POST' })) }}>
           {busy === 'all' ? 'Enviando…' : pending ? `Continuar (${pending} com o locutor)` : 'Continuar'}
         </button>
       </div>
       {error && <p className="error" role="alert">{error}</p>}
       <article className="panel quote-row">
-        <div className="quote-text"><b>Vídeo longo (contexto)</b><small className="muted">Os cortes dele passam enquanto o narrador fala. {data.footage ? `${data.footage} enviado${data.footage > 1 ? 's' : ''}.` : 'Obrigatório para continuar (o prazo de 10 min começa a contar depois dele).'}</small></div>
+        <div className="quote-text"><b>Vídeo longo (contexto)</b><small className="muted">Os cortes dele passam enquanto o narrador fala. {data.footage ? `${data.footage} enviado${data.footage > 1 ? 's' : ''}.` : 'Obrigatório para continuar.'} Sem prazo: o vídeo só segue quando você clicar em Continuar.</small></div>
         <div className="row wrap"><span className="spacer" />
           <label className="btn ghost">{busy === -1 ? 'Enviando…' : data.footage ? 'Enviar outro' : 'Enviar vídeo longo'}
             <input type="file" hidden accept="video/mp4,video/quicktime,video/webm" disabled={busy !== null} onChange={(e) => {
