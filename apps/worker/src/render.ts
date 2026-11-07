@@ -250,7 +250,7 @@ export async function render(job: Job) {
   const scenes = project.scripts[0]?.scenes
   if (!scenes?.length) throw new Error('Projeto sem cenas')
   // captionsOn: a pessoa aplicou a legenda na aba Legendas. Até lá o vídeo sai sem a legenda da fala.
-  const opts = JSON.parse(project.options) as { method?: string; montage?: string; captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
+  const opts = JSON.parse(project.options) as { captionsOn?: boolean; bgColor?: string; musicVolume?: number; sfxVolume?: number; titleStyle?: TitleStyle; musicStyle?: string; musicPicked?: string | null; pendingChanges?: string[] }
   const { captionsOnly, titlesOnly } = JSON.parse(job.payload ?? '{}') as { captionsOnly?: boolean; titlesOnly?: boolean }
   const voices = new Map(project.assets.filter((a) => a.kind === 'voice').map((a) => [a.sortOrder, a]))
   let music = project.assets.find((a) => a.kind === 'music')?.filePath ?? null
@@ -335,14 +335,7 @@ export async function render(job: Job) {
     offsets.set(s.index, total > 1 ? at % total : 0)
     cursor.set(path, at + (s.endS - s.startS))
   }
-  // Método por cortes: a imagem é a montagem já pronta, lida em sequência pelo tempo da fala (sem cartelas, efeitos nem sons).
-  const montage = opts.method === 'cortes' && opts.montage && existsSync(opts.montage) ? opts.montage : null
-  if (!reuse && !retitle && montage) await renderVideo({
-    scenes: scenes.map((s) => ({ durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: onFrame(s.startS), kind: 'video' as const, path: montage, transition: 'cut', voice: voices.get(s.index)?.filePath ?? null, bg: opts.bgColor })),
-    music, musicVolume: opts.musicVolume, sfxVolume: 0, ass: toAss([], [], style), fontsDir: FONTS_DIR, out: base, cleanOut,
-    onProgress: (p) => prisma.job.update({ where: { id: job.id }, data: { stage: p < 80 ? 'Vídeo: encaixando a montagem na fala' : 'Áudio final: narração e trilha', progress: p } }),
-  })
-  else if (!reuse && !retitle) await renderVideo({
+  if (!reuse && !retitle) await renderVideo({
     scenes: scenes.map((s) => ({
       // Começo e fim de cada cena no quadro exato: com 100+ cenas, arredondar cada duração separado somava atraso entre imagem e fala.
       durationS: onFrame(s.endS) - onFrame(s.startS), offsetS: offsets.get(s.index),

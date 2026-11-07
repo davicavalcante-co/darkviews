@@ -40,7 +40,7 @@ export async function montage(job: Job) {
   const { count, assemble: join_ } = JSON.parse(job.payload ?? '{}') as { count?: number; assemble?: boolean }
   const project = await prisma.project.findUniqueOrThrow({
     where: { id: job.projectId },
-    include: { assets: { where: { kind: { in: ['user_video', 'footage_cut', 'footage_clip'] } } }, scripts: { orderBy: { version: 'desc' }, take: 1, include: { scenes: true } } },
+    include: { assets: { where: { kind: { in: ['user_video', 'footage_cut', 'clip_video'] } } }, scripts: { orderBy: { version: 'desc' }, take: 1, include: { scenes: true } } },
   })
   const uploads = project.assets.filter((a) => a.kind === 'user_video')
   if (!uploads.length) throw new Error('Envie pelo menos um vídeo para cortar')
@@ -49,14 +49,15 @@ export async function montage(job: Job) {
   const chars = (project.scripts[0]?.scenes ?? []).reduce((n, s) => n + (s.narration?.length ?? 0), 0)
   const totalS = Math.min(MAX_DURATION_S + 60, INTRO_S + (chars / 14) * 1.3 + 20)
   const dir = await projectDir(project.id, 'cortes-dos-envios')
-  if (join_) return assemble(job, project.id, project.assets.filter((a) => a.kind === 'footage_clip'), totalS, dir)
+  if (join_) return assign(job, project.id, project.assets.filter((a) => a.kind === 'clip_video'))
 
   // Trechos já usados (aprovados, pendentes ou reprovados antes) não voltam.
   const sources = await Promise.all(uploads.map(async (a) => ({ path: a.filePath, durationS: await durationOf(a.filePath) })))
   const taken = project.assets.filter((a) => a.kind !== 'user_video' && a.sourceId).map((a) => JSON.parse(a.sourceId!) as { path: string; startS: number; lenS: number })
   // Reprovados já foram apagados; os trechos deles ficam guardados nas opções para não serem cortados de novo.
   const avoid = (JSON.parse(project.options).cutRanges ?? []) as { path: string; startS: number; lenS: number }[]
-  const cuts = pickCuts(sources, count ? count * 4.5 : totalS, Math.random, [...taken, ...avoid])
+  const scenes = (project.scripts[0]?.scenes ?? []).length || Math.ceil(totalS / 5)
+  const cuts = pickCuts(sources, (count ?? scenes) * 6, Math.random, [...taken, ...avoid]).slice(0, count ?? scenes)
   for (const [i, c] of cuts.entries()) {
     const out = join(dir, `corte-${Date.now()}-${i}.mp4`)
     await run(FFMPEG, clipArgs(c.path, c.startS, c.lenS, out), { maxBuffer: 16 * 1024 * 1024 })
@@ -67,24 +68,16 @@ export async function montage(job: Job) {
   await prisma.project.update({ where: { id: project.id }, data: { status: 'cut_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } })
 }
 
-// Monta o vídeo com os cortes aprovados, em ordem aleatória, repetindo em loop se faltar tempo. Depois vem a narração.
-async function assemble(job: Job, projectId: string, clips: { filePath: string; durationS: number | null }[], totalS: number, dir: string) {
+// Igual aos outros modos: cada cena recebe um corte aprovado (em ordem aleatória; faltando, repete) e segue para a narração.
+async function assign(job: Job, projectId: string, clips: { id: string }[]) {
   if (!clips.length) throw new Error('Nenhum corte aprovado. Faça novos cortes ou envie outros vídeos.')
-  const order: string[] = []
-  for (let t = 0, round = [...clips]; t < totalS;) {
-    if (!round.length) round = [...clips]
-    const [c] = round.splice(Math.floor(Math.random() * round.length), 1)
-    order.push(c.filePath); t += c.durationS ?? 4
+  const script = await prisma.script.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, include: { scenes: { orderBy: { index: 'asc' } } } })
+  let pool: { id: string }[] = []
+  for (const s of script?.scenes ?? []) {
+    if (!pool.length) pool = [...clips].sort(() => Math.random() - 0.5)
+    const c = pool.pop()!
+    await prisma.scene.update({ where: { id: s.id }, data: { assetId: c.id, transition: 'cut', motion: null, onScreenText: null } })
   }
-  await prisma.job.update({ where: { id: job.id }, data: { stage: `Montando o vídeo com ${clips.length} cortes aprovados`, progress: 50 } })
-  const work = await mkdtemp(join(tmpdir(), 'darkviews-montagem-'))
-  try {
-    await writeFile(join(work, 'lista.txt'), order.map((f) => `file '${f}'`).join('\n'))
-    const file = join(dir, `montagem-${Date.now()}.mp4`)
-    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', 'lista.txt', '-c', 'copy', file], { cwd: work, maxBuffer: 16 * 1024 * 1024 })
-    const fresh = JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: projectId }, select: { options: true } })).options)
-    await prisma.project.update({ where: { id: projectId }, data: { options: JSON.stringify({ ...fresh, montage: file }) } })
-  } finally { await rm(work, { recursive: true, force: true }) }
-  // Vídeo pronto: agora a narração.
+  await prisma.job.update({ where: { id: job.id }, data: { stage: `${clips.length} cortes aprovados distribuídos nas cenas`, progress: 100 } })
   await prisma.job.create({ data: { projectId, type: 'voice', stage: 'Na fila' } })
 }
