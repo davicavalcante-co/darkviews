@@ -65,6 +65,8 @@ export const NewProjectInput = z.object({
   prompt: z.string().trim().min(1).max(5000),
   // Mídia do vídeo: imagens e vídeos (padrão), só imagens ou só vídeos. Só vídeos com vídeos enviados: o sistema corta os enviados.
   mediaMode: z.enum(['mixed', 'images', 'videos']).default('mixed'),
+  // Vídeo com falas (aba em teste): falas exatas entram com o corte original enviado pela pessoa.
+  quotes: z.enum(['0', '1']).optional().transform((v) => v === '1'),
   analysisId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)), // estilo vindo da aba Análise
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
@@ -82,7 +84,7 @@ export const NewProjectInput = z.object({
   }),
 })
 
-export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'quote_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
 export const ReviewInput = z.object({ rejected: z.array(z.number().int().min(0)).max(2000) })
 export type ProjectStatus = z.infer<typeof ProjectStatus>
 
@@ -264,3 +266,5 @@ export const DEFAULT_IDENTITY: Identity = {
 
 // Depois do roteiro aprovado: imagens (método principal) ou montagem dos cortes (método "Vídeo por cortes").
 export const afterScript = (options: string) => (JSON.parse(options) as { method?: string }).method === 'cortes' ? 'montage' : 'media'
+// Vídeo com falas: depois do roteiro, para na tela das falas (a pessoa envia os cortes) antes de seguir.
+export const waitsQuotes = (options: string) => (JSON.parse(options) as { quotes?: boolean }).quotes === true

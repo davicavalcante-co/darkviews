@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
 import { estimateSeconds, prisma, projectDir, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
-import { afterScript, detectPlatform, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
+import { afterScript, detectPlatform, waitsQuotes, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
 import { requireAuth } from './auth.js'
@@ -334,7 +334,10 @@ export async function projectRoutes(app: FastifyInstance) {
     }
     if (input.action === 'save') return { ok: true }
     const ok = input.action === 'approve'
-      ? await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, afterScript(p.options))
+      ? waitsQuotes(p.options)
+        // Vídeo com falas: para na tela das falas (10 min) antes das imagens.
+        ? (await prisma.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: { status: 'quote_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } })).count > 0
+        : await advance(p.id, 'script_review', { status: 'media', reviewUntil: null }, afterScript(p.options))
       : await advance(p.id, 'script_review', { status: 'scripting' }, 'script', undefined, JSON.stringify({ hint: input.hint }))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando a aprovação do roteiro' })
     return reply.code(202).send({ next: input.action === 'approve' ? 'imagens' : 'novo_roteiro' })
@@ -385,6 +388,45 @@ export async function projectRoutes(app: FastifyInstance) {
     ]))
     if (!ok) return reply.code(409).send({ error: 'Este vídeo não está esperando aprovação de imagens' })
     return reply.code(202).send({ next: scenes.length ? 'nova_busca' : 'narracao', replaced: scenes.length })
+  })
+
+  // ---------- Vídeo com falas: a pessoa envia o corte de cada fala ou deixa o locutor falar ----------
+  const quoteScenes = async (projectId: string) => {
+    const script = await prisma.script.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, include: { scenes: { orderBy: { index: 'asc' }, include: { asset: { select: { id: true, kind: true } } } } } })
+    return (script?.scenes ?? []).filter((s) => s.searchQuery && JSON.parse(s.searchQuery).type === 'quote')
+  }
+  app.get<{ Params: { id: string } }>('/api/projects/:id/quote-review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, reviewUntil: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    return {
+      status: p.status, reviewUntil: p.reviewUntil,
+      quotes: (await quoteScenes(p.id)).map((s) => { const q = JSON.parse(s.searchQuery!); return { index: s.index, text: q.text, source: q.source, clipId: s.asset?.kind === 'quote_video' ? s.asset.id : null, narrator: q.narrator === true } }),
+    }
+  })
+  app.post<{ Params: { id: string; index: string } }>('/api/projects/:id/quote-review/:index', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'quote_review') return reply.code(409).send({ error: 'Este vídeo não está esperando as falas' })
+    const scene = (await quoteScenes(p.id)).find((s) => s.index === Number(req.params.index))
+    if (!scene) return reply.code(404).send({ error: 'Fala não encontrada' })
+    const q = JSON.parse(scene.searchQuery!)
+    if (!req.isMultipart()) {
+      // Sem corte: o locutor fala a frase.
+      await prisma.scene.update({ where: { id: scene.id }, data: { assetId: null, searchQuery: JSON.stringify({ ...q, narrator: true }) } })
+      return { ok: true }
+    }
+    const part = await req.file()
+    if (!part || part.fieldname !== 'video') return reply.code(400).send({ error: 'Envie o vídeo do corte' })
+    const saved = await keep(await saveUpload(part), p.id, 'falas')
+    const asset = await prisma.asset.create({ data: { projectId: p.id, kind: 'quote_video', filePath: saved.path, mime: saved.mime, sortOrder: scene.index } })
+    await prisma.scene.update({ where: { id: scene.id }, data: { assetId: asset.id, searchQuery: JSON.stringify({ ...q, narrator: false }) } })
+    return reply.code(201).send({ ok: true })
+  })
+  app.post<{ Params: { id: string } }>('/api/projects/:id/quote-review', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    await finishQuotes(p.id, p.options)
+    return reply.code(202).send({ ok: true })
   })
 
   // ---------- Aprovação dos cortes (Só vídeos com vídeos enviados) ----------
@@ -584,7 +626,7 @@ async function tokensByProject(ids: string[]) {
 function optionsJson(input: z.infer<typeof NewProjectInput>, prev: Record<string, unknown> = {}) {
   return JSON.stringify({
     ...prev, voiceBrief: input.voiceBrief, voicePreset: input.voicePreset, voiceTone: input.voiceTone,
-    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, mediaMode: input.mediaMode, ...(input.analysisId && { analysisId: input.analysisId }),
+    bgColor: input.bgColor, useStock: input.useStock, editStyle: input.editStyle, mediaMode: input.mediaMode, ...(input.quotes && { quotes: true }), ...(input.analysisId && { analysisId: input.analysisId }),
   })
 }
 
@@ -612,3 +654,19 @@ const ScriptReviewInput = z.object({
   hint: z.string().trim().max(2000).optional(),
   scenes: z.array(z.object({ index: z.number().int().min(0), narration: z.string().trim().max(2000), onScreenText: z.string().trim().max(120).default('') })).max(500).optional(),
 }).refine((v) => v.action !== 'redo' || !!v.hint, { message: 'Diga como quer o roteiro novo', path: ['hint'] })
+
+// Falas sem corte enviado viram fala do locutor com a frase na tela; depois segue o caminho normal (imagens).
+export async function finishQuotes(projectId: string, options: string) {
+  const script = await prisma.script.findFirst({ where: { projectId }, orderBy: { version: 'desc' }, include: { scenes: { include: { asset: { select: { kind: true } } } } } })
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.project.updateMany({ where: { id: projectId, status: 'quote_review' }, data: { status: 'media', reviewUntil: null } })
+    if (!count) return false
+    for (const s of script?.scenes ?? []) {
+      const q = s.searchQuery ? JSON.parse(s.searchQuery) : null
+      if (q?.type === 'quote' && s.asset?.kind !== 'quote_video') await tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ type: 'text_card', text: `“${q.text}”` }) } })
+    }
+    await tx.job.create({ data: { projectId, type: afterScript(options), stage: 'Na fila' } })
+    return true
+  })
+}
+

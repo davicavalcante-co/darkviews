@@ -1125,3 +1125,4 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
 .dv-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }
 .dv-seek::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--accent-text); border: 0; }
 .composer-head > .muted { white-space: nowrap; }
+.quote-row { gap: 10px; } .quote-text { display: flex; flex-direction: column; gap: 4px; } .quote-clip { width: min(100%, 420px); border-radius: var(--radius); background: #000; }

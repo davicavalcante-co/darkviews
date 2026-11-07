@@ -154,7 +154,7 @@ export async function voice(job: Job) {
     own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
     // A voz escolhida narra o vídeo inteiro: sem ela, para (nunca troca por outra voz no meio).
     if (!own?.profileId) throw new Error('A voz escolhida não existe mais. Escolha outra voz no Novo vídeo ou no editor.')
-    const todo = scenes.filter((x) => x.narration?.trim())
+    const todo = scenes.filter((x) => x.narration?.trim() && !x.searchQuery?.includes('"type":"quote"')) // fala com corte usa o áudio original
     const started = Date.now()
     for (const [n, s] of todo.entries()) {
       // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
@@ -182,6 +182,16 @@ export async function voice(job: Job) {
   // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que a voz própria já narrou é reaproveitado.
   await step('Narração com a voz escolhida', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
+  // Vídeo com falas: a cena da fala usa o áudio do corte enviado (sem gerar voz).
+  const clips = await prisma.asset.findMany({ where: { projectId: project.id, kind: 'quote_video' } })
+  const quoteOf = (s: (typeof scenes)[number]) => clips.find((c) => c.id === s.assetId)
+  for (const s of scenes) {
+    const c = quoteOf(s)
+    if (!c) continue
+    const out = join(dir, `fala-${s.index}.wav`)
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-ar', '48000', '-ac', '2', out])
+    directed.set(s.index, out)
+  }
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   // Vídeo grande: narra em partes de ~3 min (sem cortar cena no meio), salva cada parte e passa para a próxima.
@@ -199,11 +209,11 @@ export async function voice(job: Job) {
       { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
     for (const [k, v] of got) made.set(k, v)
   }
-  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: quoteOf(scenes.find((s) => s.index === idx)!) ? 'fala' : 'studio' })
 
   // Fala clara: o Whisper ouve cada cena e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
   // e fica com a melhor. Kokoro e Piper sempre geram igual, então nelas só confere e avisa.
-  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim())
+  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim() && made.get(s.index)!.provider !== 'fala') // corte original: não confere
   const others = (await activeProviders('voz', project.ownerId)).map((a) => a.provider)
   for (const [n, s] of spoken.entries()) {
     let best = made.get(s.index)!
@@ -239,7 +249,8 @@ export async function voice(job: Job) {
     const next = scenes[i + 1]
     // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
     const lead = i === 0 ? INTRO_S : isNewContext(s) ? 0.25 : 0.05
-    const tail = next && isNewContext(next) ? 0.4 : 0.18
+    // Antes do corte de uma fala: pausa de 3 s depois do anúncio do locutor.
+    const tail = next && quoteOf(next) ? 3 : next && isNewContext(next) ? 0.4 : 0.18
     // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão 3 s (+ a abertura, se for a primeira).
     let dur = s.narration?.trim() ? s.endS - s.startS : (cardDefault ?? 3) + (i === 0 ? INTRO_S : 0)
     const v = made.get(s.index)

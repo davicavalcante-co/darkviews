@@ -26,7 +26,7 @@ export async function script(job: Job) {
   })
   const images = project.assets.filter((a) => a.kind === 'user_image')
   const talkingVideo = project.assets.find((a) => a.kind === 'user_video')
-  const options = JSON.parse(project.options) as { mediaMode?: string; method?: string; analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
+  const options = JSON.parse(project.options) as { quotes?: boolean; mediaMode?: string; method?: string; analysisId?: string; fontFamily?: string; highlightMode?: string; talkingHead?: 'stock' | 'upload'; useStock?: boolean; editStyle?: string }
   // Vídeo da aba Análise escolhido como referência: a análise completa (roteiro, gancho, técnicas, ritmo...) guia o roteiro.
   const analysis = options.analysisId ? await prisma.videoAnalysis.findFirst({ where: { id: options.analysisId, ownerId: project.ownerId, status: 'done' }, select: { title: true, channel: true, details: true } }) : null
   // Pasta temporária só com as imagens do usuário, para o Claude abrir (Read) sem ver o resto do disco.
@@ -75,6 +75,9 @@ export async function script(job: Job) {
       options.method === 'cortes'
         ? 'MÉTODO VÍDEO POR CORTES: a imagem será uma montagem de cortes aleatórios dos vídeos do cliente, sem relação cena a cena com a fala. Use media.type "user_video" em TODAS as cenas, sem cartelas (text_card) e com onScreenText vazio. Capriche só na narração; transição "cut" e sem movimento.'
         : EDIT_STYLE[options.editStyle ?? 'auto'],
+      options.quotes
+        ? 'VÍDEO COM FALAS REAIS: sempre que o vídeo trouxer uma fala exata de alguém de um filme, série ou vídeo (ex.: uma frase de Jesus numa série), faça uma cena SÓ com essa fala: media.type "quote", narration = a fala exata, text = a mesma fala, source = de onde ela é (obra, personagem, episódio/cena se souber). A cena anterior, na voz do narrador, anuncia a fala; a cena seguinte explica. Todo o resto (abertura, explicações, transições, final, peça like e inscrição) é narração normal com imagem. Não use quote para frases que não sejam citações exatas.'
+        : '',
       options.mediaMode === 'images' ? 'Use só fotos (kind "image"), nunca vídeo de banco.' : options.mediaMode === 'videos' ? 'Use só vídeos de banco (kind "video"), nunca foto parada.' : '',
       project.reference?.styleProfile ? `Perfil de estilo da referência (imite o estilo, não copie o conteúdo):\n${project.reference.styleProfile}` : 'Sem vídeo de referência: escolha um estilo adequado ao pedido.',
       images.length
@@ -130,7 +133,7 @@ async function save(projectId: string, plan: ScriptOutput, imageIds: string[], t
           create: plan.scenes.map((s, index) => ({
             index, startS: s.startS, endS: s.endS, narration: s.narration, onScreenText: s.onScreenText || null, transition: s.transition, motion: s.motion, easing: s.easing,
             assetId: s.media.type === 'user_image' ? imageIds[s.media.imageIndex] : s.media.type === 'user_video' ? talkingVideoId ?? null : null,
-            searchQuery: s.media.type === 'stock' ? JSON.stringify(s.media) : s.media.type === 'text_card' ? JSON.stringify(s.media) : null,
+            searchQuery: s.media.type === 'stock' || s.media.type === 'text_card' || s.media.type === 'quote' ? JSON.stringify(s.media) : null,
           })),
         },
       },

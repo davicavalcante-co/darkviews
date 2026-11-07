@@ -23,7 +23,7 @@ type Base = {
 }
 
 const STATUS: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', cut_review: 'Aprovar cortes', rendering: 'Criando vídeo',
+  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', cut_review: 'Aprovar cortes', quote_review: 'Enviar as falas', rendering: 'Criando vídeo',
   editing: 'Pronto · em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 // Estilo de edição: puxa o roteiro para um tipo de movimento e transição.
@@ -48,6 +48,18 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
+// Aba em teste: o roteiro marca as falas exatas (de filme, série ou vídeo); você envia o corte de cada uma e o resto é o locutor.
+export function QuotesVideo() {
+  return (
+    <div className="studio">
+      <div className="stack-sm">
+        <p className="notice">O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Depois de aprovar o roteiro, você envia o corte de cada fala; o locutor anuncia, espera 3 s, entra o corte com o áudio original e o locutor volta explicando. Fala sem corte é dita pelo locutor, com a frase na tela.</p>
+        <Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes />
+      </div>
+    </div>
+  )
+}
+
 export function NewVideo() {
   const [base, setBase] = useState<Base | null>(null)
   // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
@@ -60,7 +72,7 @@ export function NewVideo() {
   )
 }
 
-function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel: () => void; analysisId: string | null }) {
+function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; onCancel: () => void; analysisId: string | null; quotes?: boolean }) {
   // Só vídeos: vídeos enviados são cortados e os cortes passam por aprovação.
   const [footage, setFootage] = useState<File[]>([])
   const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
@@ -138,6 +150,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
     }
     if (mediaMode !== 'videos') images.forEach((i) => i.file && body.append('images', i.file))
     body.append('mediaMode', mediaMode)
+    if (quotes) body.append('quotes', '1')
     if (mediaMode === 'videos' && !base) footage.forEach((f) => body.append('footage', f))
 
     setBusy(true); setError('')
@@ -150,7 +163,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">Estúdio</span><h1>Novo vídeo</h1></div>
+        <div><span className="kicker">{quotes ? 'Em teste' : 'Estúdio'}</span><h1>{quotes ? 'Vídeo com falas' : 'Novo vídeo'}</h1></div>
         <span className="muted">até {maxMin} min</span>
       </div>
 

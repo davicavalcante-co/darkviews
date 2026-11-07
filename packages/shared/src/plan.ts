@@ -61,6 +61,8 @@ const Media = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('user_video'), note: z.string().describe('O que o vídeo do cliente mostra neste trecho') }),
   z.object({ type: z.literal('text_card'), text: z.string().describe('Quadro de texto 2D quando nenhuma imagem serve') }),
+  // Vídeo com falas: a fala exata entra com o corte original (áudio e imagem), enviado pela pessoa.
+  z.object({ type: z.literal('quote'), text: z.string().describe('A fala exata, palavra por palavra'), source: z.string().describe('De onde é: filme/série/vídeo, personagem e, se souber, episódio ou cena') }),
 ])
 
 export const Scene = z.object({

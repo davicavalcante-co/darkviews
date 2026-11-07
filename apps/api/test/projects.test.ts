@@ -57,6 +57,35 @@ describe('novo vídeo', () => {
     expect((await create(ana, { targetDurationS: '3601' })).statusCode).toBe(400)
   })
 
+  it('vídeo com falas: depois do roteiro, cada fala recebe o corte ou vai com o locutor', async () => {
+    const res = await create(ana, { quotes: '1' })
+    const id = res.json().id
+    expect(JSON.parse((await prisma.project.findUnique({ where: { id } }))!.options).quotes).toBe(true)
+    const q = (text: string) => JSON.stringify({ type: 'quote', text, source: 'Série X, Jesus' })
+    await prisma.script.create({ data: { projectId: id, version: 1, body: 'x', scenePlan: '[]', createdBy: 'claude', scenes: { create: [
+      { index: 0, startS: 0, endS: 3, narration: 'Jesus disse:' },
+      { index: 1, startS: 3, endS: 6, narration: 'Não temais', searchQuery: q('Não temais') },
+      { index: 2, startS: 6, endS: 9, narration: 'Vinde a mim', searchQuery: q('Vinde a mim') },
+    ] } } })
+    await prisma.project.update({ where: { id }, data: { status: 'script_review' } })
+    await app.inject({ method: 'POST', url: `/api/projects/${id}/script-review`, headers: ana.headers, payload: { action: 'approve' } })
+    expect((await prisma.project.findUnique({ where: { id } }))!.status).toBe('quote_review')
+    expect((await app.inject({ url: `/api/projects/${id}/quote-review`, headers: ana.headers })).json().quotes).toHaveLength(2)
+
+    const form = new FormData(); form.append('video', new Blob([new Uint8Array(MP4)]), 'corte.mp4')
+    const r = new Request('http://x', { method: 'POST', body: form })
+    const up = await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review/1`, headers: { ...ana.headers, 'content-type': r.headers.get('content-type')! }, payload: Buffer.from(await r.arrayBuffer()) })
+    expect(up.statusCode).toBe(201)
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review/1`, headers: beto.headers, payload: {} })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review`, headers: ana.headers })).statusCode).toBe(202)
+    const p = await prisma.project.findUnique({ where: { id }, include: { jobs: { orderBy: { createdAt: 'desc' }, take: 1 }, scripts: { include: { scenes: { orderBy: { index: 'asc' }, include: { asset: true } } } } } })
+    expect(p!.status).toBe('media')
+    expect(p!.jobs[0].type).toBe('media')
+    const [, comCorte, semCorte] = p!.scripts[0].scenes
+    expect(comCorte.asset!.kind).toBe('quote_video')
+    expect(JSON.parse(semCorte.searchQuery!)).toEqual({ type: 'text_card', text: '“Vinde a mim”' }) // sem corte: locutor, frase na tela
+  })
+
   it('só vídeos com vídeos enviados: corta, aprova, apaga os reprovados e repõe ou repete', async () => {
     expect((await create(ana, {}, [['footage', MP4, 'longo.mp4']])).statusCode).toBe(400) // vídeo para cortar só em "Só vídeos"
     const res = await create(ana, { mediaMode: 'videos' }, [['footage', MP4, 'longo.mp4'], ['footage', MP4, 'outro.mp4']])
