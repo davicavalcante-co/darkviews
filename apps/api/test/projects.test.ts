@@ -58,8 +58,7 @@ describe('novo vídeo', () => {
   })
 
   it('vídeo com falas: depois do roteiro, cada fala recebe o corte ou vai com o locutor', async () => {
-    expect((await create(ana, { quotes: '1' })).statusCode).toBe(400) // precisa do vídeo longo
-    const res = await create(ana, { quotes: '1' }, [['footage', MP4, 'serie.mp4']])
+    const res = await create(ana, { quotes: '1' }) // o vídeo longo vem depois do roteiro
     const id = res.json().id
     expect(JSON.parse((await prisma.project.findUnique({ where: { id } }))!.options).quotes).toBe(true)
     const q = (text: string) => JSON.stringify({ type: 'quote', text, source: 'Série X, Jesus' })
@@ -71,7 +70,13 @@ describe('novo vídeo', () => {
     await prisma.project.update({ where: { id }, data: { status: 'script_review' } })
     await app.inject({ method: 'POST', url: `/api/projects/${id}/script-review`, headers: ana.headers, payload: { action: 'approve' } })
     expect((await prisma.project.findUnique({ where: { id } }))!.status).toBe('quote_review')
-    expect((await app.inject({ url: `/api/projects/${id}/quote-review`, headers: ana.headers })).json().quotes).toHaveLength(2)
+    const view = (await app.inject({ url: `/api/projects/${id}/quote-review`, headers: ana.headers })).json()
+    expect(view.quotes).toHaveLength(2)
+    expect(view.stages.map((s: { kind: string }) => s.kind)).toEqual(['narrador', 'fala', 'fala']) // etapas em ordem
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review`, headers: ana.headers })).statusCode).toBe(409) // falta o vídeo longo
+    const lf = new FormData(); lf.append('footage', new Blob([new Uint8Array(MP4)]), 'serie.mp4')
+    const lr = new Request('http://x', { method: 'POST', body: lf })
+    expect((await app.inject({ method: 'POST', url: `/api/projects/${id}/quote-review/footage`, headers: { ...ana.headers, 'content-type': lr.headers.get('content-type')! }, payload: Buffer.from(await lr.arrayBuffer()) })).statusCode).toBe(201)
 
     const form = new FormData(); form.append('video', new Blob([new Uint8Array(MP4)]), 'corte.mp4')
     const r = new Request('http://x', { method: 'POST', body: form })

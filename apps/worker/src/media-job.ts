@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, projectDir, sniffFile, type Job } from '@corte/db'
 import { activeProviders, searchStock, studioGenerate, synthesize, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
+import { MAX_DURATION_S, quoteStages, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { clarity } from './media.js'
@@ -195,16 +195,19 @@ export async function voice(job: Job) {
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   // Vídeo grande: narra em partes de ~3 min (sem cortar cena no meio), salva cada parte e passa para a próxima.
+  // Vídeo com falas: cada parte é uma etapa do narrador (até o próximo corte de fala).
   const parts: (typeof todo)[] = [[]]
   let partS = 0
+  const stageOf = new Map(quoteStages(scenes).flatMap((st, k) => Array.from({ length: st.last - st.first + 1 }, (_, j) => [st.first + j, k] as [number, number])))
   for (const s of todo) {
     const est = s.narration!.length / 14 // ~14 caracteres por segundo de fala
-    if (partS + est > 180 && parts.at(-1)!.length) { parts.push([]); partS = 0 }
+    const newStage = clips.length > 0 && parts.at(-1)!.length > 0 && stageOf.get(parts.at(-1)!.at(-1)!.index) !== stageOf.get(s.index)
+    if ((partS + est > 180 || newStage) && parts.at(-1)!.length) { parts.push([]); partS = 0 }
     parts.at(-1)!.push(s); partS += est
   }
   const made = new Map<number, { path: string; provider: string }>()
   for (const [n, part] of parts.entries()) {
-    await step(parts.length > 1 ? `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
+    await step(parts.length > 1 ? clips.length ? `Narração · etapa do narrador ${n + 1} de ${parts.length}` : `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
     const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
       { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
     for (const [k, v] of got) made.set(k, v)

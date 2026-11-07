@@ -32,7 +32,8 @@ await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { statu
 // Aprovações sem resposta no prazo da rodada (10 min): aprova sozinho e segue. Roteiro → imagens; imagens → narração.
 async function autoApprove() {
   // Falas sem corte no prazo: o locutor fala as que faltam (com a frase na tela) e o vídeo segue.
-  for (const p of await prisma.project.findMany({ where: { status: 'quote_review', reviewUntil: { lte: new Date() } }, select: { id: true, options: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { scenes: { select: { id: true, searchQuery: true, asset: { select: { kind: true } } } } } } } })) {
+  // Sem o vídeo longo não dá para montar: espera a pessoa enviar.
+  for (const p of await prisma.project.findMany({ where: { status: 'quote_review', reviewUntil: { lte: new Date() }, assets: { some: { kind: 'user_video' } } }, select: { id: true, options: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { scenes: { select: { id: true, searchQuery: true, asset: { select: { kind: true } } } } } } } })) {
     await prisma.$transaction(async (tx) => {
       const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'quote_review' }, data: { status: 'media', reviewUntil: null } })
       if (!count) return

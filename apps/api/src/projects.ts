@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import multipart, { type MultipartFile } from '@fastify/multipart'
 import { estimateSeconds, prisma, projectDir, type Prisma, sniffFile, STORAGE_DIR, type Sniffed } from '@corte/db'
-import { afterScript, detectPlatform, waitsQuotes, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
+import { afterScript, detectPlatform, quoteStages, waitsQuotes, IMAGE_MAX_BYTES, NewProjectInput, PROVIDERS, ReviewInput, VIDEO_MAX_BYTES, VOICE_PRESETS, VOICE_TONES, type ProgressEvent } from '@corte/shared'
 import { z } from 'zod'
 import { activeProviders, preferProvider } from '@corte/providers'
 import { requireAuth } from './auth.js'
@@ -90,8 +90,8 @@ export async function projectRoutes(app: FastifyInstance) {
       const footage = files.filter((f) => f.field === 'footage')
       // Só vídeos com vídeos enviados: os enviados são cortados e passam por aprovação (método por cortes).
       // Vídeo com falas: só vídeo (cortes do vídeo longo enviado + cortes das falas), sem busca de imagens.
-      if (input.quotes && !footage.length) throw httpError(400, 'Envie o vídeo longo de onde saem os cortes')
-      const cortes = (input.mediaMode === 'videos' || input.quotes) && footage.length > 0
+      // Vídeo com falas: o vídeo longo e os cortes das falas são enviados depois do roteiro aprovado.
+      const cortes = (input.mediaMode === 'videos' && footage.length > 0) || input.quotes
       if (footage.length && input.mediaMode !== 'videos' && !input.quotes) throw httpError(400, 'Vídeos para cortar só no modo "Só vídeos"')
       if (video.length > 1) throw httpError(400, 'Envie só um vídeo de referência')
       if (video.length && input.link) throw httpError(400, 'Use link ou vídeo de referência, não os dois')
@@ -424,10 +424,27 @@ export async function projectRoutes(app: FastifyInstance) {
   app.get<{ Params: { id: string } }>('/api/projects/:id/quote-review', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, reviewUntil: true } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    const script = await prisma.script.findFirst({ where: { projectId: p.id }, orderBy: { version: 'desc' }, include: { scenes: { orderBy: { index: 'asc' } } } })
+    const footage = await prisma.asset.findMany({ where: { projectId: p.id, kind: 'user_video' }, select: { id: true } })
     return {
-      status: p.status, reviewUntil: p.reviewUntil,
+      status: p.status, reviewUntil: p.reviewUntil, footage: footage.length,
+      stages: quoteStages(script?.scenes ?? []),
       quotes: (await quoteScenes(p.id)).map((s) => { const q = JSON.parse(s.searchQuery!); return { index: s.index, text: q.text, source: q.source, clipId: s.asset?.kind === 'quote_video' ? s.asset.id : null, narrator: q.narrator === true } }),
     }
+  })
+  // O vídeo longo (contexto): os cortes dele passam enquanto o narrador fala. Pode enviar mais de um.
+  app.post<{ Params: { id: string } }>('/api/projects/:id/quote-review/footage', { preHandler: requireAuth }, async (req, reply) => {
+    const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true } })
+    if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (p.status !== 'quote_review') return reply.code(409).send({ error: 'Este vídeo não está esperando os envios' })
+    const part = await req.file()
+    if (!part || part.fieldname !== 'footage') return reply.code(400).send({ error: 'Envie o vídeo longo' })
+    const saved = await keep(await saveUpload(part), p.id, 'envios')
+    const first = !(await prisma.asset.count({ where: { projectId: p.id, kind: 'user_video' } }))
+    await prisma.asset.create({ data: { projectId: p.id, kind: 'user_video', filePath: saved.path, mime: saved.mime } })
+    // O prazo de 10 min só começa quando chega o vídeo longo (sem ele não dá para montar).
+    if (first) await prisma.project.update({ where: { id: p.id }, data: { reviewUntil: new Date(Date.now() + 10 * 60_000) } })
+    return reply.code(201).send({ ok: true })
   })
   app.post<{ Params: { id: string; index: string } }>('/api/projects/:id/quote-review/:index', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true } })
@@ -451,6 +468,7 @@ export async function projectRoutes(app: FastifyInstance) {
   app.post<{ Params: { id: string } }>('/api/projects/:id/quote-review', { preHandler: requireAuth }, async (req, reply) => {
     const p = await prisma.project.findFirst({ where: projectScope(req, req.params.id), select: { id: true, status: true, options: true } })
     if (!p) return reply.code(404).send({ error: 'Projeto não encontrado' })
+    if (!(await prisma.asset.count({ where: { projectId: p.id, kind: 'user_video' } }))) return reply.code(409).send({ error: 'Envie o vídeo longo antes de continuar' })
     await finishQuotes(p.id, p.options)
     return reply.code(202).send({ ok: true })
   })

@@ -57,9 +57,10 @@ export function QuotesVideo() {
       <section className="panel quotes-help">
         <h2 className="panel-title">Como funciona</h2>
         <ol>
-          <li>Preencha ao lado (nome, voz do locutor, prompt, duração) e envie o <b>vídeo longo</b>: os cortes dele passam enquanto o narrador fala. Clique em <b>Criar vídeo</b>.</li>
+          <li>Jogue a ideia ao lado (nome, voz do locutor, prompt, duração; pode vir do Brainstorm ou de um vídeo analisado) e clique em <b>Criar vídeo</b>.</li>
           <li>O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Você aprova o roteiro.</li>
-          <li>Na tela <b>Falas do vídeo</b>, envie o corte de cada fala, ou escolha <b>Usar o locutor</b>.</li>
+          <li>Na tela <b>Falas do vídeo</b>, envie o <b>vídeo longo</b> (contexto: os cortes dele passam enquanto o narrador fala) e o corte de cada fala, ou escolha <b>Usar o locutor</b>. A tela mostra quantas etapas o vídeo terá e o tempo.</li>
+          <li>O vídeo é montado por etapa: narrador (vídeo e áudio), depois a fala, depois o narrador de novo, até o fim.</li>
           <li>No vídeo: abre com a cartela do título e a trilha; o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original, esmaece e o locutor volta explicando.</li>
           <li>Sem fotos, sem busca de imagens e sem efeitos: só cortes secos e esmaecimento. A trilha você troca ou envia na edição.</li>
         </ol>
@@ -140,7 +141,6 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
     if (!(seconds >= 15 && seconds <= MAX_DURATION_S)) return setError(`Duração entre 15 segundos e ${maxMin} minutos`)
     if (link && !platform) return setError('Link precisa ser de YouTube, Instagram, Kwai ou TikTok')
     if (link && video) return setError('Use link ou vídeo de referência, não os dois')
-    if (quotes && !footage.length) return setError('Envie o vídeo longo de onde saem os cortes')
 
     const body = new FormData()
     body.append('name', name)
@@ -161,7 +161,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
     if (mediaMode !== 'videos') images.forEach((i) => i.file && body.append('images', i.file))
     body.append('mediaMode', mediaMode)
     if (quotes) body.append('quotes', '1')
-    if ((mediaMode === 'videos' || quotes) && !base) footage.forEach((f) => body.append('footage', f))
+    if (mediaMode === 'videos' && !quotes && !base) footage.forEach((f) => body.append('footage', f))
 
     setBusy(true); setError('')
     try {
@@ -229,7 +229,7 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
           <small className="muted">{mediaMode === 'images' ? 'Só fotos (suas e dos bancos).' : mediaMode === 'videos' ? 'Só vídeos dos bancos ou, se você enviar vídeos abaixo, cortes dos seus vídeos para aprovar.' : 'Fotos e vídeos, como o sistema achar melhor.'}</small>
         </div>}
 
-        {(mediaMode === 'videos' || quotes) && !base && (
+        {mediaMode === 'videos' && !quotes && !base && (
           <div className="field">
             <div className="field-label">{quotes ? 'Vídeo longo para os cortes do narrador' : 'Seus vídeos para cortar'} <span className="muted">{footage.length ? footage.length : quotes ? 'obrigatório' : 'opcional'}</span></div>
             <label className="drop">

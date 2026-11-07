@@ -268,3 +268,15 @@ export const DEFAULT_IDENTITY: Identity = {
 export const afterScript = (options: string) => (JSON.parse(options) as { method?: string }).method === 'cortes' ? 'montage' : 'media'
 // Vídeo com falas: depois do roteiro, para na tela das falas (a pessoa envia os cortes) antes de seguir.
 export const waitsQuotes = (options: string) => (JSON.parse(options) as { quotes?: boolean }).quotes === true
+
+// Vídeo com falas: etapas em ordem. Cada fala com corte é uma etapa; o que fica entre elas (narrador e cartelas) é outra.
+export function quoteStages(scenes: { index: number; startS: number; endS: number; searchQuery: string | null }[]) {
+  const stages: { kind: 'narrador' | 'fala'; first: number; last: number; durationS: number }[] = []
+  for (const s of scenes) {
+    const kind = s.searchQuery?.includes('"type":"quote"') ? 'fala' : 'narrador'
+    const cur = stages.at(-1)
+    if (cur && cur.kind === 'narrador' && kind === 'narrador') { cur.last = s.index; cur.durationS += s.endS - s.startS }
+    else stages.push({ kind, first: s.index, last: s.index, durationS: s.endS - s.startS })
+  }
+  return stages
+}
