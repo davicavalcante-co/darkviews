@@ -4,7 +4,7 @@ import { api } from './api'
 import { clock, Modal, PageHead, Player, Section, useNow } from './ui'
 
 const STATUS_LABEL: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens', cut_review: 'Aguardando sua aprovação dos cortes',
+  queued: 'Na fila', analyzing: 'Analisando referência', scripting: 'Escrevendo roteiro', script_review: 'Aguardando sua aprovação do roteiro', talking_head: 'Aguardando sua escolha: pessoa falando', media: 'Buscando imagens', image_review: 'Aguardando sua aprovação das imagens', cut_review: 'Aguardando sua aprovação dos cortes', quote_review: 'Aguardando os cortes das falas',
   rendering: 'Criando vídeo', editing: 'Em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 const STAGES = ['Na fila', 'Analisando referência', 'Escrevendo roteiro', 'Buscando imagens', 'Gerando áudio', 'Criando vídeo', 'Pronto']
@@ -15,7 +15,7 @@ function stageIndex(e: ProgressEvent) {
     case 'analyzing': return 1
     case 'scripting': return 2
     case 'media': return e.job?.type === 'voice' ? 4 : 3
-    case 'image_review': case 'cut_review': return 3
+    case 'image_review': case 'cut_review': case 'quote_review': return 3
     case 'script_review': return 2
     case 'talking_head': return 1
     case 'rendering': return 5
@@ -226,6 +226,71 @@ function ScriptReview({ id, detail }: { id: string; detail: Detail }) {
           </li>
         ))}
       </ol>
+    </div>
+  )
+}
+
+// Vídeo com falas: para cada fala exata do roteiro, a pessoa envia o corte (com o áudio original) ou deixa o locutor falar.
+function QuoteReview({ id }: { id: string }) {
+  type Q = { index: number; text: string; source: string; clipId: string | null; narrator: boolean }
+  const [data, setData] = useState<{ reviewUntil: string | null; footage: number; stages: { kind: 'narrador' | 'fala'; first: number; last: number; durationS: number }[]; quotes: Q[] } | null>(null)
+  const [busy, setBusy] = useState<number | 'all' | null>(null)
+  const [error, setError] = useState('')
+  const load = () => api<NonNullable<typeof data>>(`/projects/${id}/quote-review`).then(setData).catch((e) => setError(e.message))
+  useEffect(() => { load() }, [id])
+  if (!data) return error ? <p className="error">{error}</p> : null
+  async function act(key: number | 'all', fn: () => Promise<unknown>) {
+    setBusy(key); setError('')
+    try { await fn(); if (key !== 'all') await load() } catch (e) { setError((e as Error).message) } finally { if (key !== 'all') setBusy(null) }
+  }
+  const upload = (q: Q, f: File | undefined) => f && act(q.index, () => { const body = new FormData(); body.append('video', f); return api(`/projects/${id}/quote-review/${q.index}`, { method: 'POST', body }) })
+  const pending = data.quotes.filter((q) => !q.clipId && !q.narrator).length
+  return (
+    <div className="review">
+      <div className="review-head">
+        <div>
+          <h3>Envie o corte de cada fala</h3>
+          <p className="muted">O corte entra com a imagem e o áudio originais, 3 s depois do locutor anunciar. Sem corte, o locutor fala a frase e ela aparece na tela.</p>
+        </div>
+        {data.footage > 0 && <ReviewClock until={data.reviewUntil ? Date.parse(data.reviewUntil) : null} onExpire={load} />}
+        <button type="button" disabled={busy !== null || !data.footage} title={data.footage ? '' : 'Envie o vídeo longo primeiro'} onClick={() => act('all', () => api(`/projects/${id}/quote-review`, { method: 'POST' }))}>
+          {busy === 'all' ? 'Enviando…' : pending ? `Continuar (${pending} com o locutor)` : 'Continuar'}
+        </button>
+      </div>
+      {error && <p className="error" role="alert">{error}</p>}
+      <article className="panel quote-row">
+        <div className="quote-text"><b>Vídeo longo (contexto)</b><small className="muted">Os cortes dele passam enquanto o narrador fala. {data.footage ? `${data.footage} enviado${data.footage > 1 ? 's' : ''}.` : 'Obrigatório para continuar (o prazo de 10 min começa a contar depois dele).'}</small></div>
+        <div className="row wrap"><span className="spacer" />
+          <label className="btn ghost">{busy === -1 ? 'Enviando…' : data.footage ? 'Enviar outro' : 'Enviar vídeo longo'}
+            <input type="file" hidden accept="video/mp4,video/quicktime,video/webm" disabled={busy !== null} onChange={(e) => {
+              const f = e.target.files?.[0]; e.target.value = ''
+              if (f) act(-1, () => { const body = new FormData(); body.append('footage', f); return api(`/projects/${id}/quote-review/footage`, { method: 'POST', body }) })
+            }} />
+          </label>
+        </div>
+      </article>
+      <div className="notice">
+        <p><b>{data.stages.length} etapas</b> · cerca de {clock(data.stages.reduce((n, st) => n + st.durationS, 0) * 1000)} no total (pelo roteiro; a fala real ajusta).</p>
+        <ol className="stage-list">{data.stages.map((st, k) => {
+          const q = st.kind === 'fala' ? data.quotes.find((x) => x.index === st.first) : null
+          return <li key={k}>Etapa {k + 1} · {q ? <>Fala: “{q.text}”</> : <>Narrador (cenas {st.first + 1}{st.last > st.first ? `–${st.last + 1}` : ''})</>} · ~{clock(st.durationS * 1000)}</li>
+        })}</ol>
+      </div>
+      {!data.quotes.length && <p className="muted">O roteiro não trouxe falas exatas. Clique em Continuar.</p>}
+      <div className="stack-sm">{data.quotes.map((q) => (
+        <article key={q.index} className="panel quote-row">
+          <div className="quote-text"><b>“{q.text}”</b><small className="muted">{q.source} · cena {q.index + 1}</small></div>
+          {q.clipId && <video className="quote-clip" src={`/api/projects/${id}/assets/${q.clipId}`} controls preload="metadata" />}
+          <div className="row wrap">
+            <span className="muted small">{q.clipId ? 'Corte enviado' : q.narrator ? 'Vai com o locutor' : 'Falta o corte'}</span>
+            <span className="spacer" />
+            <label className="btn ghost">{busy === q.index ? 'Enviando…' : q.clipId ? 'Trocar corte' : 'Enviar corte'}
+              <input type="file" hidden accept="video/mp4,video/quicktime,video/webm" disabled={busy !== null} onChange={(e) => { upload(q, e.target.files?.[0]); e.target.value = '' }} />
+            </label>
+            {!q.narrator && <button type="button" className="ghost-btn" disabled={busy !== null} onClick={() => act(q.index, () => api(`/projects/${id}/quote-review/${q.index}`, { method: 'POST', body: {} }))}>Usar o locutor</button>}
+          </div>
+        </article>
+      ))}</div>
     </div>
   )
 }
@@ -502,6 +567,7 @@ export function Progress({ id }: { id: string }) {
       {ev.status === 'script_review' && detail?.script && <Section idx={1} title="Aprovar roteiro"><ScriptReview key={detail.script.version} id={id} detail={detail} /></Section>}
       {ev.status === 'image_review' && <Section idx={1} title="Aprovar imagens"><ImageReview key={ev.job?.type ?? ''} id={id} /></Section>}
       {ev.status === 'cut_review' && <Section idx={1} title="Aprovar cortes"><CutReview key={ev.job?.type ?? ''} id={id} /></Section>}
+      {ev.status === 'quote_review' && <Section idx={1} title="Falas do vídeo"><QuoteReview id={id} /></Section>}
 
       {(detail?.script || detail?.reference?.styleProfile) && (
         <Section idx={2} title="Roteiro">

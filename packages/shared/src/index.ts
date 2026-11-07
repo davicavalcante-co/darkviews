@@ -65,6 +65,8 @@ export const NewProjectInput = z.object({
   prompt: z.string().trim().min(1).max(5000),
   // Mídia do vídeo: imagens e vídeos (padrão), só imagens ou só vídeos. Só vídeos com vídeos enviados: o sistema corta os enviados.
   mediaMode: z.enum(['mixed', 'images', 'videos']).default('mixed'),
+  // Vídeo com falas (aba em teste): falas exatas entram com o corte original enviado pela pessoa.
+  quotes: z.enum(['0', '1']).optional().transform((v) => v === '1'),
   analysisId: z.string().uuid().optional().or(z.literal('').transform(() => undefined)), // estilo vindo da aba Análise
   link: z.string().trim().max(500).optional().transform((v) => v || undefined)
     .refine((v) => !v || detectPlatform(v), 'Link precisa ser de YouTube, Instagram, Kwai ou TikTok'),
@@ -82,7 +84,7 @@ export const NewProjectInput = z.object({
   }),
 })
 
-export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
+export const ProjectStatus = z.enum(['queued', 'analyzing', 'scripting', 'script_review', 'talking_head', 'media', 'image_review', 'cut_review', 'quote_review', 'rendering', 'editing', 'in_approval', 'approved', 'failed'])
 export const ReviewInput = z.object({ rejected: z.array(z.number().int().min(0)).max(2000) })
 export type ProjectStatus = z.infer<typeof ProjectStatus>
 
@@ -212,7 +214,7 @@ export * from './claude-usage'
 
 // ---------- Trilha sonora: estilos (termos de busca em inglês) ----------
 export const MUSIC_STYLES = [
-  { id: 'auto', label: 'Automático', tags: 'background' }, { id: 'lofi', label: 'Lo-fi', tags: 'lofi chill' },
+  { id: 'auto', label: 'Automático', tags: 'background' }, { id: 'upload', label: 'Enviada por você', tags: '' }, { id: 'lofi', label: 'Lo-fi', tags: 'lofi chill' },
   { id: 'eletronica', label: 'Eletrônica', tags: 'electronic' }, { id: 'rock', label: 'Rock', tags: 'rock' },
   { id: 'classica', label: 'Clássica', tags: 'classical piano' }, { id: 'cinematica', label: 'Cinema', tags: 'cinematic' },
   { id: 'epica', label: 'Épica', tags: 'epic orchestral' }, { id: 'acustica', label: 'Acústica', tags: 'acoustic guitar' },
@@ -264,3 +266,17 @@ export const DEFAULT_IDENTITY: Identity = {
 
 // Depois do roteiro aprovado: imagens (método principal) ou montagem dos cortes (método "Vídeo por cortes").
 export const afterScript = (options: string) => (JSON.parse(options) as { method?: string }).method === 'cortes' ? 'montage' : 'media'
+// Vídeo com falas: depois do roteiro, para na tela das falas (a pessoa envia os cortes) antes de seguir.
+export const waitsQuotes = (options: string) => (JSON.parse(options) as { quotes?: boolean }).quotes === true
+
+// Vídeo com falas: etapas em ordem. Cada fala com corte é uma etapa; o que fica entre elas (narrador e cartelas) é outra.
+export function quoteStages(scenes: { index: number; startS: number; endS: number; searchQuery: string | null }[]) {
+  const stages: { kind: 'narrador' | 'fala'; first: number; last: number; durationS: number }[] = []
+  for (const s of scenes) {
+    const kind = s.searchQuery?.includes('"type":"quote"') ? 'fala' : 'narrador'
+    const cur = stages.at(-1)
+    if (cur && cur.kind === 'narrador' && kind === 'narrador') { cur.last = s.index; cur.durationS += s.endS - s.startS }
+    else stages.push({ kind, first: s.index, last: s.index, durationS: s.endS - s.startS })
+  }
+  return stages
+}

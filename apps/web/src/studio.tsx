@@ -23,7 +23,7 @@ type Base = {
 }
 
 const STATUS: Record<ProjectStatus, string> = {
-  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', cut_review: 'Aprovar cortes', rendering: 'Criando vídeo',
+  queued: 'Na fila', analyzing: 'Analisando', scripting: 'Escrevendo roteiro', script_review: 'Aprovar roteiro', talking_head: 'Sua escolha', media: 'Buscando mídia', image_review: 'Aprovar imagens', cut_review: 'Aprovar cortes', quote_review: 'Enviar as falas', rendering: 'Criando vídeo',
   editing: 'Pronto · em edição', in_approval: 'Aguardando aprovação', approved: 'Aprovado', failed: 'Falhou',
 }
 // Estilo de edição: puxa o roteiro para um tipo de movimento e transição.
@@ -48,6 +48,28 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
+// Aba em teste: o roteiro marca as falas exatas (de filme, série ou vídeo); você envia o corte de cada uma e o resto é o locutor.
+export function QuotesVideo() {
+  return (
+    // Mesmo layout do Novo vídeo: o formulário à esquerda e, no lugar da lista de criações, o passo a passo.
+    <div className="studio">
+      <Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes />
+      <section className="panel quotes-help">
+        <h2 className="panel-title">Como funciona</h2>
+        <ol>
+          <li>Jogue a ideia ao lado (nome, voz do locutor, prompt, duração; pode vir do Brainstorm ou de um vídeo analisado) e clique em <b>Criar vídeo</b>.</li>
+          <li>O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Você aprova o roteiro.</li>
+          <li>Na tela <b>Falas do vídeo</b>, envie o <b>vídeo longo</b> (contexto: os cortes dele passam enquanto o narrador fala) e o corte de cada fala, ou escolha <b>Usar o locutor</b>. A tela mostra quantas etapas o vídeo terá e o tempo.</li>
+          <li>O vídeo é montado por etapa: narrador (vídeo e áudio), depois a fala, depois o narrador de novo, até o fim.</li>
+          <li>No vídeo: abre com a cartela do título e a trilha; o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original, esmaece e o locutor volta explicando.</li>
+          <li>Sem fotos, sem busca de imagens e sem efeitos: só cortes secos e esmaecimento. A trilha você troca ou envia na edição.</li>
+        </ol>
+        <p className="muted small">O que não é fala exata (abertura, explicações, final, "deixe seu like") é sempre o locutor.</p>
+      </section>
+    </div>
+  )
+}
+
 export function NewVideo() {
   const [base, setBase] = useState<Base | null>(null)
   // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
@@ -60,7 +82,7 @@ export function NewVideo() {
   )
 }
 
-function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel: () => void; analysisId: string | null }) {
+function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; onCancel: () => void; analysisId: string | null; quotes?: boolean }) {
   // Só vídeos: vídeos enviados são cortados e os cortes passam por aprovação.
   const [footage, setFootage] = useState<File[]>([])
   const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
@@ -138,7 +160,8 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
     }
     if (mediaMode !== 'videos') images.forEach((i) => i.file && body.append('images', i.file))
     body.append('mediaMode', mediaMode)
-    if (mediaMode === 'videos' && !base) footage.forEach((f) => body.append('footage', f))
+    if (quotes) body.append('quotes', '1')
+    if (mediaMode === 'videos' && !quotes && !base) footage.forEach((f) => body.append('footage', f))
 
     setBusy(true); setError('')
     try {
@@ -150,7 +173,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">Estúdio</span><h1>Novo vídeo</h1></div>
+        <div><span className="kicker">{quotes ? 'Em teste' : 'Estúdio'}</span><h1>{quotes ? 'Vídeo com falas' : 'Novo vídeo'}</h1></div>
         <span className="muted">até {maxMin} min</span>
       </div>
 
@@ -196,7 +219,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
               </Modal>
             )}
 
-        <div className="field">
+        {!quotes && <div className="field">
           <div className="field-label">Mídia do vídeo</div>
           <div className="choice-grid" role="radiogroup" aria-label="Mídia do vídeo">
             {([['mixed', 'Imagens e vídeos'], ['images', 'Só imagens'], ['videos', 'Só vídeos']] as const).map(([id, label]) => (
@@ -204,21 +227,21 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
             ))}
           </div>
           <small className="muted">{mediaMode === 'images' ? 'Só fotos (suas e dos bancos).' : mediaMode === 'videos' ? 'Só vídeos dos bancos ou, se você enviar vídeos abaixo, cortes dos seus vídeos para aprovar.' : 'Fotos e vídeos, como o sistema achar melhor.'}</small>
-        </div>
+        </div>}
 
-        {mediaMode === 'videos' && !base && (
+        {mediaMode === 'videos' && !quotes && !base && (
           <div className="field">
-            <div className="field-label">Seus vídeos para cortar <span className="muted">{footage.length ? footage.length : 'opcional'}</span></div>
+            <div className="field-label">{quotes ? 'Vídeo longo para os cortes do narrador' : 'Seus vídeos para cortar'} <span className="muted">{footage.length ? footage.length : quotes ? 'obrigatório' : 'opcional'}</span></div>
             <label className="drop">
               <input type="file" multiple accept="video/mp4,video/quicktime,video/webm" onChange={(e) => { setFootage([...footage, ...(e.target.files ?? [])]); e.target.value = '' }} />
               <Icon name="tocar" size={14} /><span className="ellipsis">{footage.length ? footage.map((f) => f.name).join(', ') : 'Enviar vídeos longos'}</span>
             </label>
             {footage.length > 0 && <button type="button" className="link" onClick={() => setFootage([])}>Tirar os vídeos</button>}
-            <small className="muted">O sistema corta trechos desses vídeos e mostra para você aprovar. Os reprovados são apagados. Os vídeos dos bancos não são cortados.</small>
+            <small className="muted">{quotes ? 'Enquanto o narrador fala, passam cortes aleatórios deste vídeo. Os cortes das falas você envia depois de aprovar o roteiro.' : 'O sistema corta trechos desses vídeos e mostra para você aprovar. Os reprovados são apagados. Os vídeos dos bancos não são cortados.'}</small>
           </div>
         )}
 
-        {mediaMode !== 'videos' && <div className="field">
+        {mediaMode !== 'videos' && !quotes && <div className="field">
           <div className="field-label">Imagens <span className="muted">{images.length}</span></div>
           <div className={`tiles-sm${dragging ? ' dragging' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
@@ -249,7 +272,7 @@ function Composer({ base, onCancel, analysisId }: { base: Base | null; onCancel:
           <textarea name="prompt" required maxLength={5000} rows={7} placeholder="Sobre o que é o vídeo, público, tom, chamada para ação…" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
         </label>
 
-        {!footage.length && <div className="field">
+        {!footage.length && !quotes && <div className="field">
           <div className="field-label">Estilo de edição</div>
           <div className="choice-grid" role="radiogroup" aria-label="Estilo de edição">
             {EDIT_STYLES.map(([id, label]) => <button key={id} type="button" role="radio" aria-checked={editStyle === id} className="choice small-choice" onClick={() => setEditStyle(id)}>{label}</button>)}

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { prisma, projectDir, type Job } from '@corte/db'
-import { DEFAULT_IDENTITY, MAX_DURATION_S, MUSIC_STYLES, type Identity } from '@corte/shared'
+import { DEFAULT_IDENTITY, MAX_DURATION_S, MUSIC_STYLES, quoteStages, type Identity } from '@corte/shared'
 import { pickMusic } from '@corte/providers'
 import { randomUUID } from 'node:crypto'
 import { buildSegments, retimeSegments, toAss, type CaptionStyle, type Segment, type TimedScene, type TitleStyle } from './captions.js'
@@ -16,7 +16,7 @@ const X264 = ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-r', String(FPS)]
 
 export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card'; path?: string; transition: string; voice: string | null; bg?: string; motion?: string; easing?: string; mask?: string; offsetS?: number }
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
-export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; onProgress?: (p: number, stage?: string) => Promise<unknown> }
+export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; blockStarts?: number[]; onProgress?: (p: number, stage?: string) => Promise<unknown> }
 
 // Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
 // Os cortes secos usam 1 quadro de transição (na prática, corte direto).
@@ -173,13 +173,18 @@ export async function renderVideo(input: RenderInput) {
         }
         await ff([...files.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', out])
       }
+      // Vídeo com falas: um bloco por etapa (narrador, fala, narrador...); senão blocos de 40 cenas. Etapa grande também é dividida.
       const SIZE = 40
+      const starts = (input.blockStarts ?? []).filter((b) => b > 0 && b < clips.length)
+      const marks = [0, ...(starts.length ? starts : Array.from({ length: Math.ceil(clips.length / SIZE) - 1 }, (_, n) => (n + 1) * SIZE))]
+      const cuts = marks.flatMap((b, n) => { const end = marks[n + 1] ?? clips.length; return Array.from({ length: Math.ceil((end - b) / SIZE) }, (_, j) => b + j * SIZE) })
       const blocks: string[] = [], blockInto: ([string, number] | null)[] = []
-      for (let k = 0; k < clips.length; k += SIZE) {
-        const out = `bloco-${String(k / SIZE).padStart(3, '0')}.mp4`
-        await chain(clips.slice(k, k + SIZE), into.slice(k, k + SIZE), out)
+      for (const [n, k] of cuts.entries()) {
+        const end = cuts[n + 1] ?? clips.length
+        const out = `bloco-${String(n).padStart(3, '0')}.mp4`
+        await chain(clips.slice(k, end), into.slice(k, end), out)
         blocks.push(out); blockInto.push(k === 0 ? null : into[k])
-        await input.onProgress?.(75 + Math.round(((k + SIZE) / clips.length) * 3), `Juntando as cenas · bloco ${blocks.length} de ${Math.ceil(clips.length / SIZE)}`)
+        await input.onProgress?.(75 + Math.round((end / clips.length) * 3), starts.length ? `Montando etapa ${n + 1} de ${cuts.length} (vídeo e áudio)` : `Juntando as cenas · bloco ${n + 1} de ${cuts.length}`)
       }
       await input.onProgress?.(78, 'Juntando os blocos num vídeo só (vídeo longo leva alguns minutos)')
       await chain(blocks, blockInto, 'video.mp4')
@@ -358,6 +363,8 @@ export async function render(job: Job) {
       motion: s.motion ?? undefined, easing: s.easing ?? undefined, mask: masks.get(s.index),
     })),
     music, musicVolume: opts.musicVolume, sfxVolume: opts.sfxVolume, ass: toAss([], timed, style, undefined, true, opts.titleStyle), fontsDir: FONTS_DIR, out: base, cleanOut,
+    // Vídeo com falas: monta por etapa (narrador, fala, narrador...).
+    blockStarts: scenes.some((s) => s.asset?.kind === 'quote_video') ? quoteStages(scenes).map((st) => scenes.findIndex((s) => s.index === st.first)) : undefined,
     onProgress: (p, stage) => prisma.job.update({ where: { id: job.id }, data: { stage: stage ?? (p < 80 ? 'Vídeo: imagens, movimentos, transições e efeitos' : 'Áudio final: narração, trilha e efeitos sonoros'), progress: p } }),
   })
   let out = base
@@ -435,6 +442,7 @@ async function buildSfx(scenes: RenderScene[], into: ([string, number] | null)[]
 // musicPicked indefinido = projeto antigo, cuja trilha já veio da criação e fica como está.
 async function syncMusic(projectId: string, ownerId: string, opts: { musicStyle?: string; musicPicked?: string | null }, current: string | null, durationS: number) {
   const want = opts.musicStyle && opts.musicStyle !== 'none' ? MUSIC_STYLES.find((m) => m.id === opts.musicStyle) ?? MUSIC_STYLES[0] : null
+  if (want?.id === 'upload') return current // trilha enviada pela pessoa: nunca troca
   if (current && (!want || (opts.musicPicked !== undefined && opts.musicPicked !== want.id))) {
     await prisma.asset.deleteMany({ where: { projectId, kind: 'music' } })
     current = null

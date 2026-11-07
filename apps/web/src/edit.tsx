@@ -413,7 +413,7 @@ function MiniPlayer({ src, label }: { src: string; label: string }) {
   )
 }
 
-function AudioPanel({ id, data, scene, options, stageOptions }: Ctx) {
+function AudioPanel({ id, data, scene, options, stageOptions, reload }: Ctx) {
   const [voices, setVoices] = useState<{ voices: { id: string; label: string }[]; current: string | null; tones: readonly { id: string; label: string }[] } | null>(null)
   useEffect(() => { api<NonNullable<typeof voices>>('/voices').then(setVoices).catch(() => {}) }, [])
   const voice = options.voicePreset || voices?.current || ''
@@ -434,7 +434,16 @@ function AudioPanel({ id, data, scene, options, stageOptions }: Ctx) {
         {MUSIC_STYLES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
       </select></label>
       {data.music && options.musicStyle === data.options.musicStyle && <MiniPlayer src={`/api/projects/${id}/assets/${data.music.id}`} label="trilha" />}
-      {options.musicStyle !== 'none' && (!data.music || options.musicStyle !== data.options.musicStyle) && <p className="muted small">A música é buscada ao renderizar.</p>}
+      {options.musicStyle !== 'none' && options.musicStyle !== 'upload' && (!data.music || options.musicStyle !== data.options.musicStyle) && <p className="muted small">A música é buscada ao renderizar.</p>}
+      <label className="btn ghost">Enviar minha trilha
+        <input type="file" hidden accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/ogg,.mp3,.wav,.m4a,.ogg" onChange={(e) => {
+          const f = e.target.files?.[0]; e.target.value = ''
+          if (!f) return
+          const body = new FormData(); body.append('music', f)
+          act(() => api(`/projects/${id}/music`, { method: 'POST', body }), reload)
+        }} />
+      </label>
+      <small className="muted">MP3, WAV, M4A ou OGG. Entra no próximo render.</small>
       <label className="range-row">Volume<input type="range" min={0} max={80} step={5} value={options.musicVolume} onChange={(e) => stageOptions({ musicVolume: Number(e.target.value) })} /><b>{options.musicVolume ? `${options.musicVolume}%` : 'mudo'}</b></label>
       <span className="panel-title">Efeitos sonoros</span>
       <label className="range-row">Volume<input type="range" min={0} max={100} step={5} value={options.sfxVolume} onChange={(e) => stageOptions({ sfxVolume: Number(e.target.value) })} /><b>{options.sfxVolume ? `${options.sfxVolume}%` : 'desligado'}</b></label>

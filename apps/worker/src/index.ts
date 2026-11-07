@@ -1,5 +1,5 @@
 import { hostname } from 'node:os'
-import { afterScript } from '@corte/shared'
+import { afterScript, waitsQuotes } from '@corte/shared'
 import { prisma, claimNextJob, estimateSeconds, logEvent, type Job } from '@corte/db'
 import { ingest } from './ingest.js'
 import { analyze } from './analyze.js'
@@ -31,6 +31,19 @@ await prisma.brainstorm.updateMany({ where: { status: 'running' }, data: { statu
 
 // Aprovações sem resposta no prazo da rodada (10 min): aprova sozinho e segue. Roteiro → imagens; imagens → narração.
 async function autoApprove() {
+  // Falas sem corte no prazo: o locutor fala as que faltam (com a frase na tela) e o vídeo segue.
+  // Sem o vídeo longo não dá para montar: espera a pessoa enviar.
+  for (const p of await prisma.project.findMany({ where: { status: 'quote_review', reviewUntil: { lte: new Date() }, assets: { some: { kind: 'user_video' } } }, select: { id: true, options: true, scripts: { orderBy: { version: 'desc' }, take: 1, select: { scenes: { select: { id: true, searchQuery: true, asset: { select: { kind: true } } } } } } } })) {
+    await prisma.$transaction(async (tx) => {
+      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'quote_review' }, data: { status: 'media', reviewUntil: null } })
+      if (!count) return
+      for (const s of p.scripts[0]?.scenes ?? []) {
+        const q = s.searchQuery ? JSON.parse(s.searchQuery) : null
+        if (q?.type === 'quote' && s.asset?.kind !== 'quote_video') await tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ type: 'text_card', text: `“${q.text}”` }) } })
+      }
+      await tx.job.create({ data: { projectId: p.id, type: afterScript(p.options), stage: 'Na fila' } })
+    })
+  }
   // Cortes dos vídeos enviados sem resposta no prazo: todos aprovados e o vídeo é montado.
   for (const p of await prisma.project.findMany({ where: { status: 'cut_review', reviewUntil: { lte: new Date() } }, select: { id: true } })) {
     const moved = await prisma.$transaction(async (tx) => {
@@ -45,8 +58,9 @@ async function autoApprove() {
   // Roteiro sem resposta no prazo: aprovado como está e segue para as imagens.
   for (const p of await prisma.project.findMany({ where: { status: 'script_review', reviewUntil: { lte: new Date() } }, select: { id: true, options: true } })) {
     const moved = await prisma.$transaction(async (tx) => {
-      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: { status: 'media', reviewUntil: null } })
-      if (count) await tx.job.create({ data: { projectId: p.id, type: afterScript(p.options), stage: 'Na fila' } })
+      const quotes = waitsQuotes(p.options)
+      const { count } = await tx.project.updateMany({ where: { id: p.id, status: 'script_review' }, data: quotes ? { status: 'quote_review', reviewUntil: new Date(Date.now() + 10 * 60_000) } : { status: 'media', reviewUntil: null } })
+      if (count && !quotes) await tx.job.create({ data: { projectId: p.id, type: afterScript(p.options), stage: 'Na fila' } })
       return count
     })
     if (moved) logEvent({ source: 'worker', kind: 'job', message: 'roteiro aprovado automaticamente (prazo de 10 min esgotado)', details: { projectId: p.id } })

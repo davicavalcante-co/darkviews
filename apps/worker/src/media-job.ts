@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises'
 import { z } from 'zod'
 import { logEvent, prisma, projectDir, sniffFile, type Job } from '@corte/db'
 import { activeProviders, searchStock, studioGenerate, synthesize, synthesizeMany, type StockCandidate } from '@corte/providers'
-import { MAX_DURATION_S, VOICE_TONES, voiceKey } from '@corte/shared'
+import { MAX_DURATION_S, quoteStages, VOICE_TONES, voiceKey } from '@corte/shared'
 import { askClaude, ClaudeUnavailable, LIGHT_MODEL } from './claude.js'
 import { durationOf, FFMPEG, run } from './ffmpeg.js'
 import { clarity } from './media.js'
@@ -154,7 +154,7 @@ export async function voice(job: Job) {
     own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
     // A voz escolhida narra o vídeo inteiro: sem ela, para (nunca troca por outra voz no meio).
     if (!own?.profileId) throw new Error('A voz escolhida não existe mais. Escolha outra voz no Novo vídeo ou no editor.')
-    const todo = scenes.filter((x) => x.narration?.trim())
+    const todo = scenes.filter((x) => x.narration?.trim() && !x.searchQuery?.includes('"type":"quote"')) // fala com corte usa o áudio original
     const started = Date.now()
     for (const [n, s] of todo.entries()) {
       // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
@@ -182,28 +182,41 @@ export async function voice(job: Job) {
   // Todas as falas de uma vez (Kokoro carrega o modelo uma vez só); o que a voz própria já narrou é reaproveitado.
   await step('Narração com a voz escolhida', 60)
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
+  // Vídeo com falas: a cena da fala usa o áudio do corte enviado (sem gerar voz).
+  const clips = await prisma.asset.findMany({ where: { projectId: project.id, kind: 'quote_video' } })
+  const quoteOf = (s: (typeof scenes)[number]) => clips.find((c) => c.id === s.assetId)
+  for (const s of scenes) {
+    const c = quoteOf(s)
+    if (!c) continue
+    const out = join(dir, `fala-${s.index}.wav`)
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', c.filePath, '-vn', '-af', 'areverse,afade=t=in:d=0.6,areverse', '-ar', '48000', '-ac', '2', out]) // esmaece no fim
+    directed.set(s.index, out)
+  }
   const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
   // Vídeo grande: narra em partes de ~3 min (sem cortar cena no meio), salva cada parte e passa para a próxima.
+  // Vídeo com falas: cada parte é uma etapa do narrador (até o próximo corte de fala).
   const parts: (typeof todo)[] = [[]]
   let partS = 0
+  const stageOf = new Map(quoteStages(scenes).flatMap((st, k) => Array.from({ length: st.last - st.first + 1 }, (_, j) => [st.first + j, k] as [number, number])))
   for (const s of todo) {
     const est = s.narration!.length / 14 // ~14 caracteres por segundo de fala
-    if (partS + est > 180 && parts.at(-1)!.length) { parts.push([]); partS = 0 }
+    const newStage = clips.length > 0 && parts.at(-1)!.length > 0 && stageOf.get(parts.at(-1)!.at(-1)!.index) !== stageOf.get(s.index)
+    if ((partS + est > 180 || newStage) && parts.at(-1)!.length) { parts.push([]); partS = 0 }
     parts.at(-1)!.push(s); partS += est
   }
   const made = new Map<number, { path: string; provider: string }>()
   for (const [n, part] of parts.entries()) {
-    await step(parts.length > 1 ? `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
+    await step(parts.length > 1 ? clips.length ? `Narração · etapa do narrador ${n + 1} de ${parts.length}` : `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
     const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: s.narration!, outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
       { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
     for (const [k, v] of got) made.set(k, v)
   }
-  for (const [idx, file] of directed) made.set(idx, { path: file, provider: 'studio' })
+  for (const [idx, file] of directed) made.set(idx, { path: file, provider: quoteOf(scenes.find((s) => s.index === idx)!) ? 'fala' : 'studio' })
 
   // Fala clara: o Whisper ouve cada cena e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
   // e fica com a melhor. Kokoro e Piper sempre geram igual, então nelas só confere e avisa.
-  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim())
+  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim() && made.get(s.index)!.provider !== 'fala') // corte original: não confere
   const others = (await activeProviders('voz', project.ownerId)).map((a) => a.provider)
   for (const [n, s] of spoken.entries()) {
     let best = made.get(s.index)!
@@ -239,7 +252,8 @@ export async function voice(job: Job) {
     const next = scenes[i + 1]
     // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
     const lead = i === 0 ? INTRO_S : isNewContext(s) ? 0.25 : 0.05
-    const tail = next && isNewContext(next) ? 0.4 : 0.18
+    // Antes do corte de uma fala: pausa de 3 s depois do anúncio do locutor.
+    const tail = next && quoteOf(next) ? 3 : next && isNewContext(next) ? 0.4 : 0.18
     // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão 3 s (+ a abertura, se for a primeira).
     let dur = s.narration?.trim() ? s.endS - s.startS : (cardDefault ?? 3) + (i === 0 ? INTRO_S : 0)
     const v = made.get(s.index)
