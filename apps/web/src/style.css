@@ -437,7 +437,7 @@ select.chip { padding-right: 1.6rem; }
 .snippet button { position: absolute; top: 6px; right: 6px; }
 
 /* ---------- Popup (dialog nativo) ---------- */
-.modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--fg); box-shadow: 0 24px 80px rgba(0,0,0,.45); }
+.modal { position: fixed; inset: 0; margin: auto; height: fit-content; width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); color: var(--fg); box-shadow: 0 24px 80px rgba(0,0,0,.45); }
 .modal.wide { width: min(760px, calc(100vw - 32px)); }
 .modal::backdrop { background: rgba(0,0,0,.55); backdrop-filter: blur(2px); }
 .modal-body { display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4); }
@@ -1095,7 +1095,6 @@ label.field-label > :is(input, textarea, select), .composer-body > label > :is(i
 .pick-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; text-align: left; background: var(--card); color: var(--fg); border: 1px solid var(--border); min-width: 0; }
 .pick-row:hover { border-color: var(--accent); }
 .pick-row > * { max-width: 100%; }
-.modal:has(.pick-list) { margin: 80px auto auto; max-height: calc(100vh - 128px); }
 .review-clock { align-self: center; white-space: nowrap; font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .review-clock b { color: var(--fg); }
 .review-clock.late b { color: var(--danger); }
@@ -1128,3 +1127,21 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
 .quote-row { gap: 10px; } .quote-text { display: flex; flex-direction: column; gap: 4px; } .quote-clip { width: min(100%, 420px); border-radius: var(--radius); background: #000; }
 .quotes-help ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; line-height: 1.5; }
 .stage-list { margin: 6px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+
+/* Brainstorm: ideias em carrossel, pop-up mais largo */
+.modal:has(.idea-carousel) { width: min(1100px, calc(100vw - 48px)); }
+.idea-carousel { display: flex; flex-direction: column; gap: 16px; }
+.idea-context summary { cursor: pointer; font-weight: 500; }
+.idea-context p, .idea-context ul { margin-top: 8px; }
+.carousel-row { display: grid; grid-template-columns: 48px 1fr 48px; align-items: center; gap: 16px; }
+.carousel-arrow { width: 48px; height: 48px !important; min-height: 48px; padding: 0 !important; border-radius: 50%; display: grid !important; place-items: center; background: var(--soft, var(--card)); color: var(--fg); border: 1px solid var(--border); }
+.carousel-page { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: stretch; }
+.carousel-arrow:hover { border-color: var(--accent); }
+.idea-big { gap: 12px; padding: 22px 24px; min-height: 320px; }
+.idea-big .idea-title { font-size: 1.15rem; line-height: 1.35; }
+.idea-big .idea-hook { font-size: 1.05rem; }
+.idea-actions { margin-top: auto; gap: 10px; }
+.carousel-dots { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+.carousel-dots button { width: 10px; height: 10px !important; min-height: 10px; padding: 0 !important; border-radius: 50%; background: var(--border); border: 0; }
+.carousel-dots button.on { background: var(--accent-text); width: 24px; border-radius: 5px; }
+@media (max-width: 760px) { .carousel-row { grid-template-columns: 1fr; } .carousel-arrow { display: none !important; } .carousel-page { grid-template-columns: 1fr; } }

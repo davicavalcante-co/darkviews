@@ -2,12 +2,13 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { BrainstormResult } from '@corte/shared'
 import { api } from './api'
 import { elapsed, Modal, PageHead, useNow } from './ui'
+import { Icon } from './icons'
 
 type Row = { id: string; niche: string; notes: string | null; status: 'queued' | 'running' | 'done' | 'failed'; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null; tokens: number | null; result: BrainstormResult | null }
 
 // Ideia → Novo vídeo já preenchido com TUDO da ideia (título, gancho, ângulo, por que funciona, tópicos, público, observações),
 // para o roteiro sair fiel a ela. O prompt cabe em 5000 caracteres.
-function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
+function toNewVideo(b: Row, i: BrainstormResult['ideas'][number], page = '#/novo') {
   const prompt = [
     `Vídeo do Brainstorm do nicho "${b.niche}". Siga esta ideia fielmente.`,
     `Título: ${i.title}`,
@@ -19,7 +20,7 @@ function toNewVideo(b: Row, i: BrainstormResult['ideas'][number]) {
     b.notes ? `Observações do nicho: ${b.notes}` : '',
   ].filter(Boolean).join('\n\n').slice(0, 5000)
   const q = new URLSearchParams({ nome: i.title.slice(0, 120), prompt, minutos: String(Math.min(60, Math.max(0.5, i.durationMin))) })
-  return `#/novo?${q}`
+  return `${page}?${q}`
 }
 
 // Aba Brainstorm: escreve o nicho e recebe ideias de vídeo pesquisadas.
@@ -78,24 +79,52 @@ export function BrainstormPage() {
           <button type="button" className="link danger" onClick={() => api(`/brainstorms/${r.id}`, { method: 'DELETE' }).then(load)}>Excluir</button>
         </article>
       ))}</div>
-      {open?.result && (
-        <Modal open onClose={() => setOpen(null)} kicker="Brainstorm" title={open.niche} wide>
-          <div className="analysis">
-            <section className="an-block"><h3>Público</h3><p>{open.result.audience}</p></section>
-            <section className="an-block"><h3>Em alta agora</h3><ul className="an-list">{open.result.trends.map((t, i) => <li key={i}>{t}</li>)}</ul></section>
-            <div className="idea-grid">{open.result.ideas.map((i, k) => (
-              <article key={k} className="an-block idea">
-                <b className="idea-title">{i.title}</b>
-                <p className="idea-hook">“{i.hook}”</p>
-                <p>{i.angle}</p>
-                <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
-                <details><summary>Tópicos · {i.durationMin} min</summary><ol className="an-list">{i.outline.map((o, j) => <li key={j}>{o}</li>)}</ol></details>
-                <a className="btn" href={toNewVideo(open, i)} onClick={() => setOpen(null)}>Criar vídeo com esta ideia</a>
-              </article>
-            ))}</div>
-          </div>
-        </Modal>
-      )}
+      {open?.result && <IdeasModal b={open} onClose={() => setOpen(null)} />}
     </div>
+  )
+}
+
+// Ideias em carrossel: duas por vez, com setas (e as setas do teclado). Público e tendências ficam recolhidos em cima.
+function IdeasModal({ b, onClose }: { b: Row; onClose: () => void }) {
+  const ideas = b.result!.ideas
+  const pages = Math.ceil(ideas.length / 2)
+  const [page, setPage] = useState(0)
+  const go = (d: number) => setPage((x) => (x + d + pages) % pages)
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => { if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1) }
+    addEventListener('keydown', key)
+    return () => removeEventListener('keydown', key)
+  }, [pages])
+  return (
+    <Modal open onClose={onClose} kicker={`Brainstorm · ${ideas.length} ideias`} title={b.niche} wide>
+      <div className="idea-carousel">
+        <details className="an-block idea-context">
+          <summary>Público e o que está em alta</summary>
+          <p>{b.result!.audience}</p>
+          <ul className="an-list">{b.result!.trends.map((t, n) => <li key={n}>{t}</li>)}</ul>
+        </details>
+        <div className="carousel-row">
+          <button type="button" className="carousel-arrow" aria-label="Ideias anteriores" onClick={() => go(-1)}><Icon name="anterior" size={20} /></button>
+          <div className="carousel-page" aria-live="polite">{ideas.slice(page * 2, page * 2 + 2).map((i, j) => (
+            <article key={page * 2 + j} className="an-block idea idea-big">
+              <span className="kicker">Ideia {page * 2 + j + 1} de {ideas.length} · {i.durationMin} min</span>
+              <h3 className="idea-title">{i.title}</h3>
+              <p className="idea-hook">“{i.hook}”</p>
+              <p>{i.angle}</p>
+              <p className="muted small"><b>Por que funciona:</b> {i.why}</p>
+              <details><summary>Tópicos do roteiro ({i.outline.length})</summary><ol className="an-list">{i.outline.map((o, n) => <li key={n}>{o}</li>)}</ol></details>
+              <div className="row wrap idea-actions">
+                <a className="btn" href={toNewVideo(b, i)} onClick={onClose}>Criar vídeo com esta ideia</a>
+                <a className="btn ghost" href={toNewVideo(b, i, '#/falas')} onClick={onClose}>Usar no Vídeo com falas</a>
+              </div>
+            </article>
+          ))}</div>
+          <button type="button" className="carousel-arrow" aria-label="Próximas ideias" onClick={() => go(1)}><Icon name="proximo" size={20} /></button>
+        </div>
+        <div className="carousel-dots" role="tablist" aria-label="Páginas de ideias">{Array.from({ length: pages }, (_, n) => (
+          <button key={n} type="button" role="tab" aria-selected={n === page} aria-label={`Ideias ${n * 2 + 1} e ${n * 2 + 2}`} className={n === page ? 'on' : ''} onClick={() => setPage(n)} />
+        ))}</div>
+      </div>
+    </Modal>
   )
 }

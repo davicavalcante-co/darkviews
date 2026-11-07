@@ -26,6 +26,8 @@ const PATHS: Record<string, ReactNode> = {
   brainstorm: <><path d="M9 18h6M10 21h4" /><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.8V16h5v-.3c0-.7.4-1.4 1-1.8A6 6 0 0 0 12 3z" /></>,
   analise: <><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.4-4.4M8.5 11h5M11 8.5v5" /></>,
   sair: <><path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4" /><path d="m15 16 4-4-4-4M19 12H9" /></>,
+  anterior: <path d="M15 5 8 12l7 7" />,
+  proximo: <path d="m9 5 7 7-7 7" />,
   expandir: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M13.5 9.5 16 12l-2.5 2.5" /></>,
   recolher: <><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M9 3v18M16 9.5 13.5 12l2.5 2.5" /></>,
 }
