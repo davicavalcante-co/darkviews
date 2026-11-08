@@ -141,7 +141,7 @@ export async function voice(job: Job) {
   await mkdir(dir, { recursive: true })
   const step = async (stage: string, progress: number) => { await checkCancel(job.id); await prisma.job.update({ where: { id: job.id }, data: { stage, progress } }) }
 
-  // 4. Locução por cena; a cena cresce se a fala for mais longa que o planejado.
+  // 4. Locução; a cena cresce se a fala for mais longa que o planejado.
   const scenes = await prisma.scene.findMany({ where: { scriptId: script.id }, orderBy: { index: 'asc' } })
   await prisma.asset.deleteMany({ where: { projectId: project.id, kind: 'voice' } })
   // voicePreset vem como "fornecedor:voz" (ex.: "piper:faber"); o fornecedor escolhido vai para o topo.
@@ -152,34 +152,45 @@ export async function voice(job: Job) {
   const say = (t: string) => `... ${t.trim()}`
   let own: { name: string; profileId: string | null; speed: number } | null = null
 
-  // Voz própria (aba Vozes): narra cada cena no VoiceStudio. Cena que falhar cai para a próxima voz da lista.
+  // Frase inteira por áudio: cenas seguidas são narradas juntas até a frase terminar (a voz não pausa no meio dela).
+  // Depois o áudio é dividido de volta entre as cenas, emendado, sem silêncio entre elas.
+  type S = (typeof scenes)[number]
+  const groups: S[][] = []
+  for (const [i, s] of scenes.entries()) {
+    if (!s.narration?.trim() || s.searchQuery?.includes('"type":"quote"')) continue // fala com corte usa o áudio original
+    const g = groups.at(-1), last = g?.at(-1)
+    if (g && last && scenes[i - 1] === last && !endsSentence(last.narration!)) g.push(s)
+    else groups.push([s])
+  }
+  const textOf = (g: S[]) => g.map((s) => s.narration!.trim()).join(' ')
+
+  // Voz própria (aba Vozes): narra cada frase no VoiceStudio.
   if (chosenProvider === 'studio') {
     own = await prisma.studioVoice.findFirst({ where: { id: chosenVoice, ownerId: project.ownerId } })
     // A voz escolhida narra o vídeo inteiro: sem ela, para (nunca troca por outra voz no meio).
     if (!own?.profileId) throw new Error('A voz escolhida não existe mais. Escolha outra voz no Novo vídeo ou no editor.')
-    const todo = scenes.filter((x) => x.narration?.trim() && !x.searchQuery?.includes('"type":"quote"')) // fala com corte usa o áudio original
     const started = Date.now()
-    for (const [n, s] of todo.entries()) {
-      // Mostra cena por cena (a voz própria leva ~10-25 s por cena) e o tempo que falta.
-      const left = n ? Math.round(((Date.now() - started) / n) * (todo.length - n) / 1000) : null
+    for (const [n, g] of groups.entries()) {
+      // Mostra parte por parte (a voz própria leva ~10-25 s cada) e o tempo que falta.
+      const left = n ? Math.round(((Date.now() - started) / n) * (groups.length - n) / 1000) : null
       await checkCancel(job.id)
-      await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length}`, progress: 55 + Math.round((n / todo.length) * 35), etaS: left } })
-      // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, as cenas já narradas não são refeitas.
-      const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${say(s.narration!)}`).digest('hex').slice(0, 16)
+      await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · frase ${n + 1} de ${groups.length}`, progress: 55 + Math.round((n / groups.length) * 35), etaS: left } })
+      // Mesmo texto, voz e velocidade = mesmo arquivo: se o worker reiniciar, o que já foi narrado não é refeito.
+      const key = createHash('sha1').update(`${own.profileId}|${own.speed}|${say(textOf(g))}`).digest('hex').slice(0, 16)
       const out = join(dir, `voz-propria-${key}`)
       // Falha passageira (ex.: o Mac sem memória livre): espera e tenta de novo, até 6 vezes. Demora mais, mas a voz não muda.
       for (let attempt = 1; !existsSync(out + '.wav'); attempt++) {
         try {
-          await writeFile(out + '.studio.wav', await studioGenerate({ text: say(s.narration!), profileId: own.profileId, speed: own.speed }))
+          await writeFile(out + '.studio.wav', await studioGenerate({ text: say(textOf(g)), profileId: own.profileId, speed: own.speed }))
           await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out + '.studio.wav', '-ar', '48000', '-ac', '2', out + '.wav'])
         } catch (e) {
-          logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${s.index} (tentativa ${attempt} de 6): ${(e as Error).message}`, details: { jobId: job.id } })
-          if (attempt >= 6) throw new Error(`A sua voz não conseguiu narrar a cena ${s.index + 1}: ${(e as Error).message} Feche outros programas (o VoiceStudio precisa de memória livre) e clique em Tentar de novo: as cenas já narradas são aproveitadas.`)
-          await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · cena ${n + 1} de ${todo.length} · tentando de novo (${attempt + 1} de 6)` } })
+          logEvent({ level: 'warn', source: 'worker', kind: 'integration', message: `voz própria falhou na cena ${g[0].index} (tentativa ${attempt} de 6): ${(e as Error).message}`, details: { jobId: job.id } })
+          if (attempt >= 6) throw new Error(`A sua voz não conseguiu narrar a cena ${g[0].index + 1}: ${(e as Error).message} Feche outros programas (o VoiceStudio precisa de memória livre) e clique em Tentar de novo: as cenas já narradas são aproveitadas.`)
+          await prisma.job.update({ where: { id: job.id }, data: { stage: `Narrando com a sua voz "${own.name}" · frase ${n + 1} de ${groups.length} · tentando de novo (${attempt + 1} de 6)` } })
           await new Promise((r) => setTimeout(r, attempt * 15_000))
         }
       }
-      directed.set(s.index, out + '.wav')
+      directed.set(g[0].index, out + '.wav')
     }
   }
 
@@ -188,7 +199,7 @@ export async function voice(job: Job) {
   const bases = new Map(scenes.map((s) => [s.index, join(dir, `voz-${s.index}-${randomUUID().slice(0, 8)}`)]))
   // Vídeo com falas: a cena da fala usa o áudio do corte enviado (sem gerar voz).
   const clips = await prisma.asset.findMany({ where: { projectId: project.id, kind: 'quote_video' } })
-  const quoteOf = (s: (typeof scenes)[number]) => clips.find((c) => c.id === s.assetId)
+  const quoteOf = (s: S) => clips.find((c) => c.id === s.assetId)
   for (const s of scenes) {
     const c = quoteOf(s)
     if (!c) continue
@@ -198,85 +209,100 @@ export async function voice(job: Job) {
       .catch(async () => run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo', '-t', String(await durationOf(c.filePath)), out]))
     directed.set(s.index, out)
   }
-  const todo = scenes.filter((s) => s.narration?.trim() && !directed.has(s.index))
+  const todo = groups.filter((g) => !directed.has(g[0].index))
   const tone = VOICE_TONES.find((t) => t.id === opts.voiceTone)
-  // Vídeo grande: narra em partes de ~3 min (sem cortar cena no meio), salva cada parte e passa para a próxima.
+  // Vídeo grande: narra em partes de ~3 min (sempre no fim de uma frase), salva cada parte e passa para a próxima.
   // Vídeo com falas: cada parte é uma etapa do narrador (até o próximo corte de fala).
   const parts: (typeof todo)[] = [[]]
   let partS = 0
   const stageOf = new Map(quoteStages(scenes).flatMap((st, k) => Array.from({ length: st.last - st.first + 1 }, (_, j) => [st.first + j, k] as [number, number])))
-  for (const s of todo) {
-    const est = s.narration!.length / 14 // ~14 caracteres por segundo de fala
-    const newStage = clips.length > 0 && parts.at(-1)!.length > 0 && stageOf.get(parts.at(-1)!.at(-1)!.index) !== stageOf.get(s.index)
+  for (const g of todo) {
+    const est = textOf(g).length / 14 // ~14 caracteres por segundo de fala
+    const newStage = clips.length > 0 && parts.at(-1)!.length > 0 && stageOf.get(parts.at(-1)!.at(-1)![0].index) !== stageOf.get(g[0].index)
     if ((partS + est > 180 || newStage) && parts.at(-1)!.length) { parts.push([]); partS = 0 }
-    parts.at(-1)!.push(s); partS += est
+    parts.at(-1)!.push(g); partS += est
   }
   const made = new Map<number, { path: string; provider: string }>()
   for (const [n, part] of parts.entries()) {
     await step(parts.length > 1 ? clips.length ? `Narração · etapa do narrador ${n + 1} de ${parts.length}` : `Narração com a voz escolhida · parte ${n + 1} de ${parts.length}` : 'Narração com a voz escolhida', 60 + Math.round((n / parts.length) * 20))
-    const got = await synthesizeMany(part.map((s) => ({ key: s.index, text: say(s.narration!), outBase: bases.get(s.index)! })), FFMPEG, project.ownerId,
+    const got = await synthesizeMany(part.map((g) => ({ key: g[0].index, text: say(textOf(g)), outBase: bases.get(g[0].index)! })), FFMPEG, project.ownerId,
       { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed })
     for (const [k, v] of got) made.set(k, v)
   }
   for (const [idx, file] of directed) made.set(idx, { path: file, provider: quoteOf(scenes.find((s) => s.index === idx)!) ? 'fala' : 'studio' })
 
-  // Fala clara: o Whisper ouve cada cena e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
+  // Fala clara: o Whisper ouve cada frase e compara com o texto. Pouco clara, gera de novo com a MESMA voz (até 2 vezes)
   // e fica com a melhor. Kokoro e Piper sempre geram igual, então nelas só confere e avisa.
-  const spoken = scenes.filter((s) => made.has(s.index) && s.narration?.trim() && made.get(s.index)!.provider !== 'fala') // corte original: não confere
+  const spoken = groups.filter((g) => made.has(g[0].index))
   const others = (await activeProviders('voz', project.ownerId)).map((a) => a.provider)
-  for (const [n, s] of spoken.entries()) {
-    let best = made.get(s.index)!
-    let score = await clarity(best.path, s.narration!)
+  for (const [n, g] of spoken.entries()) {
+    const text = textOf(g), base0 = bases.get(g[0].index)!
+    let best = made.get(g[0].index)!
+    let score = await clarity(best.path, text)
     if (score === null) break // Whisper não instalado: segue sem conferir
     await checkCancel(job.id)
-    await prisma.job.update({ where: { id: job.id }, data: { stage: `Conferindo se a fala ficou clara · cena ${n + 1} de ${spoken.length}` } })
+    await prisma.job.update({ where: { id: job.id }, data: { stage: `Conferindo se a fala ficou clara · frase ${n + 1} de ${spoken.length}` } })
     const random = ['studio', 'elevenlabs', 'openai_tts'].includes(best.provider)
     for (let attempt = 1; random && score < 0.7 && attempt <= 2; attempt++) {
-      const base = `${bases.get(s.index)}-clareza${attempt}`
+      const base = `${base0}-clareza${attempt}`
       let file: string | null = null
       if (best.provider === 'studio' && own?.profileId) {
-        await writeFile(base + '.studio.wav', await studioGenerate({ text: say(s.narration!), profileId: own.profileId, speed: own.speed, seed: 42 + attempt }))
+        await writeFile(base + '.studio.wav', await studioGenerate({ text: say(text), profileId: own.profileId, speed: own.speed, seed: 42 + attempt }))
         await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', base + '.studio.wav', '-ar', '48000', '-ac', '2', base + '.wav'])
         file = base + '.wav'
       } else if (best.provider !== 'studio') {
-        file = (await synthesize(say(s.narration!), base, FFMPEG, project.ownerId, others.filter((o) => o !== best.provider), { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed }))?.path ?? null
+        file = (await synthesize(say(text), base, FFMPEG, project.ownerId, others.filter((o) => o !== best.provider), { provider: chosenProvider, voice: chosenVoice, speed: tone?.speed }))?.path ?? null
       }
-      const again = file ? await clarity(file, s.narration!) : null
+      const again = file ? await clarity(file, text) : null
       if (file && again !== null && again > score) { best = { path: file, provider: best.provider }; score = again }
     }
-    made.set(s.index, best)
-    if (score < 0.7) logEvent({ level: 'warn', source: 'worker', kind: 'job', message: `cena ${s.index + 1}: fala pode estar pouco clara (${Math.round(score * 100)}% das palavras reconhecidas)`, details: { jobId: job.id, projectId: project.id } })
+    made.set(g[0].index, best)
+    if (score < 0.7) logEvent({ level: 'warn', source: 'worker', kind: 'job', message: `cena ${g[0].index + 1}: fala pode estar pouco clara (${Math.round(score * 100)}% das palavras reconhecidas)`, details: { jobId: job.id, projectId: project.id } })
   }
 
-  // Pausas estratégicas: respiro curto depois de cada fala e uma pausa maior quando começa um novo contexto
+  // Pausas estratégicas: respiro curto depois de cada frase e uma pausa maior quando começa um novo contexto
   // (quadro de título/capítulo ou cena com texto de tela), para o espectador sentir a virada.
-  const isNewContext = (s: (typeof scenes)[number]) => !!s.onScreenText || (s.searchQuery ? JSON.parse(s.searchQuery).type === 'text_card' : false)
+  const isNewContext = (s: S) => !!s.onScreenText || (s.searchQuery ? JSON.parse(s.searchQuery).type === 'text_card' : false)
+  const groupOf = new Map(groups.flatMap((g) => g.map((s) => [s.index, g] as [number, S[]])))
+  const onFrame = (x: number) => Math.round(x * 30) / 30
   let t = 0
   const cardRow = await prisma.setting.findUnique({ where: { key: `card_duration:${project.ownerId}` } })
   const cardDefault = cardRow ? Number(cardRow.value) : null
   for (const [i, s] of scenes.entries()) {
     await step('Narração com a voz escolhida', 60 + Math.round((i / scenes.length) * 35))
-    const next = scenes[i + 1]
-    // Ritmo de YouTube: respiro curto entre falas e um pouco mais só na virada de capítulo.
+    const g = groupOf.get(s.index) ?? [s]
+    if (g[0] !== s) continue // já tratada junto com o começo da frase
+    const lastI = i + g.length - 1, next = scenes[lastI + 1]
+    // Ritmo de YouTube: respiro curto entre frases e um pouco mais só na virada de capítulo.
     const lead = i === 0 ? INTRO_S : isNewContext(s) ? 0.25 : 0.05
-    // Antes do corte de uma fala: pausa de 3 s depois do anúncio do locutor.
-    const tail = next && quoteOf(next) ? 3 : next && isNewContext(next) ? 0.4 : 0.18
-    // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão 3 s (+ a abertura, se for a primeira).
-    let dur = s.narration?.trim() ? s.endS - s.startS : (cardDefault ?? 3) + (i === 0 ? INTRO_S : 0)
+    // Antes do corte de uma fala: o locutor pausa 2 s (depois as cenas esmaecem 3 s para o corte entrar).
+    const tail = next && quoteOf(next) ? 2 : next && isNewContext(next) ? 0.4 : 0.18
     const v = made.get(s.index)
-    if (v) {
-      // A fala vira um WAV com o silêncio de entrada e de saída já embutidos (fade curto para não "estalar").
-      const out = bases.get(s.index)! + '.final.wav'
-      const clip = quoteOf(s)
-      await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
-        // Narrador: corta só o silêncio do FIM (cortar o do começo comia a 1ª sílaba). Corte de fala enviado: nada é cortado.
-        `${clip ? '' : 'areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,'}adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
-      dur = await durationOf(out)
-      // A cena do corte dura o vídeo inteiro dele (mesmo que passe do tempo pedido).
-      if (clip) dur = Math.max(dur, lead + (await durationOf(clip.filePath)) + tail)
-      await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: out, mime: 'audio/wav', durationS: dur, sourceProvider: v.provider, sortOrder: s.index } })
+    if (!v) {
+      // Cena sem fala (cartela): a duração padrão da pessoa, se ela definiu uma; senão 3 s (+ a abertura, se for a primeira).
+      const dur = s.narration?.trim() ? s.endS - s.startS : (cardDefault ?? 3) + (i === 0 ? INTRO_S : 0)
+      await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
+      t += dur
+      continue
     }
-    await prisma.scene.update({ where: { id: s.id }, data: { startS: t, endS: t + dur } })
+    // A fala vira um WAV com o silêncio de entrada e de saída já embutidos.
+    const out = bases.get(s.index)! + '.final.wav'
+    const clip = quoteOf(s)
+    await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', v.path, '-af',
+      // Narrador: corta só o silêncio do FIM (cortar o do começo comia a 1ª sílaba). Corte de fala enviado: nada é cortado.
+      `${clip ? '' : 'areverse,silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,areverse,'}adelay=${Math.round(lead * 1000)}:all=1,apad=pad_dur=${tail}`, '-ar', '48000', '-ac', '2', out])
+    let dur = await durationOf(out)
+    // A cena do corte dura o vídeo inteiro dele (mesmo que passe do tempo pedido).
+    if (clip) dur = Math.max(dur, lead + (await durationOf(clip.filePath)) + tail)
+    // Frase em várias cenas: divide o áudio pelo tamanho do texto de cada uma, no quadro exato, sem buraco entre elas.
+    const cuts = splitPoints(g.map((x) => x.narration!.trim().length), lead, dur - tail).map((b) => onFrame(t + b) - t)
+    for (const [j, x] of g.entries()) {
+      const a = j === 0 ? 0 : cuts[j - 1], b = j === g.length - 1 ? dur : cuts[j]
+      const file = g.length === 1 ? out : `${bases.get(x.index)!}.parte.wav`
+      if (g.length > 1) await run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', '-i', out, '-af', `atrim=${a.toFixed(4)}:${b.toFixed(4)},asetpts=PTS-STARTPTS`, '-ar', '48000', '-ac', '2', file])
+      await prisma.asset.create({ data: { projectId: project.id, kind: 'voice', filePath: file, mime: 'audio/wav', durationS: b - a, sourceProvider: v.provider, sortOrder: x.index } })
+      await prisma.scene.update({ where: { id: x.id }, data: { startS: t + a, endS: t + b } })
+    }
     t += dur
   }
   if (t > MAX_DURATION_S) throw new Error(`Com a locução o vídeo ficou com ${Math.round(t)}s, acima de 60 minutos. Encurte o roteiro.`)
@@ -287,4 +313,14 @@ export async function voice(job: Job) {
   const fresh = JSON.parse((await prisma.project.findUniqueOrThrow({ where: { id: project.id }, select: { options: true } })).options)
   await prisma.project.update({ where: { id: project.id }, data: { status: 'rendering', options: JSON.stringify({ ...fresh, voicedWith: voiceKey(opts) }) } })
   await prisma.job.create({ data: { projectId: project.id, type: 'render', stage: 'Na fila' } })
+}
+
+// Frase terminada: ponto final, exclamação, interrogação ou reticências (aspas e parênteses depois contam junto).
+export const endsSentence = (t: string) => /[.!?…]["”'»)\]]*$/.test(t.trim())
+
+// Onde dividir o áudio de uma frase entre as cenas: proporcional ao texto de cada uma, dentro do trecho falado [from, to].
+export function splitPoints(chars: number[], from: number, to: number) {
+  const total = chars.reduce((n, c) => n + c, 0) || 1
+  let acc = 0
+  return chars.slice(0, -1).map((c) => from + ((acc += c) / total) * (to - from))
 }

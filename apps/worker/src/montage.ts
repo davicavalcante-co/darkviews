@@ -10,14 +10,14 @@ import { checkCancel } from './cancel.js'
 const FPS = 30
 const FADE = 0.25 // transição: escurece e clareia rápido entre um corte e outro
 
-// Sorteia trechos de 3 a 6 s dos vídeos enviados, sem repetir trecho enquanto houver vídeo novo, até cobrir `totalS`.
-export function pickCuts(sources: { path: string; durationS: number }[], totalS: number, random = Math.random, before: { path: string; startS: number; lenS: number }[] = []) {
+// Sorteia trechos de minS a maxS segundos dos vídeos enviados, sem repetir trecho enquanto houver vídeo novo, até cobrir `totalS`.
+export function pickCuts(sources: { path: string; durationS: number }[], totalS: number, random = Math.random, before: { path: string; startS: number; lenS: number }[] = [], [minS, maxS] = [3, 6]) {
   const used = new Map<string, [number, number][]>()
   for (const b of before) used.set(b.path, [...(used.get(b.path) ?? []), [b.startS, b.startS + b.lenS]])
   const cuts: { path: string; startS: number; lenS: number }[] = []
   let t = 0
   while (t < totalS) {
-    const lenS = Math.min(3 + random() * 3, Math.max(1, totalS - t + FADE))
+    const lenS = Math.min(minS + random() * (maxS - minS), Math.max(1, totalS - t + FADE))
     const src = sources[Math.floor(random() * sources.length)]
     const max = Math.max(0, src.durationS - lenS)
     const taken = used.get(src.path) ?? []
@@ -31,8 +31,9 @@ export function pickCuts(sources: { path: string; durationS: number }[], totalS:
   return cuts
 }
 
-const clipArgs = (src: string, startS: number, lenS: number, out: string) => ['-hide_banner', '-loglevel', 'error', '-y', '-ss', startS.toFixed(3), '-i', src, '-t', lenS.toFixed(3), '-an',
-  '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS},setsar=1,fade=t=in:d=${FADE},fade=t=out:st=${Math.max(0, lenS - FADE).toFixed(3)}:d=${FADE},format=yuv420p`,
+// fade: escurece no começo e no fim do recorte. Vídeo com falas não escurece (parecia pausa a cada recorte).
+const clipArgs = (src: string, startS: number, lenS: number, out: string, fade = true) => ['-hide_banner', '-loglevel', 'error', '-y', '-ss', startS.toFixed(3), '-i', src, '-t', lenS.toFixed(3), '-an',
+  '-vf', `scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,fps=${FPS},setsar=1,${fade ? `fade=t=in:d=${FADE},fade=t=out:st=${Math.max(0, lenS - FADE).toFixed(3)}:d=${FADE},` : ''}format=yuv420p`,
   '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-r', String(FPS), out]
 
 // Só vídeos com vídeos enviados: corta os enviados em trechos (3 a 6 s) e para na aprovação dos cortes.
@@ -60,10 +61,11 @@ export async function montage(job: Job) {
   // Cenas que recebem corte: as do narrador (não as falas com corte próprio nem as cartelas).
   const quotes = JSON.parse(project.options).quotes === true
   const scenes = (project.scripts[0]?.scenes ?? []).filter((s) => !own(s)).length || Math.ceil(totalS / 5)
-  const cuts = pickCuts(sources, (count ?? scenes) * 6, Math.random, [...taken, ...avoid]).slice(0, count ?? scenes)
+  // Vídeo com falas: recortes maiores (8 a 14 s), para a cena não repetir o recorte nem trocar de imagem a toda hora.
+  const cuts = pickCuts(sources, (count ?? scenes) * 14, Math.random, [...taken, ...avoid], quotes ? [8, 14] : [3, 6]).slice(0, count ?? scenes)
   for (const [i, c] of cuts.entries()) {
     const out = join(dir, `corte-${Date.now()}-${i}.mp4`)
-    await run(FFMPEG, clipArgs(c.path, c.startS, c.lenS, out), { maxBuffer: 16 * 1024 * 1024 })
+    await run(FFMPEG, clipArgs(c.path, c.startS, c.lenS, out, !quotes), { maxBuffer: 16 * 1024 * 1024 })
     await prisma.asset.create({ data: { projectId: project.id, kind: 'footage_cut', filePath: out, mime: 'video/mp4', durationS: c.lenS, sourceProvider: 'upload', sourceId: JSON.stringify(c), sortOrder: i } })
     if (i % 10 === 0) await checkCancel(job.id)
     if (i % 10 === 0) await prisma.job.update({ where: { id: job.id }, data: { stage: `Cortando os vídeos enviados · corte ${i + 1} de ${cuts.length}`, progress: Math.round((i / cuts.length) * 95) } })

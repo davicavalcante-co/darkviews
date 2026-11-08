@@ -704,7 +704,8 @@ export async function finishQuotes(projectId: string, options: string) {
     if (!count) return false
     for (const s of script?.scenes ?? []) {
       const q = s.searchQuery ? JSON.parse(s.searchQuery) : null
-      if (q?.type === 'quote' && s.asset?.kind !== 'quote_video') await tx.scene.update({ where: { id: s.id }, data: { assetId: null, searchQuery: JSON.stringify({ type: 'text_card', text: `“${q.text}”` }) } })
+      // Sem corte: o locutor lê a fala por cima dos recortes do vídeo longo (sem cartela nem enunciado).
+      if (q?.type === 'quote' && s.asset?.kind !== 'quote_video') await tx.scene.update({ where: { id: s.id }, data: { assetId: null, onScreenText: null, narration: s.narration?.trim() || `“${q.text}”`, searchQuery: JSON.stringify({ type: 'narrated_quote', text: q.text }) } })
     }
     await tx.job.create({ data: { projectId, type: afterScript(options), stage: 'Na fila' } })
     return true

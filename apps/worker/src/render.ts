@@ -130,7 +130,8 @@ export async function renderVideo(input: RenderInput) {
   const ff = (args: string[]) => run(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args], { cwd: work, maxBuffer: 16 * 1024 * 1024 })
   try {
     const clips: string[] = [], audios: string[] = []
-    const into = input.scenes.map((s, i) => (i === 0 ? null : TRANSITIONS[s.transition] ?? TRANSITIONS.fade))
+    // Corte de fala enviado: as cenas esmaecem 3 s para ele entrar (o som do corte já começa durante o esmaecer).
+    const into = input.scenes.map((s, i): [string, number] | null => (i === 0 ? null : s.once ? ['fade', 3] : TRANSITIONS[s.transition] ?? TRANSITIONS.fade))
     for (const [i, s0] of input.scenes.entries()) {
       const clip = `clip-${String(i).padStart(4, '0')}.mp4`
       const s = s0.kind === 'image' ? await fitImage(s0, i, work, ff) : s0
@@ -207,14 +208,14 @@ export async function renderVideo(input: RenderInput) {
     const sfxIn = sfx ? 2 : -1, musicIn = sfx ? 3 : 2
     // Narração: corta o grave que embola, compressão leve (voz presente e constante) e volume no padrão do YouTube (-16 LUFS).
     const voiceChain = 'highpass=f=70,acompressor=threshold=-20dB:ratio=3:attack=8:release=180:makeup=2,loudnorm=I=-16:TP=-1.5:LRA=9'
-    // Mistura: voz (+ música com ducking) (+ efeitos sonoros).
+    // Mistura: voz (+ música) (+ efeitos sonoros).
     const mix = (inputs: string[]) => (inputs.length === 1 ? `${inputs[0]}anull[a]` : `${inputs.join('')}amix=inputs=${inputs.length}:duration=first:dropout_transition=0:normalize=0[a]`)
     let audio: string
     if (input.music) {
       args.push('-stream_loop', '-1', '-i', input.music)
-      // Música: cada faixa é nivelada no mesmo volume da voz (-16 LUFS), para o % do editor valer igual em qualquer trilha;
-      // depois abaixa um pouco enquanto há fala e volta nas pausas (ducking leve: com 8:1 ela sumia e trocar a trilha não fazia diferença).
-      audio = `[1:a]${voiceChain},asplit=2[vo][key];[${musicIn}:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,volume=${(input.musicVolume ?? 35) / 100}[m0];[m0][key]sidechaincompress=threshold=0.05:ratio=3:attack=20:release=400[m];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
+      // Música: cada faixa é nivelada no mesmo volume da voz (-16 LUFS), para o % do editor valer igual em qualquer trilha.
+      // Volume constante do começo ao fim (sem abaixar a cada fala, que soava como cortes); só entra e sai suave.
+      audio = `[1:a]${voiceChain}[vo];[${musicIn}:a]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,volume=${(input.musicVolume ?? 35) / 100},atrim=0:${total.toFixed(3)},afade=t=in:d=2,afade=t=out:st=${Math.max(0, total - 4).toFixed(3)}:d=4[m];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', '[m]', ...(sfx ? ['[fx]'] : [])])}`
     } else {
       audio = `[1:a]${voiceChain}[vo];${sfx ? `[${sfxIn}:a]volume=${(input.sfxVolume ?? 55) / 100}[fx];` : ''}${mix(['[vo]', ...(sfx ? ['[fx]'] : [])])}`
     }
