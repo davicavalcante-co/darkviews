@@ -19,10 +19,11 @@ export type RenderScene = { durationS: number; kind: 'image' | 'video' | 'card';
 // cleanOut: cópia sem legenda (mesmo vídeo e áudio), base dos cortes verticais.
 export type RenderInput = { scenes: RenderScene[]; music: string | null; musicVolume?: number; sfxVolume?: number; ass: string; fontsDir: string; out: string; cleanOut?: string; blockStarts?: number[]; onProgress?: (p: number, stage?: string) => Promise<unknown> }
 
-// Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração]. "cut" vira uma dissolvência rápida.
+// Transição de entrada de cada cena: [tipo do xfade do FFmpeg, duração].
 // Os cortes secos usam 1 quadro de transição (na prática, corte direto).
 const TRANSITIONS: Record<string, [string, number]> = {
-  fade: ['fade', 0.45], cut: ['fade', 1 / FPS], punch_in: ['fade', 1 / FPS], punch_out: ['fade', 1 / FPS],
+  // Duração 0 = corte seco, emendado com concat: xfade de 1 quadro truncava o vídeo (1351 s saíam com 1074 s).
+  fade: ['fade', 0.45], cut: ['cut', 0], punch_in: ['cut', 0], punch_out: ['cut', 0],
   zoom_through: ['zoomin', 0.5], zoom: ['zoomin', 0.45],
   slide_left: ['slideleft', 0.35], slide_right: ['slideright', 0.35], slide_up: ['slideup', 0.35], slide_down: ['slidedown', 0.35], slide: ['slideleft', 0.35],
   whip: ['hblur', 0.3], // chicote: troca rápida com borrão horizontal
@@ -170,7 +171,8 @@ export async function renderVideo(input: RenderInput) {
           const [type, d] = into0[k]!
           offset = acc - d
           acc = offset + lens[k]
-          graph += `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${(Math.floor(offset * 1000) / 1000).toFixed(3)}[x${k}]`
+          graph += d === 0 ? `;[${prev}][c${k}]concat=n=2:v=1:a=0[x${k}]`
+            : `;[${prev}][c${k}]xfade=transition=${type}:duration=${d}:offset=${(Math.floor(offset * 1000) / 1000).toFixed(3)}[x${k}]`
           prev = `x${k}`
         }
         await ff([...files.flatMap((c) => ['-i', c]), '-filter_complex', graph, '-map', `[${prev}]`, ...X264, '-preset', 'veryfast', '-crf', '17', out])
