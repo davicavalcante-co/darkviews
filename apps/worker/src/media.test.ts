@@ -14,3 +14,11 @@ describe('wordRecall (fala clara)', () => {
     expect(wordRecall('', 'qualquer coisa')).toBe(1)
   })
 })
+
+it('narra a frase inteira e divide o áudio entre as cenas pelo texto', async () => {
+  const { endsSentence, splitPoints } = await import('./media-job')
+  expect(endsSentence('Talvez o almoço tenha virado um campo minado:')).toBe(false)
+  expect(endsSentence('Jesus disse: “Sigam-me.”')).toBe(true)
+  expect(splitPoints([10, 30], 1, 5)).toEqual([2])
+  expect(splitPoints([5], 0, 3)).toEqual([])
+})
