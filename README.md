@@ -6,6 +6,11 @@ Tudo roda na sua máquina, em `http://localhost:5173`. O roteiro e as escolhas d
 
 ## O que ele faz
 
+- **Painel:** quantos vídeos estão em cada etapa, entregas por semana e quanto do Claude você já usou. No topo de todas as telas aparece o uso da sessão e da semana do Claude.
+- **Claude conectado:** com o Darkviews ligado, você pode pedir pelo Claude Code coisas como "como estão os meus vídeos?", "cria um vídeo sobre…" ou "muda a cena 3". O botão **O que dá para pedir** no Painel mostra exemplos.
+- **Brainstorm:** escreva o seu nicho e o Claude sugere ideias de vídeo, com a frase de abertura e os tópicos do roteiro. Cada ideia vira um **Novo vídeo** ou um **Vídeo com falas** com um clique.
+- **Análise:** cole o link de um vídeo (YouTube, Instagram, Kwai ou TikTok) e o sistema explica o que ele faz: ritmo, cenas, estilo. A análise pode ser usada como referência num vídeo novo.
+- **Vídeo com falas** (em teste): para vídeos com frases exatas de alguém (por exemplo, frases de Jesus numa série). O Claude escreve o roteiro e marca cada fala; você envia o vídeo longo e o corte de cada fala. No vídeo, o locutor anuncia a fala, entra o corte com o áudio original e o locutor volta explicando, com cortes secos, esmaecimento e trilha contínua. Só segue de uma etapa para outra quando você clica em **Continuar**.
 - **Novo vídeo:** prompt, duração, link ou vídeo de referência, suas fotos (com uma legenda curta para cada uma), voz e estilo de edição.
 - **Criação automática:** analisa a referência, escreve o roteiro, busca imagens nos bancos gratuitos (ou usa só as suas), narra e monta o vídeo em 1920×1080.
 - **Aprovação das imagens** antes da narração: você recusa as que não gostar e o sistema busca outras. Cada rodada tem 10 minutos; sem resposta, as imagens são aprovadas sozinhas.
@@ -20,11 +25,13 @@ Tudo roda na sua máquina, em `http://localhost:5173`. O roteiro e as escolhas d
 - **Edição por contexto:** assiste, pausa e escreve o que mudar naquele momento. No fim, o Claude refaz o vídeo com todos os pedidos.
 - **Versões:** o que foi pedido de uma versão para a outra.
 - **Publicação:** título, descrição, palavras-chave e thumbnail numa tela só.
-- **Aprovar:** escolhe o trecho e o enquadramento e gera os cortes 9:16.
+- **Aprovar:** escolhe o trecho e o enquadramento e gera os cortes 9:16. Os vídeos aprovados ficam na aba **Aprovados**, com os cortes prontos para baixar.
+- **Cancelar:** qualquer vídeo em andamento pode ser cancelado, em todos os modos.
 - **Mídia do vídeo** (no Novo vídeo): imagens e vídeos, só imagens ou só vídeos. Em "Só vídeos" você pode enviar vídeos longos: o sistema corta trechos, você aprova, os reprovados são apagados e você escolhe repor com cortes novos ou repetir os aprovados. Vídeos de até 60 minutos.
 - **Vozes:** crie uma voz por características ou **clone a sua própria voz** (gravando ou enviando um áudio). Depois de publicada, ela aparece como opção no Novo vídeo.
 - **Integrações:** bancos de imagem, vozes e músicas, gratuitos ou com a sua chave.
-- **Admin:** usuários, fontes, auditoria e logs.
+- **Admin:** perfil, **Identidade** (o visual padrão das cartelas, legendas e enunciados, com prévia), fontes, auditoria e logs com filtros e atualização ao vivo.
+- **Vídeos longos:** até 60 minutos; o vídeo é montado em blocos de cenas e a tela mostra o progresso enquanto junta tudo.
 
 ## Instalar num Mac (passo a passo)
 
