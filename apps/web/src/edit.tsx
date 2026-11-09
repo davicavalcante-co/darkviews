@@ -583,9 +583,12 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', -0.1)} aria-label="Começar antes">−</button>início<button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', 0.1)} aria-label="Começar depois">+</button>
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', -0.1)} aria-label="Terminar antes">−</button>fim<button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', 0.1)} aria-label="Terminar depois">+</button>
                   </span>
-                  {s.text.split(/\s+/).filter(Boolean).length > 1 && (
-                    <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? splitSegment(x) : [x])) })}>Dividir em duas legendas</button>
-                  )}
+                  <span className="row wrap">
+                    {s.text.split(/\s+/).filter(Boolean).length > 1 && (
+                      <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? splitSegment(x) : [x])) })}>Dividir em duas legendas</button>
+                    )}
+                    <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? addAfter(x, segs[j + 1]) : [x])) })}>+ Legenda depois</button>
+                  </span>
                 </div>
               )}
             </div>
@@ -825,4 +828,12 @@ export function dragCaptions(orig: Segment[], d: CapDrag, t: number, dur: number
   if (prev) prev.endS = Math.min(prev.endS, out[a].startS)
   if (next) next.startS = Math.max(next.startS, out[b].endS)
   return out
+}
+
+// Nova legenda logo depois desta: usa o espaço livre até a próxima (até 2 s); sem espaço, divide o tempo desta ao meio.
+function addAfter(s: Segment, next?: Segment): Segment[] {
+  const gap = (next?.startS ?? s.endS + 2) - s.endS
+  if (gap >= 0.5) return [s, { startS: s.endS, endS: Math.round((s.endS + Math.min(2, gap)) * 10) / 10, text: 'Nova legenda', highlights: [] }]
+  const mid = Math.round(((s.startS + s.endS) / 2) * 10) / 10
+  return [{ ...s, endS: mid }, { startS: mid, endS: s.endS, text: 'Nova legenda', highlights: [] }]
 }
