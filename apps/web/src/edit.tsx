@@ -242,11 +242,11 @@ function VideoEditor(props: Props) {
 }
 
 // Linha do tempo: arraste em qualquer ponto para correr pelo vídeo; clique num bloco para editar aquela parte.
-function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, scenes, options }: Ctx & { dur: number; version: number; onPick: (l: Left | Right) => void }) {
+function Timeline({ id, data, track, setTrack, time, seek, dur, version, onPick, scene, scenes, options }: Ctx & { dur: number; version: number; onPick: (l: Left | Right) => void }) {
   const [zoom, setZoom] = useState(60) // pixels por segundo
   const scroll = useRef<HTMLDivElement>(null)
   const lanes = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; moved: boolean; layer: string | null } | null>(null)
+  const drag = useRef<{ x: number; moved: boolean; layer: string | null; edge?: { i: number; key: 'startS' | 'endS' } } | null>(null)
   const raf = useRef(0)
   const width = Math.max(dur * zoom, 600)
   const step = Math.max(1, Math.round(120 / zoom)) // um quadro a cada ~120 px
@@ -262,6 +262,9 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
   const down = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
+    const edge = (e.target as HTMLElement).dataset.edge
+    // Borda de uma legenda: arrastar muda o início ou o fim dela (sem mexer no vídeo).
+    if (edge) { const [i, key] = edge.split(':'); drag.current = { x: e.clientX, moved: true, layer: null, edge: { i: Number(i), key: key as 'startS' | 'endS' } }; return }
     drag.current = { x: e.clientX, moved: false, layer: (e.target as HTMLElement).closest<HTMLElement>('[data-layer]')?.dataset.layer ?? null }
     seek(at(e.clientX), true)
   }
@@ -270,7 +273,13 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
     if (Math.abs(e.clientX - d.x) > 3) d.moved = true
     const cx = e.clientX
     cancelAnimationFrame(raf.current)
-    raf.current = requestAnimationFrame(() => seek(at(cx), true))
+    if (d.edge) {
+      const { i, key } = d.edge, segs = track.segments, s = segs[i]
+      // Não passa da outra borda (mín. 0,2 s) nem entra na legenda vizinha.
+      const lo = key === 'startS' ? (segs[i - 1]?.endS ?? 0) : s.startS + 0.2, hi = key === 'startS' ? s.endS - 0.2 : (segs[i + 1]?.startS ?? dur)
+      const v = Math.round(Math.min(hi, Math.max(lo, at(cx))) * 10) / 10
+      if (v !== s[key]) setTrack({ ...track, segments: segs.map((x, j) => (j === i ? { ...x, [key]: v } : x)) })
+    } else raf.current = requestAnimationFrame(() => seek(at(cx), true))
     // Arrastando perto da borda, a timeline anda junto.
     const el = scroll.current!, r = el.getBoundingClientRect()
     if (cx > r.right - 30) el.scrollLeft += 12; else if (cx < r.left + 30) el.scrollLeft -= 12
@@ -278,6 +287,7 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
   const up = (e: RPointerEvent<HTMLDivElement>) => {
     const d = drag.current; drag.current = null
     if (!d) return
+    if (d.edge) return
     seek(at(e.clientX))
     if (!d.moved && d.layer) onPick(d.layer as Left | Right)
   }
@@ -318,7 +328,11 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
               ))}
             </div>
             <div className="lane">
-              {track.segments.map((s, i) => <span key={i} data-layer="caption" className="blk cap" style={box(s.startS, s.endS)} title={s.text}>{s.text}</span>)}
+              {track.segments.map((s, i) => (
+                <span key={i} data-layer="caption" className="blk cap" style={box(s.startS, s.endS)} title={s.text}>
+                  <i className="edge l" data-edge={`${i}:startS`} title="Arraste para mudar o início" />{s.text}<i className="edge r" data-edge={`${i}:endS`} title="Arraste para mudar o fim" />
+                </span>
+              ))}
             </div>
             <div className="lane">
               {scenes.filter((s) => s.narration?.trim()).map((s) => <span key={s.index} data-layer="audio" className="blk voice" style={box(s.startS, s.endS)} title={s.narration!}>{s.narration}</span>)}
@@ -568,6 +582,9 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', -0.1)} aria-label="Começar antes">−</button>início<button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', 0.1)} aria-label="Começar depois">+</button>
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', -0.1)} aria-label="Terminar antes">−</button>fim<button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', 0.1)} aria-label="Terminar depois">+</button>
                   </span>
+                  {s.text.split(/\s+/).filter(Boolean).length > 1 && (
+                    <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? splitSegment(x) : [x])) })}>Dividir em duas legendas</button>
+                  )}
                 </div>
               )}
             </div>
@@ -775,4 +792,14 @@ function History({ items, onRestore }: { items: { version: number; isCurrent: bo
       </ul>
     </details>
   )
+}
+
+// Legenda grande demais: vira duas, metade das palavras em cada, com o tempo dividido na mesma proporção.
+function splitSegment(s: Segment): Segment[] {
+  const words = s.text.split(/\s+/).filter(Boolean), half = Math.ceil(words.length / 2)
+  const mid = Math.round((s.startS + ((s.endS - s.startS) * half) / words.length) * 10) / 10
+  return [
+    { startS: s.startS, endS: mid, text: words.slice(0, half).join(' '), highlights: s.highlights.filter((h) => h < half) },
+    { startS: mid, endS: s.endS, text: words.slice(half).join(' '), highlights: s.highlights.filter((h) => h >= half).map((h) => h - half) },
+  ]
 }
