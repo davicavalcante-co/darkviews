@@ -1150,3 +1150,4 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
 .blk.cap .edge { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
 .blk.cap .edge.l { left: 0; } .blk.cap .edge.r { right: 0; }
 .blk.cap .edge:hover { background: rgb(255 255 255 / .45); }
+.blk.cap.sel { outline: 2px solid #ffd43b; outline-offset: -1px; cursor: grab; }
