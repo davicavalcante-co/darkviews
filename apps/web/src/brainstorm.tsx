@@ -115,7 +115,7 @@ function IdeasModal({ b, onClose }: { b: Row; onClose: () => void }) {
               <details><summary>Tópicos do roteiro ({i.outline.length})</summary><ol className="an-list">{i.outline.map((o, n) => <li key={n}>{o}</li>)}</ol></details>
               <div className="row wrap idea-actions">
                 <a className="btn" href={toNewVideo(b, i)} onClick={onClose}>Criar vídeo com esta ideia</a>
-                <a className="btn ghost" href={toNewVideo(b, i, '#/falas')} onClick={onClose}>Usar no Vídeo com falas</a>
+                <a className="btn ghost" href={toNewVideo(b, i, '#/falas')} onClick={onClose}>Usar no método Com falas</a>
               </div>
             </article>
           ))}</div>
