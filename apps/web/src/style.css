@@ -1145,3 +1145,9 @@ input[type="color"] { box-sizing: border-box; height: var(--control-h); }
 .carousel-dots button { width: 10px; height: 10px !important; min-height: 10px; padding: 0 !important; border-radius: 50%; background: var(--border); border: 0; }
 .carousel-dots button.on { background: var(--accent-text); width: 24px; border-radius: 5px; }
 @media (max-width: 760px) { .carousel-row { grid-template-columns: 1fr; } .carousel-arrow { display: none !important; } .carousel-page { grid-template-columns: 1fr; } }
+/* Bordas da legenda na linha do tempo: arrastar muda o início/fim. */
+.blk.cap { position: absolute; }
+.blk.cap .edge { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; z-index: 1; }
+.blk.cap .edge.l { left: 0; } .blk.cap .edge.r { right: 0; }
+.blk.cap .edge:hover { background: rgb(255 255 255 / .45); }
+.blk.cap.sel { outline: 2px solid #ffd43b; outline-offset: -1px; cursor: grab; }

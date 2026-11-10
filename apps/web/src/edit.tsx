@@ -242,11 +242,12 @@ function VideoEditor(props: Props) {
 }
 
 // Linha do tempo: arraste em qualquer ponto para correr pelo vídeo; clique num bloco para editar aquela parte.
-function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, scenes, options }: Ctx & { dur: number; version: number; onPick: (l: Left | Right) => void }) {
+function Timeline({ id, data, track, setTrack, time, seek, dur, version, onPick, scene, scenes, options }: Ctx & { dur: number; version: number; onPick: (l: Left | Right) => void }) {
   const [zoom, setZoom] = useState(60) // pixels por segundo
   const scroll = useRef<HTMLDivElement>(null)
   const lanes = useRef<HTMLDivElement>(null)
-  const drag = useRef<{ x: number; moved: boolean; layer: string | null } | null>(null)
+  const drag = useRef<{ x: number; moved: boolean; layer: string | null; cap?: CapDrag & { orig: Segment[] } } | null>(null)
+  const [sel, setSel] = useState<number[]>([]) // legendas selecionadas com Shift (andam juntas)
   const raf = useRef(0)
   const width = Math.max(dur * zoom, 600)
   const step = Math.max(1, Math.round(120 / zoom)) // um quadro a cada ~120 px
@@ -262,6 +263,14 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
   const down = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return
     e.currentTarget.setPointerCapture(e.pointerId)
+    const el = e.target as HTMLElement, capEl = el.closest<HTMLElement>('[data-cap]'), ci = capEl ? Number(capEl.dataset.cap) : -1
+    // Shift + clique numa legenda: entra ou sai da seleção (as selecionadas andam juntas, sem mudar de tamanho).
+    if (ci >= 0 && e.shiftKey) { setSel((v) => (v.includes(ci) ? v.filter((k) => k !== ci) : [...v, ci])); drag.current = null; return }
+    const orig = track.segments, t0 = at(e.clientX)
+    // Legenda selecionada: arrastar move o grupo todo. Borda de outra: muda o início ou o fim dela.
+    if (ci >= 0 && sel.includes(ci)) { drag.current = { x: e.clientX, moved: true, layer: null, cap: { kind: 'group', a: Math.min(...sel), b: Math.max(...sel), t0, orig } }; return }
+    if (el.dataset.edge) { setSel([]); drag.current = { x: e.clientX, moved: true, layer: null, cap: { kind: 'edge', i: ci, key: el.dataset.edge as 'startS' | 'endS', t0, orig } }; return }
+    if (sel.length) setSel([])
     drag.current = { x: e.clientX, moved: false, layer: (e.target as HTMLElement).closest<HTMLElement>('[data-layer]')?.dataset.layer ?? null }
     seek(at(e.clientX), true)
   }
@@ -270,7 +279,8 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
     if (Math.abs(e.clientX - d.x) > 3) d.moved = true
     const cx = e.clientX
     cancelAnimationFrame(raf.current)
-    raf.current = requestAnimationFrame(() => seek(at(cx), true))
+    if (d.cap) setTrack({ ...track, segments: dragCaptions(d.cap.orig, d.cap, at(cx), dur) })
+    else raf.current = requestAnimationFrame(() => seek(at(cx), true))
     // Arrastando perto da borda, a timeline anda junto.
     const el = scroll.current!, r = el.getBoundingClientRect()
     if (cx > r.right - 30) el.scrollLeft += 12; else if (cx < r.left + 30) el.scrollLeft -= 12
@@ -278,6 +288,7 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
   const up = (e: RPointerEvent<HTMLDivElement>) => {
     const d = drag.current; drag.current = null
     if (!d) return
+    if (d.cap) return
     seek(at(e.clientX))
     if (!d.moved && d.layer) onPick(d.layer as Left | Right)
   }
@@ -318,7 +329,11 @@ function Timeline({ id, data, track, time, seek, dur, version, onPick, scene, sc
               ))}
             </div>
             <div className="lane">
-              {track.segments.map((s, i) => <span key={i} data-layer="caption" className="blk cap" style={box(s.startS, s.endS)} title={s.text}>{s.text}</span>)}
+              {track.segments.map((s, i) => (
+                <span key={i} data-layer="caption" data-cap={i} className={`blk cap${sel.includes(i) ? ' sel' : ''}`} style={box(s.startS, s.endS)} title={sel.includes(i) ? 'Arraste para mover as selecionadas' : `${s.text} (Shift + clique seleciona)`}>
+                  <i className="edge l" data-edge="startS" title="Arraste para mudar o início" />{s.text}<i className="edge r" data-edge="endS" title="Arraste para mudar o fim" />
+                </span>
+              ))}
             </div>
             <div className="lane">
               {scenes.filter((s) => s.narration?.trim()).map((s) => <span key={s.index} data-layer="audio" className="blk voice" style={box(s.startS, s.endS)} title={s.narration!}>{s.narration}</span>)}
@@ -568,6 +583,12 @@ function CaptionPanel({ id, data, reload, busy, track, setTrack, time, seek, seg
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', -0.1)} aria-label="Começar antes">−</button>início<button type="button" className="icon-btn" onClick={() => nudge(i, 'startS', 0.1)} aria-label="Começar depois">+</button>
                     <button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', -0.1)} aria-label="Terminar antes">−</button>fim<button type="button" className="icon-btn" onClick={() => nudge(i, 'endS', 0.1)} aria-label="Terminar depois">+</button>
                   </span>
+                  <span className="row wrap">
+                    {s.text.split(/\s+/).filter(Boolean).length > 1 && (
+                      <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? splitSegment(x) : [x])) })}>Dividir em duas legendas</button>
+                    )}
+                    <button type="button" className="link" onClick={() => set({ segments: segs.flatMap((x, j) => (j === i ? addAfter(x, segs[j + 1]) : [x])) })}>+ Legenda depois</button>
+                  </span>
                 </div>
               )}
             </div>
@@ -775,4 +796,44 @@ function History({ items, onRestore }: { items: { version: number; isCurrent: bo
       </ul>
     </details>
   )
+}
+
+// Legenda grande demais: vira duas, metade das palavras em cada, com o tempo dividido na mesma proporção.
+function splitSegment(s: Segment): Segment[] {
+  const words = s.text.split(/\s+/).filter(Boolean), half = Math.ceil(words.length / 2)
+  const mid = Math.round((s.startS + ((s.endS - s.startS) * half) / words.length) * 10) / 10
+  return [
+    { startS: s.startS, endS: mid, text: words.slice(0, half).join(' '), highlights: s.highlights.filter((h) => h < half) },
+    { startS: mid, endS: s.endS, text: words.slice(half).join(' '), highlights: s.highlights.filter((h) => h >= half).map((h) => h - half) },
+  ]
+}
+
+type CapDrag = { t0: number } & ({ kind: 'edge'; i: number; key: 'startS' | 'endS' } | { kind: 'group'; a: number; b: number })
+// Arrasto de legendas na linha do tempo. A vizinha é encolhida (fica com 0,2 s no mínimo), nunca sobreposta.
+// edge: muda o início ou o fim de uma legenda. group: as legendas de a até b andam juntas, mantendo o tamanho.
+export function dragCaptions(orig: Segment[], d: CapDrag, t: number, dur: number): Segment[] {
+  const r = (v: number) => Math.round(v * 10) / 10, MIN = 0.2
+  const out = orig.map((s) => ({ ...s }))
+  const [a, b] = d.kind === 'edge' ? [d.i, d.i] : [d.a, d.b]
+  const prev = out[a - 1], next = out[b + 1]
+  if (d.kind === 'edge') {
+    const s = out[d.i]
+    if (d.key === 'startS') s.startS = r(Math.min(s.endS - MIN, Math.max(prev ? prev.startS + MIN : 0, t)))
+    else s.endS = r(Math.max(s.startS + MIN, Math.min(next ? next.endS - MIN : dur, t)))
+  } else {
+    const lo = (prev ? prev.startS + MIN : 0) - orig[a].startS, hi = (next ? next.endS - MIN : dur) - orig[b].endS
+    const dt = r(Math.min(hi, Math.max(lo, t - d.t0)))
+    for (let k = a; k <= b; k++) { out[k].startS = r(orig[k].startS + dt); out[k].endS = r(orig[k].endS + dt) }
+  }
+  if (prev) prev.endS = Math.min(prev.endS, out[a].startS)
+  if (next) next.startS = Math.max(next.startS, out[b].endS)
+  return out
+}
+
+// Nova legenda logo depois desta: usa o espaço livre até a próxima (até 2 s); sem espaço, divide o tempo desta ao meio.
+function addAfter(s: Segment, next?: Segment): Segment[] {
+  const gap = (next?.startS ?? s.endS + 2) - s.endS
+  if (gap >= 0.5) return [s, { startS: s.endS, endS: Math.round((s.endS + Math.min(2, gap)) * 10) / 10, text: 'Nova legenda', highlights: [] }]
+  const mid = Math.round(((s.startS + s.endS) / 2) * 10) / 10
+  return [{ ...s, endS: mid }, { startS: mid, endS: s.endS, text: 'Nova legenda', highlights: [] }]
 }
