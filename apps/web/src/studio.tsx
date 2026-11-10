@@ -48,41 +48,21 @@ function ago(iso: string) {
   return d < 30 ? `há ${d} ${d === 1 ? 'dia' : 'dias'}` : `há ${Math.floor(d / 30)} ${d < 60 ? 'mês' : 'meses'}`
 }
 
-// Aba em teste: o roteiro marca as falas exatas (de filme, série ou vídeo); você envia o corte de cada uma e o resto é o locutor.
-export function QuotesVideo() {
-  return (
-    // Mesmo layout do Novo vídeo: o formulário à esquerda e, no lugar da lista de criações, o passo a passo.
-    <div className="studio">
-      <Composer base={null} onCancel={() => {}} analysisId={new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes />
-      <section className="panel quotes-help">
-        <h2 className="panel-title">Como funciona</h2>
-        <ol>
-          <li>Jogue a ideia ao lado (nome, voz do locutor, prompt, duração; pode vir do Brainstorm ou de um vídeo analisado) e clique em <b>Criar vídeo</b>.</li>
-          <li>O Claude escreve o roteiro e marca cada <b>fala exata</b> (ex.: uma frase de Jesus numa série). Você aprova o roteiro.</li>
-          <li>Na tela <b>Falas do vídeo</b>, envie o <b>vídeo longo</b> (contexto: os cortes dele passam enquanto o narrador fala) e o corte de cada fala, ou escolha <b>Usar o locutor</b>. A tela mostra quantas etapas o vídeo terá e o tempo.</li>
-          <li>O vídeo é montado por etapa: narrador (vídeo e áudio), depois a fala, depois o narrador de novo, até o fim.</li>
-          <li>No vídeo: abre com a cartela do título e a trilha; o locutor anuncia a fala, pausa de 3 s, entra o corte com o áudio original, esmaece e o locutor volta explicando.</li>
-          <li>Sem fotos, sem busca de imagens e sem efeitos: só cortes secos e esmaecimento. A trilha você troca ou envia na edição.</li>
-        </ol>
-        <p className="muted small">O que não é fala exata (abertura, explicações, final, "deixe seu like") é sempre o locutor.</p>
-      </section>
-    </div>
-  )
-}
-
-export function NewVideo() {
+// Uma aba só para os dois métodos: o seletor no topo esconde o que o método escolhido não usa.
+export function NewVideo({ quotes }: { quotes?: boolean } = {}) {
   const [base, setBase] = useState<Base | null>(null)
   // Recriar a partir de uma versão: o formulário vem com os campos daquela versão (sem número = a última).
   const pick = (id: string, v?: number) => api<Base>(`/projects/${id}${v ? `?fromVersion=${v}` : ''}`).then((b) => { setBase(b); scrollTo({ top: 0, behavior: 'smooth' }) })
   return (
     <div className="studio">
-      <Composer key={`${base?.id ?? 'novo'}-${base?.fromVersion ?? ''}`} base={base} onCancel={() => setBase(null)} analysisId={base ? null : new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} />
+      <Composer key={`${base?.id ?? 'novo'}-${base?.fromVersion ?? ''}`} base={base} onCancel={() => setBase(null)} analysisId={base ? null : new URLSearchParams(location.hash.split('?')[1] ?? '').get('analise')} quotes={quotes} />
       <Creations onPick={pick} picked={base?.id ?? null} />
     </div>
   )
 }
 
-function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; onCancel: () => void; analysisId: string | null; quotes?: boolean }) {
+function Composer({ base, onCancel, analysisId, quotes: quotes0 }: { base: Base | null; onCancel: () => void; analysisId: string | null; quotes?: boolean }) {
+  const [quotes, setQuotes] = useState(!!quotes0 || (base?.options as { quotes?: boolean } | undefined)?.quotes === true)
   // Só vídeos: vídeos enviados são cortados e os cortes passam por aprovação.
   const [footage, setFootage] = useState<File[]>([])
   const [style, setStyle] = useState<{ id: string; title: string | null } | null>(null)
@@ -173,12 +153,21 @@ function Composer({ base, onCancel, analysisId, quotes }: { base: Base | null; o
   return (
     <form className="composer" onSubmit={submit}>
       <div className="composer-head">
-        <div><span className="kicker">{quotes ? 'Em teste' : 'Estúdio'}</span><h1>{quotes ? 'Vídeo com falas' : 'Novo vídeo'}</h1></div>
+        <div><span className="kicker">Estúdio</span><h1>Novo vídeo</h1></div>
         <span className="muted">até {maxMin} min</span>
       </div>
 
       <div className="composer-body">
         {base && <div className="notice">Nova versão de <b>{base.name}</b>{base.fromVersion ? <> a partir da <b>versão {base.fromVersion}</b></> : null}: ajuste o que quiser; o vídeo novo entra no mesmo card, em primeiro. <button type="button" className="link" onClick={onCancel}>Começar do zero</button></div>}
+        <div className="field">
+          <div className="field-label">Método</div>
+          <div className="choice-grid" role="radiogroup" aria-label="Método">
+            {([[false, 'Narrado'], [true, 'Com falas']] as const).map(([q, label]) => (
+              <button key={label} type="button" role="radio" aria-checked={quotes === q} className="choice small-choice" disabled={!!base} onClick={() => setQuotes(q)}>{label}</button>
+            ))}
+          </div>
+          <small className="muted">{quotes ? 'O roteiro marca as falas exatas (de filme, série ou vídeo); você envia o corte de cada uma depois de aprovar o roteiro e o resto é o locutor sobre cortes do seu vídeo longo.' : 'O locutor narra o vídeo todo sobre imagens e vídeos.'}</small>
+        </div>
         <label className="field-label">Nome<input name="name" required maxLength={120} placeholder="Ex.: Lançamento do café especial" value={name} onChange={(e) => setName(e.target.value)} /></label>
 
         {base ? (

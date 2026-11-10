@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import type { PublicUser } from '@corte/shared'
 import { api, setCsrf } from './api'
 import { Progress, ProjectList } from './projects'
-import { NewVideo, QuotesVideo } from './studio'
+import { NewVideo } from './studio'
 import { AdminPage } from './admin'
 import { Dashboard } from './dashboard'
 import { ClaudePill } from './claude-pill'
@@ -114,8 +114,7 @@ function Sidebar({ hash, user, onLogout, expanded, onToggle }: { hash: string; u
   // Cada item fica ativo também nas telas que pertencem a ele (ex.: #/editar/:id está dentro de Edição).
   const items = [
     { href: '#/', label: 'Painel', icon: 'painel', match: (h: string) => h === '' || h === '#/' },
-    { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h.startsWith('#/novo') },
-    { href: '#/falas', label: 'Vídeo com falas', icon: 'microfone', match: (h: string) => h.startsWith('#/falas') },
+    { href: '#/novo', label: 'Novo vídeo', icon: 'novo', match: (h: string) => h.startsWith('#/novo') || h.startsWith('#/falas') },
     { href: '#/brainstorm', label: 'Brainstorm', icon: 'brainstorm', match: (h: string) => h === '#/brainstorm' },
     { href: '#/analises', label: 'Análise', icon: 'analise', match: (h: string) => h === '#/analises' },
     { href: '#/projetos', label: 'Projetos', icon: 'projetos', match: (h: string) => h === '#/projetos' || h.startsWith('#/projeto/') || h.startsWith('#/editar/') },
@@ -172,7 +171,7 @@ function App() {
       <main>
         <div className="top-bar"><ThemeToggle /><ClaudePill isAdmin={isAdmin} /></div>
         {hash.startsWith('#/novo') ? <NewVideo key={hash} />
-          : hash.startsWith('#/falas') ? <QuotesVideo key={hash} />
+          : hash.startsWith('#/falas') ? <NewVideo key={hash} quotes />
           : hash === '#/analises' ? <AnalysesPage />
           : hash === '#/brainstorm' ? <BrainstormPage />
           : hash === '#/integracoes' ? <MyIntegrations isAdmin={isAdmin} />
